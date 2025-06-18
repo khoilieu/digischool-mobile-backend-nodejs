@@ -1,0 +1,1306 @@
+const User = require('../../auth/models/user.model');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+const Subject = require('../../subjects/models/subject.model');
+
+class UserService {
+  // Tạo one-time password với chữ hoa, chữ thường, số và ký tự đặc biệt
+  generateOTP() {
+    const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+    const numbers = '0123456789';
+    const specialChars = '!@#$%^&*?';
+    
+    // Kết hợp tất cả ký tự
+    const allChars = uppercase + lowercase + numbers + specialChars;
+    
+    let password = '';
+    
+    // Đảm bảo có ít nhất 1 ký tự từ mỗi loại
+    password += uppercase[Math.floor(Math.random() * uppercase.length)];
+    password += lowercase[Math.floor(Math.random() * lowercase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+    password += specialChars[Math.floor(Math.random() * specialChars.length)];
+    
+    // Tạo thêm 8 ký tự ngẫu nhiên (tổng cộng 12 ký tự)
+    for (let i = 4; i < 12; i++) {
+      password += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+    
+    // Trộn lại thứ tự các ký tự
+    return password.split('').sort(() => Math.random() - 0.5).join('');
+  }
+
+  // Gửi email với OTP
+  async sendOTPEmail(email, otp) {
+    try {
+      // Kiểm tra cấu hình email
+      if (!process.env.EMAIL_HOST || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        console.log(`📧 [NO EMAIL CONFIG] OTP for ${email}: ${otp}`);
+        console.log('⚠️  Please configure EMAIL_HOST, EMAIL_USER, EMAIL_PASS in .env file to send real emails');
+        return;
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: process.env.EMAIL_HOST,
+        port: process.env.EMAIL_PORT || 587,
+        secure: process.env.EMAIL_PORT == 465, // true for 465, false for other ports
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS
+        }
+      });
+
+      const mailOptions = {
+        from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+        to: email,
+        subject: 'Your One-Time Password for Account Creation - EcoSchool',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color: #2c3e50;">EcoSchool - Account Creation</h1>
+            <p>Hello,</p>
+            <p>Your account has been created by an administrator. Please use the following one-time password to set up your account:</p>
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; text-align: center; margin: 20px 0;">
+              <h2 style="color: #e74c3c; font-size: 24px; letter-spacing: 2px;">${otp}</h2>
+            </div>
+            <p><strong>Important:</strong></p>
+            <ul>
+              <li>This password will expire in 24 hours</li>
+              <li>Use this password to log in and set your permanent password</li>
+              <li>Do not share this password with anyone</li>
+            </ul>
+            <p>If you did not request this account, please contact your administrator.</p>
+            <hr style="margin: 30px 0;">
+            <p style="color: #7f8c8d; font-size: 12px;">This is an automated message from EcoSchool system.</p>
+          </div>
+        `
+      };
+
+      await transporter.sendMail(mailOptions);
+      console.log(`📧 Email successfully sent to ${email}`);
+    } catch (error) {
+      console.error('❌ Email sending failed:', error.message);
+      // Vẫn log OTP để admin có thể thông báo cho user
+      console.log(`📧 [FALLBACK] OTP for ${email}: ${otp}`);
+      // Không throw error để không làm gián đoạn quá trình tạo user
+    }
+  }
+
+  // Gửi email chào mừng cho teacher mới import
+  async sendTeacherWelcomeEmail(email, name, tempPassword, subjectName) {
+    try {
+      // Kiểm tra cấu hình email
+      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        console.log(`📧 [NO EMAIL CONFIG] Temp password for ${email}: ${tempPassword}`);
+        console.log('⚠️  Please configure EMAIL_USER, EMAIL_PASS in .env file to send real emails');
+        return;
+      }
+
+      // Cấu hình transporter (sử dụng Gmail)
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS
+        }
+      });
+
+      // Nội dung email
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: 'Chào mừng giáo viên mới - EcoSchool',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #4CAF50;">Chào mừng ${name} đến với EcoSchool!</h2>
+            <p>Bạn đã được thêm vào hệ thống với vai trò <strong>Giáo viên</strong> môn <strong>${subjectName || 'chưa xác định'}</strong>.</p>
+            
+            <div style="background-color: #f0f8fe; padding: 20px; border-left: 4px solid #4CAF50; margin: 20px 0;">
+              <h3 style="margin-top: 0;">Thông tin đăng nhập lần đầu:</h3>
+              <p><strong>Email:</strong> ${email}</p>
+              <p><strong>Mật khẩu tạm thời:</strong> <code style="background: #e8e8e8; padding: 4px 8px; border-radius: 4px; font-size: 16px;">${tempPassword}</code></p>
+            </div>
+
+            <div style="background-color: #fff3cd; padding: 15px; border: 1px solid #ffeaa7; border-radius: 5px; margin: 20px 0;">
+              <h4 style="margin-top: 0; color: #856404;">📋 Hướng dẫn đăng nhập:</h4>
+              <ol style="margin: 0; color: #856404;">
+                <li>Truy cập trang đăng nhập hệ thống</li>
+                <li>Sử dụng email và mật khẩu tạm thời ở trên</li>
+                <li>Hệ thống sẽ tự động chuyển đến trang thiết lập mật khẩu mới</li>
+                <li>Nhập mật khẩu mới theo yêu cầu</li>
+                <li>Hoàn tất và bắt đầu sử dụng hệ thống</li>
+              </ol>
+            </div>
+
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/login" 
+                 style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                🚀 Đăng nhập ngay
+              </a>
+            </div>
+
+            <hr>
+            <p style="color: #666; font-size: 12px;">
+              Email này được gửi tự động từ hệ thống EcoSchool. Vui lòng không phản hồi email này.<br>
+              Nếu bạn gặp vấn đề, vui lòng liên hệ quản trị viên hệ thống.
+            </p>
+          </div>
+        `
+      };
+
+      // Gửi email
+      await transporter.sendMail(mailOptions);
+      console.log(`📧 Teacher welcome email sent to ${email}`);
+      
+    } catch (error) {
+      console.error('❌ Teacher welcome email failed:', error.message);
+      // Log mật khẩu tạm thời để admin có thể thông báo cho teacher
+      console.log(`📧 [FALLBACK] Temp password for ${email}: ${tempPassword}`);
+      // Không throw error để không làm gián đoạn quá trình import
+    }
+  }
+
+  // Tạo user mới với OTP
+  async createUserWithOTP(userData, token) {
+    try {
+      // Verify token và kiểm tra role manager
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const currentUser = await User.findById(decoded.id);
+      
+      if (!currentUser || !currentUser.role.includes('manager')) {
+        throw new Error('Only managers can create users');
+      }
+
+      // Validate role
+      if (!userData.role || !['student', 'teacher'].includes(userData.role)) {
+        throw new Error('Invalid role. Must be student or teacher');
+      }
+
+      // Kiểm tra email đã tồn tại
+      const existingUser = await User.findOne({ email: userData.email });
+      if (existingUser) {
+        throw new Error('Email already exists');
+      }
+
+      // Tạo OTP
+      const otp = this.generateOTP();
+      const otpExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+      // Lưu thông tin tạm thời vào Redis hoặc database
+      // TODO: Implement OTP storage
+      // Ví dụ: await redis.set(`otp:${userData.email}`, JSON.stringify({ otp, otpExpiry, role: userData.role }));
+      
+      // Tạm thời lưu vào memory (trong production nên dùng Redis)
+      global.otpStorage = global.otpStorage || {};
+      global.otpStorage[userData.email] = {
+        otp,
+        otpExpiry,
+        role: userData.role
+      };
+
+      // Gửi OTP qua email
+      await this.sendOTPEmail(userData.email, otp);
+
+      return {
+        message: 'OTP sent to email',
+        email: userData.email,
+        role: userData.role,
+        otpExpiry,
+        // Tạm thời trả về OTP để test (trong production không nên trả về)
+        otp: otp
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Đăng nhập với email và 1password (OTP)
+  async loginWithOTP(email, password) {
+    try {
+      // Lấy OTP từ storage
+      const otpData = global.otpStorage?.[email];
+      if (!otpData) {
+        throw new Error('No OTP found for this email. Please contact admin to create your account.');
+      }
+
+      // Kiểm tra OTP
+      if (otpData.otp !== password) {
+        throw new Error('Invalid one-time password');
+      }
+
+      // Kiểm tra OTP hết hạn
+      if (new Date() > new Date(otpData.otpExpiry)) {
+        throw new Error('One-time password expired');
+      }
+
+      // Tạo token tạm thời để set password
+      const tempToken = jwt.sign(
+        { email, role: otpData.role },
+        process.env.JWT_SECRET,
+        { expiresIn: '15m' } // Token hết hạn sau 15 phút
+      );
+
+      return {
+        message: 'Login successful. Please set your password.',
+        tempToken,
+        email,
+        role: otpData.role,
+        redirectTo: 'set-password' // Frontend có thể dùng để redirect
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Xác thực OTP
+  async verifyOTP(email, otp) {
+    try {
+      // Lấy OTP từ Redis hoặc database
+      // TODO: Implement OTP retrieval
+      // const storedData = await redis.get(`otp:${email}`);
+      // const { otp: storedOTP, otpExpiry, role } = JSON.parse(storedData);
+
+      // Kiểm tra OTP
+      // if (!storedOTP || storedOTP !== otp) {
+      //   throw new Error('Invalid OTP');
+      // }
+
+      // Kiểm tra OTP hết hạn
+      // if (new Date() > new Date(otpExpiry)) {
+      //   throw new Error('OTP expired');
+      // }
+
+      // Tạo token tạm thời để set password
+      const tempToken = jwt.sign(
+        { email, role: 'student' }, // hoặc role từ storedData
+        process.env.JWT_SECRET,
+        { expiresIn: '15m' } // Token hết hạn sau 15 phút
+      );
+
+      return {
+        message: 'OTP verified successfully',
+        tempToken
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Set password mới - handle cả OTP flow và existing user flow
+  async setPassword(tokenOrTempToken, password, confirmPassword) {
+    try {
+      // Verify token
+      const decoded = jwt.verify(tokenOrTempToken, process.env.JWT_SECRET);
+      
+      // Kiểm tra password và confirm password
+      if (password !== confirmPassword) {
+        throw new Error('Passwords do not match');
+      }
+
+      // Validate password strength
+      if (password.length < 8) {
+        throw new Error('Password must be at least 8 characters long');
+      }
+
+      // Hash password
+      const passwordHash = await bcrypt.hash(password, 12);
+
+      // Kiểm tra xem đây là tempToken (có email + role) hay JWT token (có id)
+      if (decoded.id) {
+        // Đây là JWT token của user đã tồn tại (student/teacher được tạo bởi manager)
+        const userId = decoded.id;
+        
+        // Tìm user
+        const user = await User.findById(userId);
+        if (!user) {
+          throw new Error('User not found');
+        }
+
+        // Kiểm tra user có phải là new user không
+        if (!user.isNewUser) {
+          throw new Error('This user has already set up their password');
+        }
+
+        // Cập nhật user
+        const updatedUser = await User.findByIdAndUpdate(
+          userId,
+          { 
+            passwordHash,
+            isNewUser: false // Đánh dấu user đã setup password
+          },
+          { new: true }
+        );
+
+        // Tạo token mới cho user
+        const newToken = jwt.sign(
+          { id: updatedUser._id, email: updatedUser.email, role: updatedUser.role },
+          process.env.JWT_SECRET,
+          { expiresIn: process.env.JWT_EXPIRES_IN }
+        );
+
+        return {
+          message: 'Password set successfully',
+          user: {
+            id: updatedUser._id,
+            email: updatedUser.email,
+            name: updatedUser.name,
+            role: updatedUser.role,
+            class_id: updatedUser.class_id,
+            subjects: updatedUser.subjects,
+            isNewUser: updatedUser.isNewUser
+          },
+          token: newToken,
+          redirectTo: 'home'
+        };
+
+      } else if (decoded.email && decoded.role) {
+        // Đây là tempToken từ OTP flow (tạo user mới)
+        const { email, role } = decoded;
+
+        // Tạo user mới
+        const user = await User.create({
+          email,
+          passwordHash,
+          role: [role],
+          name: email.split('@')[0], // Tạo name từ email
+          class_id: null, // Để null, có thể cập nhật sau
+          subjects: [], // Mảng rỗng, có thể cập nhật sau
+          isNewUser: false // User mới tạo từ OTP đã set password nên không còn là newUser
+        });
+
+        // Xóa OTP đã sử dụng
+        if (global.otpStorage && global.otpStorage[email]) {
+          delete global.otpStorage[email];
+        }
+
+        // Vô hiệu hóa tempToken bằng cách thêm vào blacklist
+        global.invalidTokens = global.invalidTokens || new Set();
+        global.invalidTokens.add(tokenOrTempToken);
+
+        return {
+          message: 'Password set successfully. Please login with your new credentials.',
+          user: {
+            id: user._id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            class_id: user.class_id,
+            subjects: user.subjects,
+            isNewUser: user.isNewUser
+          },
+          redirectTo: 'login' // Frontend sẽ redirect về trang login
+        };
+
+      } else {
+        throw new Error('Invalid token format');
+      }
+
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Lấy danh sách users
+  async getUsers({ page = 1, limit = 10, role, search }) {
+    try {
+      const query = {};
+      
+      if (role) {
+        query.role = role;
+      }
+
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } }
+        ];
+      }
+
+      const users = await User.find(query)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .sort({ createdAt: -1 });
+
+      const total = await User.countDocuments(query);
+
+      return {
+        users: users.map(user => ({
+          id: user._id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          isNewUser: user.isNewUser,
+          active: user.active,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt
+        })),
+        pagination: {
+          total,
+          page: Number(page),
+          limit: Number(limit),
+          pages: Math.ceil(total / limit)
+        }
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Lấy thông tin user theo ID
+  async getUserById(id) {
+    try {
+      const user = await User.findById(id);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      return {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        class_id: user.class_id,
+        subjects: user.subjects,
+        isNewUser: user.isNewUser,
+        active: user.active,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Cập nhật thông tin user
+  async updateUser(id, updateData) {
+    try {
+      const user = await User.findById(id);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      if (updateData.password) {
+        const salt = await bcrypt.genSalt(10);
+        updateData.passwordHash = await bcrypt.hash(updateData.password, salt);
+        delete updateData.password;
+      }
+
+      const updatedUser = await User.findByIdAndUpdate(
+        id,
+        { $set: updateData },
+        { new: true }
+      );
+
+      return {
+        id: updatedUser._id,
+        email: updatedUser.email,
+        name: updatedUser.name,
+        role: updatedUser.role,
+        isNewUser: updatedUser.isNewUser,
+        active: updatedUser.active,
+        createdAt: updatedUser.createdAt,
+        updatedAt: updatedUser.updatedAt
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Xóa user
+  async deleteUser(id) {
+    try {
+      const user = await User.findById(id);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      await User.findByIdAndDelete(id);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Cập nhật trạng thái active của user
+  async updateUserStatus(id, active) {
+    try {
+      const user = await User.findById(id);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      const updatedUser = await User.findByIdAndUpdate(
+        id,
+        { $set: { active } },
+        { new: true }
+      );
+
+      return {
+        id: updatedUser._id,
+        email: updatedUser.email,
+        name: updatedUser.name,
+        role: updatedUser.role,
+        isNewUser: updatedUser.isNewUser,
+        active: updatedUser.active,
+        createdAt: updatedUser.createdAt,
+        updatedAt: updatedUser.updatedAt
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Import teachers từ file Excel
+  async importTeachers(filePath, token) {
+    const XLSX = require('xlsx');
+    const fs = require('fs');
+    
+    try {
+      // Verify token và kiểm tra role manager
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const currentUser = await User.findById(decoded.id);
+      
+      if (!currentUser || !currentUser.role.includes('manager')) {
+        throw new Error('Only managers can import teachers');
+      }
+
+      // Đọc file Excel
+      const workbook = XLSX.readFile(filePath);
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const teachers = XLSX.utils.sheet_to_json(worksheet);
+
+      if (!teachers || teachers.length === 0) {
+        throw new Error('No data found in Excel file');
+      }
+
+      const results = {
+        success: [],
+        failed: [],
+        total: teachers.length
+      };
+
+      // Xử lý từng teacher
+      for (let i = 0; i < teachers.length; i++) {
+        const teacher = teachers[i];
+        
+        try {
+          // Validate dữ liệu
+          if (!teacher.name || !teacher.email || !teacher.subjectId) {
+            results.failed.push({
+              row: i + 2, // +2 vì hàng 1 là header, index bắt đầu từ 0
+              data: teacher,
+              error: 'Missing required fields: name, email, or subjectId'
+            });
+            continue;
+          }
+
+          // Kiểm tra email đã tồn tại
+          const existingUser = await User.findOne({ email: teacher.email });
+          if (existingUser) {
+            results.failed.push({
+              row: i + 2,
+              data: teacher,
+              error: 'Email already exists'
+            });
+            continue;
+          }
+
+          // Tạo mật khẩu tạm thời và hash
+          const tempPassword = this.generateOTP();
+          const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+          // Tạo user mới với isNewUser = true (sẽ redirect tới set-password)
+          const newUser = new User({
+            name: teacher.name,
+            email: teacher.email,
+            passwordHash,
+            dateOfBirth: teacher.dateOfBirth ? new Date(teacher.dateOfBirth) : null,
+            gender: teacher.gender || 'other',
+            role: ['teacher'],
+            subjects: [teacher.subjectId],
+            isNewUser: true, // Sẽ redirect tới set-password khi login
+            active: teacher.active !== false
+          });
+
+          await newUser.save();
+
+          // Gửi email với mật khẩu tạm thời
+          await this.sendTeacherWelcomeEmail(teacher.email, teacher.name, tempPassword, teacher.subjectName);
+
+          results.success.push({
+            row: i + 2,
+            email: teacher.email,
+            name: teacher.name,
+            status: 'awaiting_first_login',
+            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
+          });
+
+        } catch (error) {
+          results.failed.push({
+            row: i + 2,
+            data: teacher,
+            error: error.message
+          });
+        }
+      }
+
+      // Xóa file tạm sau khi xử lý
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+
+      return results;
+
+    } catch (error) {
+      // Xóa file tạm nếu có lỗi
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      throw error;
+    }
+  }
+
+  // Import teachers từ base64 string
+  async importTeachersBase64(fileData, token) {
+    const XLSX = require('xlsx');
+    const fs = require('fs');
+    
+    try {
+      // Verify token và kiểm tra role manager
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const currentUser = await User.findById(decoded.id);
+      
+      if (!currentUser || !currentUser.role.includes('manager')) {
+        throw new Error('Only managers can import teachers');
+      }
+
+      // Decode base64 và tạo buffer
+      const buffer = Buffer.from(fileData, 'base64');
+      
+      // Đọc Excel từ buffer
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const teachers = XLSX.utils.sheet_to_json(worksheet);
+
+      if (!teachers || teachers.length === 0) {
+        throw new Error('No data found in Excel file');
+      }
+
+      const results = {
+        success: [],
+        failed: [],
+        total: teachers.length
+      };
+
+      // Xử lý từng teacher
+      for (let i = 0; i < teachers.length; i++) {
+        const teacher = teachers[i];
+        
+        try {
+          // Validate dữ liệu
+          if (!teacher.name || !teacher.email || !teacher.subjectId) {
+            results.failed.push({
+              row: i + 2, // +2 vì hàng 1 là header, index bắt đầu từ 0
+              data: teacher,
+              error: 'Missing required fields: name, email, or subjectId'
+            });
+            continue;
+          }
+
+          // Kiểm tra email đã tồn tại
+          const existingUser = await User.findOne({ email: teacher.email });
+          if (existingUser) {
+            results.failed.push({
+              row: i + 2,
+              data: teacher,
+              error: 'Email already exists'
+            });
+            continue;
+          }
+
+          // Tạo mật khẩu tạm thời và hash
+          const tempPassword = this.generateOTP();
+          const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+          // Tạo user mới với isNewUser = true (sẽ redirect tới set-password)
+          const newUser = new User({
+            name: teacher.name,
+            email: teacher.email,
+            passwordHash,
+            dateOfBirth: teacher.dateOfBirth ? new Date(teacher.dateOfBirth) : null,
+            gender: teacher.gender || 'other',
+            role: ['teacher'],
+            subjects: [teacher.subjectId],
+            isNewUser: true, // Sẽ redirect tới set-password khi login
+            active: teacher.active !== false
+          });
+
+          await newUser.save();
+
+          // Gửi email với mật khẩu tạm thời
+          await this.sendTeacherWelcomeEmail(teacher.email, teacher.name, tempPassword, teacher.subjectName);
+
+          results.success.push({
+            row: i + 2,
+            email: teacher.email,
+            name: teacher.name,
+            status: 'awaiting_first_login',
+            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
+          });
+
+        } catch (error) {
+          results.failed.push({
+            row: i + 2,
+            data: teacher,
+            error: error.message
+          });
+        }
+      }
+
+      return results;
+
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Gửi email chào mừng cho student mới import
+  async sendStudentWelcomeEmail(email, name, tempPassword, className) {
+    try {
+      // Kiểm tra cấu hình email
+      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        console.log(`📧 [NO EMAIL CONFIG] Temp password for ${email}: ${tempPassword}`);
+        console.log('⚠️  Please configure EMAIL_USER, EMAIL_PASS in .env file to send real emails');
+        return;
+      }
+
+      // Cấu hình transporter (sử dụng Gmail)
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS
+        }
+      });
+
+      // Nội dung email
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: 'Chào mừng học sinh mới - EcoSchool',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #4CAF50;">Chào mừng ${name} đến với EcoSchool! 🎓</h2>
+            <p>Bạn đã được thêm vào hệ thống với vai trò <strong>Học sinh</strong> lớp <strong>${className || 'chưa xác định'}</strong>.</p>
+            
+            <div style="background-color: #f0f8fe; padding: 20px; border-left: 4px solid #4CAF50; margin: 20px 0;">
+              <h3 style="margin-top: 0;">Thông tin đăng nhập lần đầu:</h3>
+              <p><strong>Email:</strong> ${email}</p>
+              <p><strong>Mật khẩu tạm thời:</strong> <code style="background: #e8e8e8; padding: 4px 8px; border-radius: 4px; font-size: 16px;">${tempPassword}</code></p>
+            </div>
+
+            <div style="background-color: #fff3cd; padding: 15px; border: 1px solid #ffeaa7; border-radius: 5px; margin: 20px 0;">
+              <h4 style="margin-top: 0; color: #856404;">📋 Hướng dẫn đăng nhập:</h4>
+              <ol style="margin: 0; color: #856404;">
+                <li>Truy cập trang đăng nhập hệ thống</li>
+                <li>Sử dụng email và mật khẩu tạm thời ở trên</li>
+                <li>Hệ thống sẽ tự động chuyển đến trang thiết lập mật khẩu mới</li>
+                <li>Nhập mật khẩu mới theo yêu cầu</li>
+                <li>Hoàn tất và bắt đầu sử dụng hệ thống</li>
+              </ol>
+            </div>
+
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/login" 
+                 style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                🚀 Đăng nhập ngay
+              </a>
+            </div>
+
+            <div style="background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <h4 style="margin-top: 0; color: #2e7d32;">📚 Thông tin lớp học:</h4>
+              <p style="margin: 0; color: #2e7d32;">Lớp: <strong>${className}</strong></p>
+              <p style="margin: 0; color: #2e7d32;">Năm học: <strong>2024-2025</strong></p>
+            </div>
+
+            <hr>
+            <p style="color: #666; font-size: 12px;">
+              Email này được gửi tự động từ hệ thống EcoSchool. Vui lòng không phản hồi email này.<br>
+              Nếu bạn gặp vấn đề, vui lòng liên hệ giáo viên chủ nhiệm hoặc quản trị viên hệ thống.
+            </p>
+          </div>
+        `
+      };
+
+      // Gửi email
+      await transporter.sendMail(mailOptions);
+      console.log(`📧 Student welcome email sent to ${email}`);
+      
+    } catch (error) {
+      console.error('❌ Student welcome email failed:', error.message);
+      // Log mật khẩu tạm thời để admin có thể thông báo cho student
+      console.log(`📧 [FALLBACK] Temp password for ${email}: ${tempPassword}`);
+      // Không throw error để không làm gián đoạn quá trình import
+    }
+  }
+
+  // Import students từ file xlsx
+  async importStudents(filePath, token) {
+    const XLSX = require('xlsx');
+    const fs = require('fs');
+    const Class = require('../../classes/models/class.model');
+    
+    try {
+      // Verify token và kiểm tra role manager
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const currentUser = await User.findById(decoded.id);
+      
+      if (!currentUser || !currentUser.role.includes('manager')) {
+        throw new Error('Only managers can import students');
+      }
+
+      // Đọc file Excel
+      const workbook = XLSX.readFile(filePath);
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const students = XLSX.utils.sheet_to_json(worksheet);
+
+      if (!students || students.length === 0) {
+        throw new Error('No data found in Excel file');
+      }
+
+      const results = {
+        success: [],
+        failed: [],
+        total: students.length
+      };
+
+      // Xử lý từng student
+      for (let i = 0; i < students.length; i++) {
+        const student = students[i];
+        
+        try {
+          // Validate dữ liệu
+          if (!student.name || !student.email || !student.studentId || !student.className) {
+            results.failed.push({
+              row: i + 2, // +2 vì hàng 1 là header, index bắt đầu từ 0
+              data: student,
+              error: 'Missing required fields: name, email, studentId, or className'
+            });
+            continue;
+          }
+
+          // Kiểm tra email đã tồn tại
+          const existingUser = await User.findOne({ email: student.email });
+          if (existingUser) {
+            results.failed.push({
+              row: i + 2,
+              data: student,
+              error: 'Email already exists'
+            });
+            continue;
+          }
+
+          // Kiểm tra studentId đã tồn tại
+          const existingStudentId = await User.findOne({ studentId: student.studentId });
+          if (existingStudentId) {
+            results.failed.push({
+              row: i + 2,
+              data: student,
+              error: 'Student ID already exists'
+            });
+            continue;
+          }
+
+          // Tìm lớp học theo tên
+          const classInfo = await Class.findOne({ 
+            className: student.className,
+            academicYear: student.schoolYear || '2024-2025',
+            active: true
+          });
+
+          if (!classInfo) {
+            results.failed.push({
+              row: i + 2,
+              data: student,
+              error: `Class ${student.className} not found for academic year ${student.schoolYear || '2024-2025'}`
+            });
+            continue;
+          }
+
+          // Tạo mật khẩu tạm thời và hash
+          const tempPassword = this.generateOTP();
+          const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+          // Tạo user mới với isNewUser = true (sẽ redirect tới set-password)
+          const newUser = new User({
+            name: student.name,
+            email: student.email,
+            passwordHash,
+            dateOfBirth: student.dateOfBirth ? new Date(student.dateOfBirth) : null,
+            gender: student.gender || 'other',
+            studentId: student.studentId,
+            class_id: classInfo._id,
+            role: ['student'],
+            isNewUser: true, // Sẽ redirect tới set-password khi login
+            active: student.active !== false
+          });
+
+          await newUser.save();
+
+          // Gửi email với mật khẩu tạm thời
+          await this.sendStudentWelcomeEmail(student.email, student.name, tempPassword, student.className);
+
+          results.success.push({
+            row: i + 2,
+            email: student.email,
+            name: student.name,
+            studentId: student.studentId,
+            className: student.className,
+            status: 'awaiting_first_login',
+            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
+          });
+
+        } catch (error) {
+          results.failed.push({
+            row: i + 2,
+            data: student,
+            error: error.message
+          });
+        }
+      }
+
+      // Xóa file tạm sau khi xử lý
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+
+      return results;
+
+    } catch (error) {
+      // Xóa file tạm nếu có lỗi
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      throw error;
+    }
+  }
+
+  // Import students từ base64 string
+  async importStudentsBase64(fileData, token) {
+    const XLSX = require('xlsx');
+    const Class = require('../../classes/models/class.model');
+    
+    try {
+      // Verify token và kiểm tra role manager
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const currentUser = await User.findById(decoded.id);
+      
+      if (!currentUser || !currentUser.role.includes('manager')) {
+        throw new Error('Only managers can import students');
+      }
+
+      // Decode base64 và tạo buffer
+      const buffer = Buffer.from(fileData, 'base64');
+      
+      // Đọc Excel từ buffer
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const students = XLSX.utils.sheet_to_json(worksheet);
+
+      if (!students || students.length === 0) {
+        throw new Error('No data found in Excel file');
+      }
+
+      const results = {
+        success: [],
+        failed: [],
+        total: students.length
+      };
+
+      // Xử lý từng student
+      for (let i = 0; i < students.length; i++) {
+        const student = students[i];
+        
+        try {
+          // Validate dữ liệu
+          if (!student.name || !student.email || !student.studentId || !student.className) {
+            results.failed.push({
+              row: i + 2, // +2 vì hàng 1 là header, index bắt đầu từ 0
+              data: student,
+              error: 'Missing required fields: name, email, studentId, or className'
+            });
+            continue;
+          }
+
+          // Kiểm tra email đã tồn tại
+          const existingUser = await User.findOne({ email: student.email });
+          if (existingUser) {
+            results.failed.push({
+              row: i + 2,
+              data: student,
+              error: 'Email already exists'
+            });
+            continue;
+          }
+
+          // Kiểm tra studentId đã tồn tại
+          const existingStudentId = await User.findOne({ studentId: student.studentId });
+          if (existingStudentId) {
+            results.failed.push({
+              row: i + 2,
+              data: student,
+              error: 'Student ID already exists'
+            });
+            continue;
+          }
+
+          // Tìm lớp học theo tên
+          const classInfo = await Class.findOne({ 
+            className: student.className,
+            academicYear: student.schoolYear || '2024-2025',
+            active: true
+          });
+
+          if (!classInfo) {
+            results.failed.push({
+              row: i + 2,
+              data: student,
+              error: `Class ${student.className} not found for academic year ${student.schoolYear || '2024-2025'}`
+            });
+            continue;
+          }
+
+          // Tạo mật khẩu tạm thời và hash
+          const tempPassword = this.generateOTP();
+          const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+          // Tạo user mới với isNewUser = true (sẽ redirect tới set-password)
+          const newUser = new User({
+            name: student.name,
+            email: student.email,
+            passwordHash,
+            dateOfBirth: student.dateOfBirth ? new Date(student.dateOfBirth) : null,
+            gender: student.gender || 'other',
+            studentId: student.studentId,
+            class_id: classInfo._id,
+            role: ['student'],
+            isNewUser: true, // Sẽ redirect tới set-password khi login
+            active: student.active !== false
+          });
+
+          await newUser.save();
+
+          // Gửi email với mật khẩu tạm thời
+          await this.sendStudentWelcomeEmail(student.email, student.name, tempPassword, student.className);
+
+          results.success.push({
+            row: i + 2,
+            email: student.email,
+            name: student.name,
+            studentId: student.studentId,
+            className: student.className,
+            status: 'awaiting_first_login',
+            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
+          });
+
+        } catch (error) {
+          results.failed.push({
+            row: i + 2,
+            data: student,
+            error: error.message
+          });
+        }
+      }
+
+      return results;
+
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Tạo student mới với thông tin đầy đủ (chỉ manager)
+  async createStudent(studentData, token) {
+    const Class = require('../../classes/models/class.model');
+
+    try {
+      // Verify token và kiểm tra role manager
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const currentUser = await User.findById(decoded.id);
+      
+      if (!currentUser || !currentUser.role.includes('manager')) {
+        throw new Error('Only managers can create students');
+      }
+
+      // Validate dữ liệu bắt buộc
+      const { name, email, studentId, className, academicYear, dateOfBirth, gender } = studentData;
+      
+      if (!name || !email || !studentId || !className) {
+        throw new Error('Missing required fields: name, email, studentId, or className');
+      }
+
+      // Kiểm tra email đã tồn tại
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        throw new Error('Email already exists');
+      }
+
+      // Kiểm tra studentId đã tồn tại
+      const existingStudentId = await User.findOne({ studentId });
+      if (existingStudentId) {
+        throw new Error('Student ID already exists');
+      }
+
+      // Tìm lớp học theo tên và năm học
+      const classInfo = await Class.findOne({ 
+        className,
+        academicYear: academicYear || '2024-2025',
+        active: true
+      });
+
+      if (!classInfo) {
+        throw new Error(`Class ${className} not found for academic year ${academicYear || '2024-2025'}`);
+      }
+
+      // Tạo mật khẩu tạm thời và hash
+      const tempPassword = this.generateOTP();
+      const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+      // Tạo student mới
+      const newStudent = new User({
+        name,
+        email,
+        passwordHash,
+        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+        gender: gender || 'other',
+        studentId,
+        class_id: classInfo._id,
+        role: ['student'],
+        isNewUser: true, // Sẽ redirect tới set-password khi login
+        active: true
+      });
+
+      await newStudent.save();
+
+      // Gửi email với mật khẩu tạm thời
+      await this.sendStudentWelcomeEmail(email, name, tempPassword, className);
+
+      // Populate class info cho response
+      await newStudent.populate('class_id', 'className academicYear');
+
+      return {
+        id: newStudent._id,
+        name: newStudent.name,
+        email: newStudent.email,
+        studentId: newStudent.studentId,
+        class: {
+          id: newStudent.class_id._id,
+          className: newStudent.class_id.className,
+          academicYear: newStudent.class_id.academicYear
+        },
+        dateOfBirth: newStudent.dateOfBirth,
+        gender: newStudent.gender,
+        role: newStudent.role,
+        isNewUser: newStudent.isNewUser,
+        active: newStudent.active,
+        tempPassword: tempPassword, // Tạm thời để test, production nên bỏ
+        status: 'awaiting_first_login',
+        createdAt: newStudent.createdAt,
+        updatedAt: newStudent.updatedAt
+      };
+
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Tạo teacher mới với thông tin đầy đủ (chỉ manager)
+  async createTeacher(teacherData, token) {
+    const Subject = require('../../subjects/models/subject.model');
+
+    try {
+      // Verify token và kiểm tra role manager
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const currentUser = await User.findById(decoded.id);
+      
+      if (!currentUser || !currentUser.role.includes('manager')) {
+        throw new Error('Only managers can create teachers');
+      }
+
+      // Validate dữ liệu bắt buộc
+      const { name, email, subjectIds, dateOfBirth, gender } = teacherData;
+      
+      if (!name || !email || !subjectIds || !Array.isArray(subjectIds) || subjectIds.length === 0) {
+        throw new Error('Missing required fields: name, email, or subjectIds (must be array with at least one subject)');
+      }
+
+      // Kiểm tra email đã tồn tại
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        throw new Error('Email already exists');
+      }
+
+      // Kiểm tra các subject có tồn tại không
+      const subjects = await Subject.find({ _id: { $in: subjectIds } });
+      if (subjects.length !== subjectIds.length) {
+        throw new Error('One or more subjects not found');
+      }
+
+      // Tạo mật khẩu tạm thời và hash
+      const tempPassword = this.generateOTP();
+      const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+      // Tạo teacher mới
+      const newTeacher = new User({
+        name,
+        email,
+        passwordHash,
+        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+        gender: gender || 'other',
+        role: ['teacher'],
+        subjects: subjectIds,
+        isNewUser: true, // Sẽ redirect tới set-password khi login
+        active: true
+      });
+
+      await newTeacher.save();
+
+      // Populate subjects cho response
+      await newTeacher.populate('subjects', 'subjectName subjectCode');
+
+      // Gửi email với mật khẩu tạm thời
+      const subjectNames = subjects.map(s => s.subjectName).join(', ');
+      await this.sendTeacherWelcomeEmail(email, name, tempPassword, subjectNames);
+
+      return {
+        id: newTeacher._id,
+        name: newTeacher.name,
+        email: newTeacher.email,
+        subjects: newTeacher.subjects.map(subject => ({
+          id: subject._id,
+          subjectName: subject.subjectName,
+          subjectCode: subject.subjectCode
+        })),
+        dateOfBirth: newTeacher.dateOfBirth,
+        gender: newTeacher.gender,
+        role: newTeacher.role,
+        isNewUser: newTeacher.isNewUser,
+        active: newTeacher.active,
+        tempPassword: tempPassword, // Tạm thời để test, production nên bỏ
+        status: 'awaiting_first_login',
+        createdAt: newTeacher.createdAt,
+        updatedAt: newTeacher.updatedAt
+      };
+
+    } catch (error) {
+      throw error;
+    }
+  }
+}
+
+module.exports = new UserService(); 
