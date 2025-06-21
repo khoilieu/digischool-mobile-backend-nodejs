@@ -31,6 +31,8 @@ router.get(
 // Cập nhật thông tin user (chỉ admin và manager)
 router.put(
   '/:id',
+  protect,
+  authorize('admin', 'manager'),
   validateUser.updateUser,
   userController.updateUser
 );

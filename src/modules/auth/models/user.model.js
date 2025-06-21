@@ -40,14 +40,14 @@ const userSchema = new mongoose.Schema({
     ref: 'Class',
     default: null
   },
-  subjects: [{ 
+  subject: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Subject',
     required: function() {
-      // subjects không bắt buộc cho manager hoặc user mới tạo qua OTP
-      return !this.role.includes('manager') && !this.isNewUser;
+      // subject không bắt buộc cho manager hoặc user mới tạo qua OTP
+      return this.role.includes('teacher') && !this.isNewUser;
     }
-  }],
+  },
   isNewUser: {
     type: Boolean,
     default: true

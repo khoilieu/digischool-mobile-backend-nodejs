@@ -5,6 +5,8 @@ const authRoutes = require('../modules/auth/routes/auth.routes');
 const userRoutes = require('../modules/user/routes/user.routes');
 const subjectRoutes = require('../modules/subjects/routes/subject.routes');
 const classRoutes = require('../modules/classes/routes/class.routes');
+const scheduleRoutes = require('../modules/schedules/routes/schedule.routes');
+
 // Health check route
 router.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Server is healthy' });
@@ -19,6 +21,8 @@ router.use('/courses', courseRoutes);
 router.use('/subjects', subjectRoutes);
 // Class routes
 router.use('/classes', classRoutes);
+// Schedule routes
+router.use('/schedules', scheduleRoutes);
 
 // Import and use other route modules here
 // Example: router.use('/users', require('./userRoutes'));

@@ -18,6 +18,12 @@ const classSchema = new mongoose.Schema({
       message: 'Academic year must be in format YYYY-YYYY (e.g., 2023-2024)'
     }
   },
+  gradeLevel: {
+    type: Number,
+    required: false,
+    min: 10,
+    max: 12
+  },
   homeroomTeacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
