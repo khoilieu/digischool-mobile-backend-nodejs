@@ -135,13 +135,17 @@ const validateUser = {
       .isEmail()
       .withMessage('Please enter a valid email'),
 
-    body('subjectIds')
-      .isArray({ min: 1 })
-      .withMessage('Subject IDs must be an array with at least one subject'),
-
-    body('subjectIds.*')
+    body('subjectId')
+      .notEmpty()
+      .withMessage('Subject ID is required')
       .isMongoId()
-      .withMessage('Each subject ID must be a valid MongoDB ObjectId'),
+      .withMessage('Subject ID must be a valid MongoDB ObjectId'),
+
+    body('role')
+      .optional()
+      .trim()
+      .isIn(['teacher', 'homeroom_teacher'])
+      .withMessage('Role must be teacher or homeroom_teacher'),
 
     body('dateOfBirth')
       .optional()
@@ -192,6 +196,45 @@ const validateUser = {
       .isIn(['student', 'teacher'])
       .withMessage('Role must be student or teacher'),
 
+    body('name')
+      .if(body('role').equals('teacher'))
+      .trim()
+      .notEmpty()
+      .withMessage('Name is required for teacher')
+      .isLength({ min: 2, max: 100 })
+      .withMessage('Name must be between 2 and 100 characters'),
+
+    body('subjectId')
+      .if(body('role').equals('teacher'))
+      .notEmpty()
+      .withMessage('Subject ID is required for teacher')
+      .isMongoId()
+      .withMessage('Subject ID must be a valid MongoDB ObjectId'),
+
+    body('dateOfBirth')
+      .if(body('role').equals('teacher'))
+      .optional()
+      .isISO8601()
+      .withMessage('Date of birth must be in ISO 8601 format (YYYY-MM-DD)')
+      .custom((value) => {
+        if (value) {
+          const birthDate = new Date(value);
+          const today = new Date();
+          const age = today.getFullYear() - birthDate.getFullYear();
+          if (age < 22 || age > 70) {
+            throw new Error('Teacher age must be between 22 and 70 years');
+          }
+        }
+        return true;
+      }),
+
+    body('gender')
+      .if(body('role').equals('teacher'))
+      .optional()
+      .trim()
+      .isIn(['male', 'female', 'other'])
+      .withMessage('Gender must be male, female, or other'),
+
     (req, res, next) => {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -236,6 +279,11 @@ const validateUser = {
       .optional()
       .isIn(['student', 'teacher', 'homeroom_teacher', 'admin', 'manager'])
       .withMessage('Invalid role'),
+
+    body('subject')
+      .optional()
+      .isMongoId()
+      .withMessage('Subject must be a valid MongoDB ObjectId'),
 
     (req, res, next) => {
       const errors = validationResult(req);

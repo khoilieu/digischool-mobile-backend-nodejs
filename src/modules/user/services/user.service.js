@@ -184,20 +184,25 @@ class UserService {
         throw new Error('Email already exists');
       }
 
+      // Nếu là teacher, validate subject
+      if (userData.role === 'teacher' && userData.subjectId) {
+        const Subject = require('../../subjects/models/subject.model');
+        const subject = await Subject.findById(userData.subjectId);
+        if (!subject) {
+          throw new Error('Subject not found');
+        }
+      }
+
       // Tạo OTP
       const otp = this.generateOTP();
       const otpExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-      // Lưu thông tin tạm thời vào Redis hoặc database
-      // TODO: Implement OTP storage
-      // Ví dụ: await redis.set(`otp:${userData.email}`, JSON.stringify({ otp, otpExpiry, role: userData.role }));
-      
-      // Tạm thời lưu vào memory (trong production nên dùng Redis)
+      // Lưu thông tin đầy đủ vào storage
       global.otpStorage = global.otpStorage || {};
       global.otpStorage[userData.email] = {
         otp,
         otpExpiry,
-        role: userData.role
+        userData: userData // Lưu toàn bộ thông tin user
       };
 
       // Gửi OTP qua email
@@ -237,7 +242,7 @@ class UserService {
 
       // Tạo token tạm thời để set password
       const tempToken = jwt.sign(
-        { email, role: otpData.role },
+        { email, role: otpData.userData.role },
         process.env.JWT_SECRET,
         { expiresIn: '15m' } // Token hết hạn sau 15 phút
       );
@@ -246,7 +251,7 @@ class UserService {
         message: 'Login successful. Please set your password.',
         tempToken,
         email,
-        role: otpData.role,
+        role: otpData.userData.role,
         redirectTo: 'set-password' // Frontend có thể dùng để redirect
       };
     } catch (error) {
@@ -348,7 +353,7 @@ class UserService {
             name: updatedUser.name,
             role: updatedUser.role,
             class_id: updatedUser.class_id,
-            subjects: updatedUser.subjects,
+            subject: updatedUser.subject,
             isNewUser: updatedUser.isNewUser
           },
           token: newToken,
@@ -359,39 +364,76 @@ class UserService {
         // Đây là tempToken từ OTP flow (tạo user mới)
         const { email, role } = decoded;
 
-        // Tạo user mới
-        const user = await User.create({
-          email,
+        // Lấy thông tin đầy đủ từ OTP storage
+        const otpData = global.otpStorage?.[email];
+        if (!otpData || !otpData.userData) {
+          throw new Error('User data not found. Please restart the registration process.');
+        }
+
+        const userData = otpData.userData;
+        const Subject = require('../../subjects/models/subject.model');
+
+        // Tạo user với thông tin đầy đủ
+        const newUserData = {
+          email: userData.email,
           passwordHash,
-          role: [role],
-          name: email.split('@')[0], // Tạo name từ email
-          class_id: null, // Để null, có thể cập nhật sau
-          subjects: [], // Mảng rỗng, có thể cập nhật sau
-          isNewUser: false // User mới tạo từ OTP đã set password nên không còn là newUser
-        });
+          name: userData.name,
+          role: [userData.role],
+          dateOfBirth: userData.dateOfBirth ? new Date(userData.dateOfBirth) : null,
+          gender: userData.gender || 'other',
+          isNewUser: false, // User đã hoàn thành setup
+          active: true
+        };
+
+        // Nếu là teacher, thêm subject
+        if (userData.role === 'teacher' && userData.subjectId) {
+          newUserData.subject = userData.subjectId;
+        }
+
+        const user = await User.create(newUserData);
+
+        // Populate subject cho response nếu là teacher
+        if (userData.role === 'teacher' && userData.subjectId) {
+          await user.populate('subject', 'subjectName subjectCode');
+        }
 
         // Xóa OTP đã sử dụng
         if (global.otpStorage && global.otpStorage[email]) {
           delete global.otpStorage[email];
         }
 
-        // Vô hiệu hóa tempToken bằng cách thêm vào blacklist
+        // Vô hiệu hóa tempToken
         global.invalidTokens = global.invalidTokens || new Set();
         global.invalidTokens.add(tokenOrTempToken);
 
-        return {
-          message: 'Password set successfully. Please login with your new credentials.',
-          user: {
+        // Tạo response theo format mong muốn
+        const response = {
+          message: 'Teacher created successfully',
+          data: {
             id: user._id,
-            email: user.email,
             name: user.name,
+            email: user.email,
+            dateOfBirth: user.dateOfBirth,
+            gender: user.gender,
             role: user.role,
-            class_id: user.class_id,
-            subjects: user.subjects,
-            isNewUser: user.isNewUser
-          },
-          redirectTo: 'login' // Frontend sẽ redirect về trang login
+            isNewUser: user.isNewUser,
+            active: user.active,
+            status: 'active',
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+          }
         };
+
+        // Thêm subject info nếu là teacher
+        if (userData.role === 'teacher' && user.subject) {
+          response.data.subject = {
+            id: user.subject._id,
+            subjectName: user.subject.subjectName,
+            subjectCode: user.subject.subjectCode
+          };
+        }
+
+        return response;
 
       } else {
         throw new Error('Invalid token format');
@@ -431,6 +473,7 @@ class UserService {
           email: user.email,
           name: user.name,
           role: user.role,
+          subject: user.subject,
           isNewUser: user.isNewUser,
           active: user.active,
           createdAt: user.createdAt,
@@ -498,6 +541,7 @@ class UserService {
         email: updatedUser.email,
         name: updatedUser.name,
         role: updatedUser.role,
+        subject: updatedUser.subject,
         isNewUser: updatedUser.isNewUser,
         active: updatedUser.active,
         createdAt: updatedUser.createdAt,
@@ -619,7 +663,7 @@ class UserService {
             dateOfBirth: teacher.dateOfBirth ? new Date(teacher.dateOfBirth) : null,
             gender: teacher.gender || 'other',
             role: ['teacher'],
-            subjects: [teacher.subjectId],
+            subject: teacher.subjectId,
             isNewUser: true, // Sẽ redirect tới set-password khi login
             active: teacher.active !== false
           });
@@ -733,7 +777,7 @@ class UserService {
             dateOfBirth: teacher.dateOfBirth ? new Date(teacher.dateOfBirth) : null,
             gender: teacher.gender || 'other',
             role: ['teacher'],
-            subjects: [teacher.subjectId],
+            subject: teacher.subjectId,
             isNewUser: true, // Sẽ redirect tới set-password khi login
             active: teacher.active !== false
           });
@@ -1233,10 +1277,10 @@ class UserService {
       }
 
       // Validate dữ liệu bắt buộc
-      const { name, email, subjectIds, dateOfBirth, gender } = teacherData;
+      const { name, email, subjectId, role, dateOfBirth, gender } = teacherData;
       
-      if (!name || !email || !subjectIds || !Array.isArray(subjectIds) || subjectIds.length === 0) {
-        throw new Error('Missing required fields: name, email, or subjectIds (must be array with at least one subject)');
+      if (!name || !email || !subjectId) {
+        throw new Error('Missing required fields: name, email, or subjectId');
       }
 
       // Kiểm tra email đã tồn tại
@@ -1245,11 +1289,14 @@ class UserService {
         throw new Error('Email already exists');
       }
 
-      // Kiểm tra các subject có tồn tại không
-      const subjects = await Subject.find({ _id: { $in: subjectIds } });
-      if (subjects.length !== subjectIds.length) {
-        throw new Error('One or more subjects not found');
+      // Kiểm tra subject có tồn tại không
+      const subject = await Subject.findById(subjectId);
+      if (!subject) {
+        throw new Error('Subject not found');
       }
+
+      // Xác định role - mặc định là 'teacher' nếu không được cung cấp
+      const teacherRole = role && ['teacher', 'homeroom_teacher'].includes(role) ? role : 'teacher';
 
       // Tạo mật khẩu tạm thời và hash
       const tempPassword = this.generateOTP();
@@ -1262,30 +1309,29 @@ class UserService {
         passwordHash,
         dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
         gender: gender || 'other',
-        role: ['teacher'],
-        subjects: subjectIds,
+        role: [teacherRole],
+        subject: subjectId,
         isNewUser: true, // Sẽ redirect tới set-password khi login
         active: true
       });
 
       await newTeacher.save();
 
-      // Populate subjects cho response
-      await newTeacher.populate('subjects', 'subjectName subjectCode');
+      // Populate subject cho response
+      await newTeacher.populate('subject', 'subjectName subjectCode');
 
       // Gửi email với mật khẩu tạm thời
-      const subjectNames = subjects.map(s => s.subjectName).join(', ');
-      await this.sendTeacherWelcomeEmail(email, name, tempPassword, subjectNames);
+      await this.sendTeacherWelcomeEmail(email, name, tempPassword, subject.subjectName);
 
       return {
         id: newTeacher._id,
         name: newTeacher.name,
         email: newTeacher.email,
-        subjects: newTeacher.subjects.map(subject => ({
-          id: subject._id,
-          subjectName: subject.subjectName,
-          subjectCode: subject.subjectCode
-        })),
+        subject: {
+          id: newTeacher.subject._id,
+          subjectName: newTeacher.subject.subjectName,
+          subjectCode: newTeacher.subject.subjectCode
+        },
         dateOfBirth: newTeacher.dateOfBirth,
         gender: newTeacher.gender,
         role: newTeacher.role,

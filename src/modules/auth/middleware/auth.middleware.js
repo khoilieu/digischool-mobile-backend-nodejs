@@ -65,7 +65,7 @@ const authorize = (...roles) => {
     if (!hasPermission) {
       return res.status(403).json({
         success: false,
-        message: `User role ${req.user.role} is not authorized to access this route`
+        message: `User roles [${userRoles.join(', ')}] are not authorized to access this route. Required: [${roles.join(', ')}]`
       });
     }
     next();
