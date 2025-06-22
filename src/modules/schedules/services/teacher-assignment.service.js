@@ -354,15 +354,11 @@ class TeacherAssignmentService {
       schedule: []
     };
 
-    // Initialize 6 days (Monday to Saturday)
-    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    for (let day = 0; day < 6; day++) {
-      schedule.schedule.push({
-        dayOfWeek: day + 2, // Monday = 2, Saturday = 7
-        dayName: dayNames[day],
-        periods: []
-      });
-    }
+    // Tạo template sử dụng method mới
+    const templateSchedule = await Schedule.createTemplate(classId, '2024-2025', homeroomTeacherId);
+    schedule.weeks = templateSchedule.weeks;
+    schedule.academicStartDate = templateSchedule.academicStartDate;
+    schedule.totalWeeks = templateSchedule.totalWeeks;
 
     // Create subject periods list with better distribution
     const subjectPeriods = this.createBalancedSubjectDistribution(subjects);
@@ -373,11 +369,17 @@ class TeacherAssignmentService {
     let conflictCount = 0;
 
          // Try to place subjects with better distribution strategy
+     // Chỉ xếp cho tuần đầu tiên, các tuần khác sẽ copy
+     const firstWeek = schedule.weeks[0];
+     if (!firstWeek) {
+       throw new Error('No weeks found in schedule template');
+     }
+
      let currentPeriodIndex = 0;
      const dailySubjectCount = {}; // Track subjects per day to avoid overloading
      
      for (let dayIndex = 0; dayIndex < 6; dayIndex++) {
-       const daySchedule = schedule.schedule[dayIndex];
+       const daySchedule = firstWeek.days[dayIndex];
        const dayOfWeek = dayIndex + 2;
        dailySubjectCount[dayIndex] = {};
        
@@ -387,8 +389,12 @@ class TeacherAssignmentService {
        if (dayIndex === 5) skipPeriods.push(7); // Saturday period 7: Class meeting
 
        // Try to place periods for this day
-       for (let period = 1; period <= 7 && currentPeriodIndex < subjectPeriods.length; period++) {
+       for (let period = 1; period <= 10 && currentPeriodIndex < subjectPeriods.length; period++) {
          if (skipPeriods.includes(period)) continue;
+
+         // Tìm tiết regular tương ứng
+         const existingPeriod = daySchedule.periods.find(p => p.periodNumber === period && p.periodType === 'regular');
+         if (!existingPeriod) continue; // Skip nếu không tìm thấy period regular
 
          // Find best subject for this time slot
          let bestSubjectIndex = -1;
@@ -419,17 +425,9 @@ class TeacherAssignmentService {
            // Track subject count for this day
            dailySubjectCount[dayIndex][bestSubject.subjectName] = (dailySubjectCount[dayIndex][bestSubject.subjectName] || 0) + 1;
            
-           const timeSlot = this.getTimeSlot(period);
-           
-           daySchedule.periods.push({
-             periodNumber: period,
-             subject: bestSubject._id,
-             teacher: bestTeacher._id,
-             session: timeSlot.session,
-             timeStart: timeSlot.start,
-             timeEnd: timeSlot.end,
-             status: 'not_started'
-           });
+           // Cập nhật tiết regular với thông tin môn học và giáo viên
+           existingPeriod.subject = bestSubject._id;
+           existingPeriod.teacher = bestTeacher._id;
 
            console.log(`✅ Tiết ${period} - ${this.getDayName(dayIndex)}: ${bestSubject.subjectName} (${bestTeacher.name})`);
            
@@ -448,17 +446,9 @@ class TeacherAssignmentService {
                if (alternativeTeacher) {
                  this.bookTeacher(alternativeTeacher._id, dayOfWeek, period);
                  
-                 const timeSlot = this.getTimeSlot(period);
-                 
-                 daySchedule.periods.push({
-                   periodNumber: period,
-                   subject: subject._id,
-                   teacher: alternativeTeacher._id,
-                   session: timeSlot.session,
-                   timeStart: timeSlot.start,
-                   timeEnd: timeSlot.end,
-                   status: 'not_started'
-                 });
+                 // Cập nhật tiết regular với thông tin môn học và giáo viên
+                 existingPeriod.subject = subject._id;
+                 existingPeriod.teacher = alternativeTeacher._id;
 
                  console.log(`✅ Thay thế: Tiết ${period} - ${this.getDayName(dayIndex)}: ${subject.subjectName} (${alternativeTeacher.name})`);
                  subjectPeriods.splice(i, 1);
@@ -476,6 +466,9 @@ class TeacherAssignmentService {
          }
        }
      }
+
+     // Copy lịch từ tuần đầu tiên sang các tuần khác
+     this.copyScheduleToAllWeeks(schedule);
 
     // Add fixed periods
     this.addFixedPeriods(schedule, homeroomTeacherId);
@@ -584,31 +577,72 @@ class TeacherAssignmentService {
    * Add fixed periods (flag ceremony, class meeting)
    */
   addFixedPeriods(schedule, homeroomTeacherId) {
-    // Monday period 1: Flag ceremony
-    schedule.schedule[0].periods.unshift({
-      periodNumber: 1,
-      subject: null,
-      teacher: homeroomTeacherId,
-      session: 'morning',
-      timeStart: '07:00',
-      timeEnd: '07:45',
-      status: 'not_started',
-      fixed: true,
-      specialType: 'flag_ceremony'
-    });
+    // Thêm tiết chào cờ (Thứ 2, tiết 1) và sinh hoạt lớp (Thứ 7, tiết 7) cho tất cả các tuần
+    schedule.weeks.forEach(week => {
+      // Tiết chào cờ - Thứ 2, tiết 1
+      const mondayPeriod1 = week.days[0].periods.find(p => p.periodNumber === 1);
+      if (mondayPeriod1) {
+        mondayPeriod1.subject = null;
+        mondayPeriod1.teacher = homeroomTeacherId;
+        mondayPeriod1.periodType = 'fixed';
+        mondayPeriod1.specialType = 'flag_ceremony';
+        mondayPeriod1.fixed = true;
+      }
 
-    // Saturday period 7: Class meeting
-    schedule.schedule[5].periods.push({
-      periodNumber: 7,
-      subject: null,
-      teacher: homeroomTeacherId,
-      session: 'afternoon',
-      timeStart: '14:20',
-      timeEnd: '15:05',
-      status: 'not_started',
-      fixed: true,
-      specialType: 'class_meeting'
+      // Sinh hoạt lớp - Thứ 7, tiết 7
+      const saturdayPeriod7 = week.days[5].periods.find(p => p.periodNumber === 7);
+      if (saturdayPeriod7) {
+        saturdayPeriod7.subject = null;
+        saturdayPeriod7.teacher = homeroomTeacherId;
+        saturdayPeriod7.periodType = 'fixed';
+        saturdayPeriod7.specialType = 'class_meeting';
+        saturdayPeriod7.fixed = true;
+      }
     });
+  }
+
+  /**
+   * Copy schedule from first week to all other weeks
+   */
+  copyScheduleToAllWeeks(schedule) {
+    const firstWeek = schedule.weeks[0];
+    if (!firstWeek) return;
+
+    // Copy lịch từ tuần đầu tiên sang các tuần khác
+    for (let weekIndex = 1; weekIndex < schedule.weeks.length; weekIndex++) {
+      const currentWeek = schedule.weeks[weekIndex];
+      
+      // Copy từng ngày
+      for (let dayIndex = 0; dayIndex < firstWeek.days.length; dayIndex++) {
+        const firstWeekDay = firstWeek.days[dayIndex];
+        const currentWeekDay = currentWeek.days[dayIndex];
+        
+        // Copy từng tiết (chỉ copy subject và teacher cho regular periods)
+        for (let periodIndex = 0; periodIndex < firstWeekDay.periods.length; periodIndex++) {
+          const firstWeekPeriod = firstWeekDay.periods[periodIndex];
+          const currentWeekPeriod = currentWeekDay.periods[periodIndex];
+          
+          if (currentWeekPeriod && firstWeekPeriod) {
+            // Chỉ copy cho regular periods
+            if (firstWeekPeriod.periodType === 'regular' && firstWeekPeriod.subject && firstWeekPeriod.teacher) {
+              currentWeekPeriod.subject = firstWeekPeriod.subject;
+              currentWeekPeriod.teacher = firstWeekPeriod.teacher;
+              currentWeekPeriod.periodType = 'regular';
+            }
+            // Copy fixed periods (chào cờ, sinh hoạt lớp)
+            else if (firstWeekPeriod.periodType === 'fixed' || firstWeekPeriod.fixed) {
+              currentWeekPeriod.teacher = firstWeekPeriod.teacher;
+              currentWeekPeriod.periodType = 'fixed';
+              currentWeekPeriod.specialType = firstWeekPeriod.specialType;
+              currentWeekPeriod.fixed = firstWeekPeriod.fixed;
+              // Empty periods giữ nguyên là empty, không copy subject/teacher
+            }
+            // Empty periods giữ nguyên
+            // Không cần làm gì cho empty periods vì chúng đã được tạo đúng
+          }
+        }
+      }
+    }
   }
 
   /**

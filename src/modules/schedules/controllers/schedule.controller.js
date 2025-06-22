@@ -468,6 +468,34 @@ class ScheduleController {
     }
   }
 
+  // Lấy lịch dạy của giáo viên
+  async getTeacherSchedule(req, res, next) {
+    try {
+      const { teacherId, academicYear, startOfWeek, endOfWeek } = req.query;
+      
+      if (!teacherId || !academicYear || !startOfWeek || !endOfWeek) {
+        return res.status(400).json({
+          success: false,
+          message: 'teacherId, academicYear, startOfWeek, and endOfWeek are required'
+        });
+      }
+
+      const result = await scheduleService.getTeacherScheduleByDateRange(
+        teacherId, 
+        academicYear, 
+        startOfWeek, 
+        endOfWeek
+      );
+      
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // Lấy danh sách năm học (options cho dropdown)
   async getAcademicYearOptions(req, res, next) {
     try {
@@ -761,6 +789,550 @@ class ScheduleController {
         success: true,
         message: 'Period marked as absent',
         data: result.updatedPeriod
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Lấy thống kê theo loại tiết học
+  async getPeriodTypeStatistics(req, res, next) {
+    try {
+      const { className, academicYear } = req.query;
+      
+      if (!className || !academicYear) {
+        return res.status(400).json({
+          success: false,
+          message: 'Class name and academic year are required'
+        });
+      }
+
+      const result = await scheduleService.getPeriodTypeStatistics(className, academicYear);
+      
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Lấy danh sách tiết học theo loại
+  async getPeriodsByType(req, res, next) {
+    try {
+      const { className, academicYear, periodType } = req.query;
+      
+      if (!className || !academicYear || !periodType) {
+        return res.status(400).json({
+          success: false,
+          message: 'Class name, academic year, and period type are required'
+        });
+      }
+
+      const validPeriodTypes = ['regular', 'makeup', 'extracurricular', 'fixed'];
+      if (!validPeriodTypes.includes(periodType)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid period type. Must be one of: ${validPeriodTypes.join(', ')}`
+        });
+      }
+
+      const result = await scheduleService.getPeriodsByType(className, academicYear, periodType);
+      
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Nhận biết loại tiết học
+  async identifyPeriodType(req, res, next) {
+    try {
+      const { className, academicYear, dayOfWeek, periodNumber } = req.query;
+      
+      if (!className || !academicYear || !dayOfWeek || !periodNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'Class name, academic year, day of week, and period number are required'
+        });
+      }
+
+      const result = await scheduleService.identifyPeriodType(
+        className, 
+        academicYear, 
+        parseInt(dayOfWeek), 
+        parseInt(periodNumber)
+      );
+      
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Thêm tiết dạy bù
+  async addMakeupPeriod(req, res, next) {
+    try {
+      const { scheduleId } = req.params;
+      const { 
+        dayOfWeek, 
+        periodNumber, 
+        teacherId, 
+        subjectId, 
+        makeupInfo,
+        timeSlot 
+      } = req.body;
+      const token = req.headers.authorization?.split(' ')[1];
+      
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: 'No token provided'
+        });
+      }
+
+      if (!dayOfWeek || !periodNumber || !teacherId || !subjectId || !makeupInfo) {
+        return res.status(400).json({
+          success: false,
+          message: 'dayOfWeek, periodNumber, teacherId, subjectId, and makeupInfo are required'
+        });
+      }
+
+      const result = await scheduleService.addMakeupPeriod(
+        scheduleId,
+        dayOfWeek,
+        periodNumber,
+        teacherId,
+        subjectId,
+        makeupInfo,
+        timeSlot,
+        token
+      );
+      
+      res.status(201).json({
+        success: true,
+        message: 'Makeup period added successfully',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Thêm hoạt động ngoại khóa
+  async addExtracurricularPeriod(req, res, next) {
+    try {
+      const { scheduleId } = req.params;
+      const { 
+        dayOfWeek, 
+        periodNumber, 
+        teacherId, 
+        extracurricularInfo,
+        timeSlot 
+      } = req.body;
+      const token = req.headers.authorization?.split(' ')[1];
+      
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: 'No token provided'
+        });
+      }
+
+      if (!dayOfWeek || !periodNumber || !teacherId || !extracurricularInfo) {
+        return res.status(400).json({
+          success: false,
+          message: 'dayOfWeek, periodNumber, teacherId, and extracurricularInfo are required'
+        });
+      }
+
+      const result = await scheduleService.addExtracurricularPeriod(
+        scheduleId,
+        dayOfWeek,
+        periodNumber,
+        teacherId,
+        extracurricularInfo,
+        timeSlot,
+        token
+      );
+      
+      res.status(201).json({
+        success: true,
+        message: 'Extracurricular period added successfully',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Kiểm tra slot trống để thêm tiết học
+  async checkAvailableSlots(req, res, next) {
+    try {
+      const { className, academicYear } = req.query;
+      
+      if (!className || !academicYear) {
+        return res.status(400).json({
+          success: false,
+          message: 'Class name and academic year are required'
+        });
+      }
+
+      const result = await scheduleService.getAvailableSlots(className, academicYear);
+      
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Xem chi tiết tiết học
+  async getPeriodDetails(req, res, next) {
+    try {
+      const { className, academicYear, dayOfWeek, periodNumber } = req.query;
+      
+      if (!className || !academicYear || !dayOfWeek || !periodNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'Class name, academic year, day of week, and period number are required'
+        });
+      }
+
+      // Validate dayOfWeek và periodNumber
+      const day = parseInt(dayOfWeek);
+      const period = parseInt(periodNumber);
+      
+      if (isNaN(day) || day < 2 || day > 7) {
+        return res.status(400).json({
+          success: false,
+          message: 'Day of week must be between 2 (Monday) and 7 (Saturday)'
+        });
+      }
+
+      if (isNaN(period) || period < 1 || period > 7) {
+        return res.status(400).json({
+          success: false,
+          message: 'Period number must be between 1 and 7'
+        });
+      }
+
+      const result = await scheduleService.getPeriodDetails(
+        className, 
+        academicYear, 
+        day, 
+        period
+      );
+      
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Đánh giá tiết học
+  async evaluatePeriod(req, res, next) {
+    try {
+      const { scheduleId } = req.params;
+      const { dayOfWeek, periodNumber, evaluation } = req.body;
+      
+      if (!scheduleId || !dayOfWeek || !periodNumber || !evaluation) {
+        return res.status(400).json({
+          success: false,
+          message: 'Schedule ID, day of week, period number, and evaluation data are required'
+        });
+      }
+
+      // Validate dayOfWeek và periodNumber
+      const day = parseInt(dayOfWeek);
+      const period = parseInt(periodNumber);
+      
+      if (isNaN(day) || day < 2 || day > 7) {
+        return res.status(400).json({
+          success: false,
+          message: 'Day of week must be between 2 (Monday) and 7 (Saturday)'
+        });
+      }
+
+      if (isNaN(period) || period < 1 || period > 7) {
+        return res.status(400).json({
+          success: false,
+          message: 'Period number must be between 1 and 7'
+        });
+      }
+
+      // Validate evaluation data
+      if (evaluation.overallRating && (evaluation.overallRating < 1 || evaluation.overallRating > 5)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Overall rating must be between 1 and 5'
+        });
+      }
+
+      const result = await scheduleService.evaluatePeriod(
+        scheduleId,
+        day,
+        period,
+        evaluation,
+        req.user._id,
+        req.user.role[0] // Lấy role đầu tiên
+      );
+      
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: 'Period evaluated successfully'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Lấy đánh giá tiết học
+  async getPeriodEvaluation(req, res, next) {
+    try {
+      const { scheduleId } = req.params;
+      const { dayOfWeek, periodNumber } = req.query;
+      
+      if (!scheduleId || !dayOfWeek || !periodNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'Schedule ID, day of week, and period number are required'
+        });
+      }
+
+      // Validate dayOfWeek và periodNumber
+      const day = parseInt(dayOfWeek);
+      const period = parseInt(periodNumber);
+      
+      if (isNaN(day) || day < 2 || day > 7) {
+        return res.status(400).json({
+          success: false,
+          message: 'Day of week must be between 2 (Monday) and 7 (Saturday)'
+        });
+      }
+
+      if (isNaN(period) || period < 1 || period > 7) {
+        return res.status(400).json({
+          success: false,
+          message: 'Period number must be between 1 and 7'
+        });
+      }
+
+      const result = await scheduleService.getPeriodEvaluation(scheduleId, day, period);
+      
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Lấy chi tiết tiết học theo ID
+  async getPeriodById(req, res, next) {
+    try {
+      const { scheduleId, periodId } = req.params;
+      
+      if (!scheduleId || !periodId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Schedule ID and Period ID are required'
+        });
+      }
+
+      const result = await scheduleService.getPeriodById(scheduleId, periodId);
+      
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Lấy danh sách tiết rỗng
+  async getEmptySlots(req, res, next) {
+    try {
+      const { scheduleId } = req.params;
+      const { weekNumber } = req.query;
+      
+      if (!scheduleId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Schedule ID is required'
+        });
+      }
+
+      const result = await scheduleService.getEmptySlots(scheduleId, weekNumber ? parseInt(weekNumber) : null);
+      
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Cập nhật trạng thái tiết học theo ID
+  async updatePeriodStatusById(req, res, next) {
+    try {
+      const { scheduleId, periodId } = req.params;
+      const { status, options = {} } = req.body;
+      const token = req.headers.authorization?.split(' ')[1];
+      
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: 'No token provided'
+        });
+      }
+
+      if (!periodId || !status) {
+        return res.status(400).json({
+          success: false,
+          message: 'Period ID and status are required'
+        });
+      }
+
+      const result = await scheduleService.updatePeriodStatusById(
+        scheduleId, 
+        periodId, 
+        status, 
+        options, 
+        token
+      );
+      
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result.updatedPeriod
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Thêm tiết dạy bù vào slot rỗng
+  async addMakeupToEmptySlot(req, res, next) {
+    try {
+      const { scheduleId, periodId } = req.params;
+      const { teacherId, subjectId, makeupInfo } = req.body;
+      const token = req.headers.authorization?.split(' ')[1];
+      
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: 'No token provided'
+        });
+      }
+
+      if (!periodId || !teacherId || !subjectId || !makeupInfo) {
+        return res.status(400).json({
+          success: false,
+          message: 'Period ID, teacher ID, subject ID, and makeup info are required'
+        });
+      }
+
+      const result = await scheduleService.addMakeupToEmptySlot(
+        scheduleId,
+        periodId,
+        teacherId,
+        subjectId,
+        makeupInfo,
+        token
+      );
+      
+      res.status(201).json({
+        success: true,
+        message: 'Makeup period added successfully',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Thêm hoạt động ngoại khóa vào slot rỗng
+  async addExtracurricularToEmptySlot(req, res, next) {
+    try {
+      const { scheduleId, periodId } = req.params;
+      const { teacherId, extracurricularInfo } = req.body;
+      const token = req.headers.authorization?.split(' ')[1];
+      
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: 'No token provided'
+        });
+      }
+
+      if (!periodId || !teacherId || !extracurricularInfo) {
+        return res.status(400).json({
+          success: false,
+          message: 'Period ID, teacher ID, and extracurricular info are required'
+        });
+      }
+
+      const result = await scheduleService.addExtracurricularToEmptySlot(
+        scheduleId,
+        periodId,
+        teacherId,
+        extracurricularInfo,
+        token
+      );
+      
+      res.status(201).json({
+        success: true,
+        message: 'Extracurricular activity added successfully',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Lấy thời khóa biểu theo tuần
+  async getScheduleByWeek(req, res, next) {
+    try {
+      const { scheduleId } = req.params;
+      const { weekNumber } = req.query;
+      
+      if (!scheduleId || !weekNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'Schedule ID and week number are required'
+        });
+      }
+
+      const week = parseInt(weekNumber);
+      if (isNaN(week) || week < 1 || week > 38) {
+        return res.status(400).json({
+          success: false,
+          message: 'Week number must be between 1 and 38'
+        });
+      }
+
+      const result = await scheduleService.getScheduleByWeek(scheduleId, week);
+      
+      res.status(200).json({
+        success: true,
+        data: result
       });
     } catch (error) {
       next(error);

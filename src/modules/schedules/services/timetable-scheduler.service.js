@@ -35,6 +35,11 @@ class TimetableSchedulerService {
         throw new Error('Danh sách giáo viên không hợp lệ');
       }
 
+      // Get class info to obtain homeroom teacher ID
+      const Class = require('../../classes/models/class.model');
+      const classInfo = await Class.findById(classId).populate('homeroomTeacher');
+      const homeroomTeacherId = classInfo?.homeroomTeacher?._id || teachers[0]._id;
+
       // Create teacher-subject mapping
       const teacherSubjectMap = new Map();
       teachers.forEach(teacher => {
@@ -49,11 +54,11 @@ class TimetableSchedulerService {
 
       console.log(`📊 Teacher-Subject mapping: ${teacherSubjectMap.size} subjects mapped`);
 
-      // Create schedule template
-      const schedule = Schedule.createTemplate(classId, academicYear, teachers[0]._id);
+      // Create schedule template with homeroom teacher ID
+      const schedule = Schedule.createTemplate(classId, academicYear, homeroomTeacherId, homeroomTeacherId);
       
       // Add fixed periods first
-      this.addFixedPeriods(schedule, teachers[0]._id);
+      this.addFixedPeriods(schedule, homeroomTeacherId);
 
       // Create periods to schedule
       const periodsToSchedule = [];
@@ -103,6 +108,7 @@ class TimetableSchedulerService {
             session: timeSlot.session,
             timeStart: timeSlot.start,
             timeEnd: timeSlot.end,
+            periodType: 'regular', // Đánh dấu là tiết chính quy
             status: 'not_started'
           });
 
@@ -134,8 +140,9 @@ class TimetableSchedulerService {
         session: 'morning',
         timeStart: '07:00',
         timeEnd: '07:45',
+        periodType: 'fixed', // Sử dụng periodType thay vì fixed flag
         status: 'not_started',
-        fixed: true,
+        fixed: true, // Giữ lại để tương thích
         specialType: 'flag_ceremony'
       });
 
@@ -147,8 +154,9 @@ class TimetableSchedulerService {
         session: 'afternoon',
         timeStart: '14:20',
         timeEnd: '15:05',
+        periodType: 'fixed', // Sử dụng periodType thay vì fixed flag
         status: 'not_started',
-        fixed: true,
+        fixed: true, // Giữ lại để tương thích
         specialType: 'class_meeting'
       });
 

@@ -67,6 +67,14 @@ router.get('/class',
   scheduleController.getClassSchedule
 );
 
+// GET /api/schedules/teacher - Xem lịch dạy của giáo viên
+// Query params: teacherId, academicYear, startOfWeek, endOfWeek
+// Ví dụ: /api/schedules/teacher?teacherId=64f8b9c123456789abcdef07&academicYear=2024-2025&startOfWeek=2024-12-19&endOfWeek=2024-12-25
+router.get('/teacher',
+  authMiddleware.protect,
+  scheduleController.getTeacherSchedule
+);
+
 // GET /api/schedules/available - Xem tất cả schedules có sẵn (debugging)
 router.get('/available',
   authMiddleware.protect,
@@ -95,6 +103,12 @@ router.get('/attendance-report',
 router.get('/stats',
   authMiddleware.protect,
   scheduleController.getScheduleStats
+);
+
+// GET /api/schedules/period-details - Xem chi tiết tiết học (đặt trước /:id để tránh conflict)
+router.get('/period-details',
+  authMiddleware.protect,
+  scheduleController.getPeriodDetails
 );
 
 // GET /api/schedules - Lấy danh sách thời khóa biểu với filter
@@ -193,6 +207,102 @@ router.patch('/:scheduleId/mark-absent',
   authMiddleware.protect,
   authMiddleware.authorize('admin', 'manager', 'teacher'),
   scheduleController.markPeriodAbsent
+);
+
+// Routes cho quản lý loại tiết học (Period Type Management)
+
+// GET /api/schedules/period-type-statistics - Lấy thống kê theo loại tiết học
+router.get('/period-type-statistics',
+  authMiddleware.protect,
+  scheduleController.getPeriodTypeStatistics
+);
+
+// GET /api/schedules/periods-by-type - Lấy danh sách tiết học theo loại
+router.get('/periods-by-type',
+  authMiddleware.protect,
+  scheduleController.getPeriodsByType
+);
+
+// GET /api/schedules/identify-period-type - Nhận biết loại tiết học
+router.get('/identify-period-type',
+  authMiddleware.protect,
+  scheduleController.identifyPeriodType
+);
+
+// GET /api/schedules/available-slots - Kiểm tra slot trống để thêm tiết học
+router.get('/available-slots',
+  authMiddleware.protect,
+  scheduleController.checkAvailableSlots
+);
+
+// POST /api/schedules/:scheduleId/periods/makeup - Thêm tiết dạy bù
+router.post('/:scheduleId/periods/makeup',
+  authMiddleware.protect,
+  authMiddleware.authorize('admin', 'manager', 'teacher'),
+  scheduleController.addMakeupPeriod
+);
+
+// POST /api/schedules/:scheduleId/periods/extracurricular - Thêm hoạt động ngoại khóa
+router.post('/:scheduleId/periods/extracurricular',
+  authMiddleware.protect,
+  authMiddleware.authorize('admin', 'manager', 'teacher'),
+  scheduleController.addExtracurricularPeriod
+);
+
+// Routes cho đánh giá tiết học
+
+// POST /api/schedules/:scheduleId/evaluate - Đánh giá tiết học
+router.post('/:scheduleId/evaluate',
+  authMiddleware.protect,
+  authMiddleware.authorize('admin', 'manager', 'principal', 'head_teacher', 'teacher'),
+  scheduleController.evaluatePeriod
+);
+
+// GET /api/schedules/:scheduleId/evaluation - Lấy đánh giá tiết học
+router.get('/:scheduleId/evaluation',
+  authMiddleware.protect,
+  scheduleController.getPeriodEvaluation
+);
+
+// ========== API MỚI CHO SCHEMA TUẦN-NGÀY-TIẾT ==========
+
+// GET /api/schedules/:scheduleId/periods/:periodId - Lấy chi tiết tiết học theo ID
+router.get('/:scheduleId/periods/:periodId',
+  authMiddleware.protect,
+  scheduleController.getPeriodById
+);
+
+// GET /api/schedules/:scheduleId/empty-slots - Lấy danh sách tiết rỗng
+router.get('/:scheduleId/empty-slots',
+  authMiddleware.protect,
+  scheduleController.getEmptySlots
+);
+
+// GET /api/schedules/:scheduleId/weeks - Lấy thời khóa biểu theo tuần
+router.get('/:scheduleId/weeks',
+  authMiddleware.protect,
+  scheduleController.getScheduleByWeek
+);
+
+// PUT /api/schedules/:scheduleId/periods/:periodId/status - Cập nhật trạng thái tiết học theo ID
+router.put('/:scheduleId/periods/:periodId/status',
+  authMiddleware.protect,
+  authMiddleware.authorize('admin', 'manager', 'teacher'),
+  scheduleController.updatePeriodStatusById
+);
+
+// POST /api/schedules/:scheduleId/periods/:periodId/makeup - Thêm tiết dạy bù vào slot rỗng
+router.post('/:scheduleId/periods/:periodId/makeup',
+  authMiddleware.protect,
+  authMiddleware.authorize('admin', 'manager', 'teacher'),
+  scheduleController.addMakeupToEmptySlot
+);
+
+// POST /api/schedules/:scheduleId/periods/:periodId/extracurricular - Thêm hoạt động ngoại khóa vào slot rỗng
+router.post('/:scheduleId/periods/:periodId/extracurricular',
+  authMiddleware.protect,
+  authMiddleware.authorize('admin', 'manager', 'teacher'),
+  scheduleController.addExtracurricularToEmptySlot
 );
 
 module.exports = router; 
