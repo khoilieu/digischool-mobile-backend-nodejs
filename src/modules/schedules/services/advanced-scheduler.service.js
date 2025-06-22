@@ -116,7 +116,7 @@ class AdvancedSchedulerService {
   async createFallbackSchedule(classId, academicYear, subjects, teachers, classInfo) {
     try {
       console.log('🔧 Tạo fallback schedule với logic phân công giáo viên đúng...');
-      const schedule = Schedule.createTemplate(classId, academicYear, classInfo.homeroomTeacher._id);
+      const schedule = await Schedule.createTemplate(classId, academicYear, classInfo.homeroomTeacher._id);
       
       // Tạo bản đồ phân công giáo viên đúng logic
       const teacherAssignmentMap = await this.teacherAssignment.createTeacherAssignmentMap(
@@ -143,8 +143,14 @@ class AdvancedSchedulerService {
       const maxPeriodsPerDay = 7;
       const daysPerWeek = 6;
 
+      // Chỉ xếp cho tuần đầu tiên (tuần 1), các tuần khác sẽ copy từ tuần này
+      const firstWeek = schedule.weeks[0];
+      if (!firstWeek) {
+        throw new Error('No weeks found in schedule template');
+      }
+
       for (let dayIndex = 0; dayIndex < daysPerWeek && periodIndex < subjectPeriods.length; dayIndex++) {
-        const daySchedule = schedule.schedule[dayIndex];
+        const daySchedule = firstWeek.days[dayIndex];
         
         // Bỏ qua tiết chào cờ (thứ 2 tiết 1) và sinh hoạt lớp (thứ 7 tiết 7)
         const skipPeriods = [];
@@ -154,6 +160,10 @@ class AdvancedSchedulerService {
         for (let period = 1; period <= maxPeriodsPerDay && periodIndex < subjectPeriods.length; period++) {
           if (skipPeriods.includes(period)) continue;
 
+          // Tìm tiết regular tương ứng trong ngày
+          const existingPeriod = daySchedule.periods.find(p => p.periodNumber === period && p.periodType === 'regular');
+          if (!existingPeriod) continue;
+
           // 1. Chọn subject trước
           const subject = subjectPeriods[periodIndex];
           
@@ -161,17 +171,9 @@ class AdvancedSchedulerService {
           const assignedTeacher = this.teacherAssignment.getAssignedTeacher(teacherAssignmentMap, subject._id);
           
           if (assignedTeacher) {
-            const timeSlot = this.getTimeSlot(period);
-            
-            daySchedule.periods.push({
-              periodNumber: period,
-              subject: subject._id,
-              teacher: assignedTeacher._id,
-              session: timeSlot.session,
-              timeStart: timeSlot.start,
-              timeEnd: timeSlot.end,
-              status: 'not_started'
-            });
+            // Cập nhật tiết regular với thông tin môn học và giáo viên
+            existingPeriod.subject = subject._id;
+            existingPeriod.teacher = assignedTeacher._id;
 
             console.log(`✅ Tiết ${period} - ${this.getDayName(dayIndex)}: ${subject.subjectName} (${assignedTeacher.name})`);
             periodIndex++;
@@ -183,6 +185,9 @@ class AdvancedSchedulerService {
         }
       }
 
+      // Copy lịch từ tuần đầu tiên sang các tuần khác
+      this.copyScheduleToAllWeeks(schedule);
+
       // Thêm các tiết cố định
       this.addFixedPeriods(schedule, classInfo.homeroomTeacher._id);
       
@@ -193,8 +198,8 @@ class AdvancedSchedulerService {
       console.log(`📈 Đã xếp ${periodIndex - unplacedCount}/${subjectPeriods.length} tiết học`);
       
       // Save the fallback schedule
-      await schedule.save();
-    return schedule;
+      await schedule.save({ validateBeforeSave: false });
+      return schedule;
 
     } catch (error) {
       throw new Error(`Lỗi tạo thời khóa biểu fallback: ${error.message}`);
@@ -202,29 +207,67 @@ class AdvancedSchedulerService {
   }
 
   addFixedPeriods(schedule, homeroomTeacherId) {
-    schedule.schedule[0].periods.unshift({
-      periodNumber: 1,
-      subject: null,
-      teacher: homeroomTeacherId,
-      session: 'morning',
-      timeStart: '07:00',
-      timeEnd: '07:45',
-      status: 'not_started',
-      fixed: true,
-      specialType: 'flag_ceremony'
-    });
+    // Thêm tiết chào cờ (Thứ 2, tiết 1) và sinh hoạt lớp (Thứ 7, tiết 7) cho tất cả các tuần
+    schedule.weeks.forEach(week => {
+      // Tiết chào cờ - Thứ 2, tiết 1
+      const mondayPeriod1 = week.days[0].periods.find(p => p.periodNumber === 1);
+      if (mondayPeriod1) {
+        mondayPeriod1.subject = null;
+        mondayPeriod1.teacher = homeroomTeacherId;
+        mondayPeriod1.periodType = 'fixed';
+        mondayPeriod1.specialType = 'flag_ceremony';
+        mondayPeriod1.fixed = true;
+      }
 
-    schedule.schedule[5].periods.push({
-      periodNumber: 7,
-      subject: null,
-      teacher: homeroomTeacherId,
-      session: 'afternoon',
-      timeStart: '14:20',
-      timeEnd: '15:05',
-      status: 'not_started',
-      fixed: true,
-      specialType: 'class_meeting'
+      // Sinh hoạt lớp - Thứ 7, tiết 7
+      const saturdayPeriod7 = week.days[5].periods.find(p => p.periodNumber === 7);
+      if (saturdayPeriod7) {
+        saturdayPeriod7.subject = null;
+        saturdayPeriod7.teacher = homeroomTeacherId;
+        saturdayPeriod7.periodType = 'fixed';
+        saturdayPeriod7.specialType = 'class_meeting';
+        saturdayPeriod7.fixed = true;
+      }
     });
+  }
+
+  copyScheduleToAllWeeks(schedule) {
+    const firstWeek = schedule.weeks[0];
+    if (!firstWeek) return;
+
+    // Copy lịch từ tuần đầu tiên sang các tuần khác
+    for (let weekIndex = 1; weekIndex < schedule.weeks.length; weekIndex++) {
+      const currentWeek = schedule.weeks[weekIndex];
+      
+      // Copy từng ngày
+      for (let dayIndex = 0; dayIndex < firstWeek.days.length; dayIndex++) {
+        const firstWeekDay = firstWeek.days[dayIndex];
+        const currentWeekDay = currentWeek.days[dayIndex];
+        
+        // Copy từng tiết (chỉ copy subject và teacher cho regular periods)
+        for (let periodIndex = 0; periodIndex < firstWeekDay.periods.length; periodIndex++) {
+          const firstWeekPeriod = firstWeekDay.periods[periodIndex];
+          const currentWeekPeriod = currentWeekDay.periods[periodIndex];
+          
+          if (currentWeekPeriod && firstWeekPeriod) {
+            // Chỉ copy cho regular periods có đầy đủ subject và teacher
+            if (firstWeekPeriod.periodType === 'regular' && firstWeekPeriod.subject && firstWeekPeriod.teacher) {
+              currentWeekPeriod.subject = firstWeekPeriod.subject;
+              currentWeekPeriod.teacher = firstWeekPeriod.teacher;
+              currentWeekPeriod.periodType = 'regular';
+            }
+            // Copy fixed periods (chào cờ, sinh hoạt lớp)
+            else if (firstWeekPeriod.periodType === 'fixed' || firstWeekPeriod.fixed) {
+              currentWeekPeriod.teacher = firstWeekPeriod.teacher;
+              currentWeekPeriod.periodType = 'fixed';
+              currentWeekPeriod.specialType = firstWeekPeriod.specialType;
+              currentWeekPeriod.fixed = firstWeekPeriod.fixed;
+            }
+            // Empty periods giữ nguyên - không copy subject/teacher
+          }
+        }
+      }
+    }
   }
 
   getTimeSlot(periodNumber) {
@@ -268,8 +311,8 @@ class AdvancedSchedulerService {
 
       const schedule = await Schedule.findOne(query)
         .populate('class')
-        .populate('schedule.periods.subject')
-        .populate('schedule.periods.teacher', 'name email')
+        .populate('weeks.days.periods.subject')
+        .populate('weeks.days.periods.teacher', 'name email')
         .populate('createdBy', 'name email')
         .lean();
 
