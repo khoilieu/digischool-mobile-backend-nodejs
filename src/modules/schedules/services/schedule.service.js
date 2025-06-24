@@ -1,64 +1,878 @@
+const jwt = require('jsonwebtoken');
 const Schedule = require('../models/schedule.model');
+const Period = require('../models/period.model');
 const TeacherSchedule = require('../models/teacher-schedule.model');
+const AcademicYear = require('../models/academic-year.model');
+const TimeSlot = require('../models/time-slot.model');
+const Lesson = require('../models/lesson.model');
+const WeeklySchedule = require('../models/weekly-schedule.model');
+const LessonTemplate = require('../models/lesson-template.model');
 const Class = require('../../classes/models/class.model');
 const Subject = require('../../subjects/models/subject.model');
 const User = require('../../auth/models/user.model');
 const AdvancedSchedulerService = require('./advanced-scheduler.service');
-const TeacherAssignmentService = require('./teacher-assignment.service');
-const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 
 class ScheduleService {
-  
   constructor() {
     this.advancedScheduler = new AdvancedSchedulerService();
-    this.teacherAssignment = new TeacherAssignmentService();
   }
 
-  // Khởi tạo thời khóa biểu cho các lớp trong năm học
-  async initializeSchedulesForAcademicYear(data, token) {
+  // NEW: Khởi tạo thời khóa biểu với architecture mới (Lesson-based)
+  async initializeSchedulesWithNewArchitecture(data, token) {
     try {
-      // Verify token và lấy user info
+      const { academicYear, gradeLevel, semester = 1 } = data;
+      
+      // Verify user permissions
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await User.findById(decoded.id);
       
-      if (!user || !user.role.some(role => ['admin', 'manager'].includes(role))) {
-        throw new Error('Unauthorized: Only admin or manager can initialize schedules');
+      if (!user || !['admin', 'manager'].includes(user.role[0])) {
+        throw new Error('Unauthorized to create schedules');
       }
 
-      const { academicYear, gradeLevel, semester = 1 } = data;
+      console.log(`🚀 Starting NEW schedule initialization for grade ${gradeLevel}, academic year ${academicYear}`);
 
-      if (!academicYear) {
-        throw new Error('Academic year is required');
+      // Đảm bảo Academic Year exists
+      let academicYearDoc = await AcademicYear.findOne({ name: academicYear });
+      if (!academicYearDoc) {
+        console.log(`📅 Creating Academic Year: ${academicYear}`);
+        academicYearDoc = new AcademicYear({
+          name: academicYear,
+          startDate: new Date('2024-08-12'),
+          endDate: new Date('2025-05-30'),
+          totalWeeks: 38,
+          isActive: true
+        });
+        await academicYearDoc.save();
       }
 
-      let classes;
-      
-      if (gradeLevel) {
-        // Nếu có gradeLevel, chỉ lấy lớp của khối đó
-        classes = await this.getClassesByGradeAndYear(academicYear, gradeLevel);
-        console.log(`📚 Found ${classes.length} classes for grade ${gradeLevel}`);
-      } else {
-        // Nếu không có gradeLevel, lấy tất cả lớp trong năm học
-        classes = await Class.find({
-          academicYear: academicYear,
-          active: true
-        }).populate('homeroomTeacher');
-        console.log(`📚 Found ${classes.length} classes for academic year ${academicYear}`);
+      // Đảm bảo Time Slots exist
+      await this.ensureTimeSlots();
+
+      // Lấy danh sách lớp theo khối
+      const classes = await Class.find({
+        className: new RegExp(`^${gradeLevel}`),
+        academicYear,
+        active: true
+      }).populate('homeroomTeacher');
+
+      if (!classes || classes.length === 0) {
+        throw new Error(`No classes found for grade ${gradeLevel} in academic year ${academicYear}`);
       }
-      
-      if (classes.length === 0) {
-        const gradeMsg = gradeLevel ? `grade ${gradeLevel} in ` : '';
-        throw new Error(`No classes found for ${gradeMsg}academic year ${academicYear}`);
-      }
+
+      console.log(`📚 Found ${classes.length} classes: ${classes.map(c => c.className).join(', ')}`);
 
       const results = [];
-      const teacherSchedulesCreated = new Map(); // Track teacher schedules created
+      let createdSchedulesCount = 0;
+
+      // NEW: Tạo thời khóa biểu cho tất cả lớp với multi-class scheduler
+      const classesToCreate = [];
       
+      // Phân loại lớp: tạo mới vs đã tồn tại
+      for (const classInfo of classes) {
+        console.log(`\n🎯 Processing class: ${classInfo.className}`);
+        
+        // Kiểm tra xem lớp đã có thời khóa biểu chưa
+        const existingSchedule = await Schedule.findByClassAndYear(classInfo._id, academicYearDoc._id);
+
+        if (existingSchedule) {
+          console.log(`⚠️ Schedule already exists for ${classInfo.className}, skipping...`);
+          results.push({
+            classId: classInfo._id,
+            className: classInfo.className,
+            status: 'skipped',
+            message: 'Schedule already exists'
+          });
+        } else {
+          classesToCreate.push(classInfo);
+        }
+      }
+
+      // Tạo schedules cho tất cả lớp cần tạo mới
+      if (classesToCreate.length > 0) {
+        try {
+          console.log(`\n🎯 Creating schedules for ${classesToCreate.length} classes with optimized teacher distribution...`);
+          
+          // Tạo schedules cho tất cả lớp cùng lúc
+          const schedules = await this.createMultiClassSchedulesWithLessons(
+            classesToCreate,
+            academicYearDoc._id,
+            user._id
+          );
+
+          // Activate và tạo results cho từng schedule
+          for (let i = 0; i < schedules.length; i++) {
+            const schedule = schedules[i];
+            const classInfo = classesToCreate[i];
+            
+            await schedule.activate();
+
+            console.log(`✅ Successfully created schedule for ${classInfo.className}`);
+            
+            results.push({
+              classId: classInfo._id,
+              className: classInfo.className,
+              status: 'created',
+              scheduleId: schedule._id,
+              totalWeeks: schedule.statistics.totalWeeks,
+              totalLessons: schedule.statistics.totalLessons
+            });
+            
+            createdSchedulesCount++;
+          }
+
+        } catch (error) {
+          console.error(`❌ Failed to create multi-class schedules:`, error.message);
+          
+          // Mark all classes as failed
+          for (const classInfo of classesToCreate) {
+            results.push({
+              classId: classInfo._id,
+              className: classInfo.className,
+              status: 'failed',
+              error: error.message
+            });
+          }
+        }
+      }
+
+      const summary = {
+        totalClasses: classes.length,
+        createdSchedules: createdSchedulesCount,
+        skippedSchedules: results.filter(r => r.status === 'skipped').length,
+        failedSchedules: results.filter(r => r.status === 'failed').length,
+        successRate: ((createdSchedulesCount / classes.length) * 100).toFixed(2) + '%'
+      };
+
+      console.log('\n📊 Schedule Creation Summary:');
+      console.log(`- Total Classes: ${summary.totalClasses}`);
+      console.log(`- Created: ${summary.createdSchedules}`);
+      console.log(`- Skipped: ${summary.skippedSchedules}`);
+      console.log(`- Failed: ${summary.failedSchedules}`);
+      console.log(`- Success Rate: ${summary.successRate}`);
+
+      return {
+        summary,
+        results,
+        useNewArchitecture: true
+      };
+
+    } catch (error) {
+      throw new Error(`Failed to initialize schedules with new architecture: ${error.message}`);
+    }
+  }
+
+  // Helper method để tạo schedule với lessons cho một lớp
+  async createScheduleWithLessons(classId, academicYearId, createdBy, homeroomTeacher) {
+    console.log(`🏗️ Creating schedule with lessons for class ${classId}...`);
+
+    // Tạo schedule chính
+    const schedule = await Schedule.createSchedule(classId, academicYearId, createdBy);
+
+    // Lấy time slots
+    const timeSlots = await TimeSlot.getAllActive();
+
+    // Lấy subjects cho grade level này
+    const classDoc = await Class.findById(classId);
+    const subjects = await Subject.find({
+      gradeLevels: classDoc.className.startsWith('12') ? 12 : 
+                   classDoc.className.startsWith('11') ? 11 : 10,
+      isActive: true
+    });
+
+    console.log(`📚 Found ${subjects.length} subjects for grade`);
+
+    // Tạo 38 tuần
+    const academicYear = await AcademicYear.findById(academicYearId);
+    const startDate = new Date(academicYear.startDate);
+    
+    for (let weekNum = 1; weekNum <= 38; weekNum++) {
+      const weekStartDate = new Date(startDate);
+      weekStartDate.setDate(startDate.getDate() + (weekNum - 1) * 7);
+      
+      // Điều chỉnh để thứ 2 là ngày đầu tuần
+      const dayOfWeek = weekStartDate.getDay();
+      const daysToMonday = dayOfWeek === 0 ? 1 : (8 - dayOfWeek) % 7;
+      if (daysToMonday > 0) {
+        weekStartDate.setDate(weekStartDate.getDate() + daysToMonday);
+      }
+
+      // Tạo weekly schedule
+      const weeklySchedule = await WeeklySchedule.createWeek(
+        classId,
+        academicYearId,
+        weekNum,
+        weekStartDate,
+        createdBy
+      );
+
+      // Tạo lessons cho tuần này
+      await this.createLessonsForWeek(
+        weeklySchedule._id,
+        classId,
+        academicYearId,
+        weekNum,
+        weekStartDate,
+        timeSlots,
+        subjects,
+        homeroomTeacher,
+        createdBy
+      );
+
+      // Add weekly schedule to main schedule
+      await schedule.addWeeklySchedule(weeklySchedule._id);
+      await weeklySchedule.publish();
+    }
+
+    // Update statistics
+    await schedule.updateStatistics();
+
+    return schedule;
+  }
+
+  // NEW: Tạo schedules cho nhiều lớp với teacher distribution tối ưu
+  async createMultiClassSchedulesWithLessons(classes, academicYearId, createdBy) {
+    console.log(`\n🎯 Creating schedules for ${classes.length} classes with optimized teacher distribution...`);
+
+    // Lấy time slots và subjects
+    const timeSlots = await TimeSlot.getAllActive();
+    const academicYear = await AcademicYear.findById(academicYearId);
+    const startDate = new Date(academicYear.startDate);
+
+    // Lấy subjects cho grade level
+    const gradeLevel = classes[0].className.startsWith('12') ? 12 : 
+                      classes[0].className.startsWith('11') ? 11 : 10;
+    const subjects = await Subject.find({
+      gradeLevels: gradeLevel,
+      isActive: true
+    });
+
+    console.log(`📚 Found ${subjects.length} subjects for grade ${gradeLevel}`);
+
+    // Tạo schedules và weekly schedules cho tất cả lớp
+    const schedules = [];
+    const weeklySchedulesByWeek = []; // [week][classIndex] = weeklyScheduleId
+
+    for (const classInfo of classes) {
+      const schedule = await Schedule.createSchedule(classInfo._id, academicYearId, createdBy);
+      schedules.push(schedule);
+    }
+
+    // Tạo weekly schedules cho tất cả tuần và lớp
+    for (let weekNum = 1; weekNum <= 38; weekNum++) {
+      const weekStartDate = new Date(startDate);
+      weekStartDate.setDate(startDate.getDate() + (weekNum - 1) * 7);
+      
+      // Điều chỉnh để thứ 2 là ngày đầu tuần
+      const dayOfWeek = weekStartDate.getDay();
+      const daysToMonday = dayOfWeek === 0 ? 1 : (8 - dayOfWeek) % 7;
+      if (daysToMonday > 0) {
+        weekStartDate.setDate(weekStartDate.getDate() + daysToMonday);
+      }
+
+      const weekSchedules = [];
+      for (let i = 0; i < classes.length; i++) {
+        const classInfo = classes[i];
+        const weeklySchedule = await WeeklySchedule.createWeek(
+          classInfo._id,
+          academicYearId,
+          weekNum,
+          weekStartDate,
+          createdBy
+        );
+        weekSchedules.push(weeklySchedule._id);
+        
+        // Add to main schedule
+        await schedules[i].addWeeklySchedule(weeklySchedule._id);
+      }
+      weeklySchedulesByWeek.push(weekSchedules);
+    }
+
+    // Tạo lessons cho tất cả lớp sử dụng multi-class scheduler
+    console.log(`\n🎯 Creating lessons with multi-class scheduler...`);
+    
+    for (let weekNum = 1; weekNum <= 38; weekNum++) {
+      const weekStartDate = new Date(startDate);
+      weekStartDate.setDate(startDate.getDate() + (weekNum - 1) * 7);
+      
+      // Điều chỉnh để thứ 2 là ngày đầu tuần
+      const dayOfWeek = weekStartDate.getDay();
+      const daysToMonday = dayOfWeek === 0 ? 1 : (8 - dayOfWeek) % 7;
+      if (daysToMonday > 0) {
+        weekStartDate.setDate(weekStartDate.getDate() + daysToMonday);
+      }
+
+      // Get data for this week
+      const weeklyScheduleIds = weeklySchedulesByWeek[weekNum - 1];
+      const classIds = classes.map(c => c._id);
+      const homeroomTeachers = classes.map(c => c.homeroomTeacher);
+
+      // Create lessons for all classes in this week
+      await this.createLessonsForMultipleClasses(
+        weeklyScheduleIds,
+        classIds,
+        academicYearId,
+        weekNum,
+        weekStartDate,
+        timeSlots,
+        subjects,
+        homeroomTeachers,
+        createdBy
+      );
+
+      // Publish weekly schedules
+      for (const weeklyScheduleId of weeklyScheduleIds) {
+        const weeklySchedule = await WeeklySchedule.findById(weeklyScheduleId);
+        await weeklySchedule.publish();
+      }
+    }
+
+    // Update statistics for all schedules
+    for (const schedule of schedules) {
+      await schedule.updateStatistics();
+    }
+
+    console.log(`✅ Successfully created ${classes.length} optimized schedules`);
+    return schedules;
+  }
+
+  // NEW: Multi-class constraint-based scheduling với phân bổ giáo viên tối ưu
+  async createLessonsForWeek(weeklyScheduleId, classId, academicYearId, weekNum, weekStartDate, timeSlots, subjects, homeroomTeacher, createdBy) {
+    // For single class, use the simple constraint scheduler
+    const ConstraintSchedulerService = require('./constraint-scheduler.service');
+    const constraintScheduler = new ConstraintSchedulerService();
+    
+    return await constraintScheduler.createConstraintBasedSchedule(
+      weeklyScheduleId, classId, academicYearId, weekNum, weekStartDate, 
+      timeSlots, subjects, homeroomTeacher, createdBy
+    );
+  }
+
+  // NEW: Multi-class scheduling method for creating different schedules
+  async createLessonsForMultipleClasses(weeklyScheduleIds, classIds, academicYearId, weekNum, weekStartDate, timeSlots, subjects, homeroomTeachers, createdBy) {
+    const MultiClassSchedulerService = require('./multi-class-scheduler.service');
+    const multiClassScheduler = new MultiClassSchedulerService();
+    
+    return await multiClassScheduler.createMultiClassSchedules(
+      weeklyScheduleIds, classIds, academicYearId, weekNum, weekStartDate,
+      timeSlots, subjects, homeroomTeachers, createdBy
+    );
+  }
+
+  // Initialize constraint tracking system
+  initializeConstraintSystem(classId, subjects, homeroomTeacher, timeSlots) {
+    const constraints = {
+      // Core data
+      classId,
+      subjects,
+      homeroomTeacher,
+      timeSlots,
+      
+      // Schedule matrix: [dayIndex][period] = lesson or null
+      schedule: Array(7).fill().map(() => Array(10).fill(null)),
+      
+      // Teacher tracking: teacherId -> { schedule: [dayIndex][period], workload: {...} }
+      teacherSchedules: new Map(),
+      
+      // Subject requirements: subjectId -> { required: X, scheduled: Y, doublePeriods: Z }
+      subjectRequirements: new Map(),
+      
+      // Priority subjects for double periods
+      prioritySubjects: ['Mathematics', 'Literature', 'English'],
+      
+      // Time preferences
+      morningPeriods: [1, 2, 3, 4, 5], // periods 1-5
+      afternoonPeriods: [6, 7, 8, 9, 10], // periods 6-10
+      
+      // Constraint violations tracking
+      violations: [],
+      
+      // Statistics
+      stats: {
+        totalLessons: 0,
+        doublePeriods: 0,
+        constraintViolations: 0
+      }
+    };
+
+    // Initialize teacher schedules
+    this.initializeTeacherSchedules(constraints);
+    
+    // Initialize subject requirements
+    this.initializeSubjectRequirements(constraints);
+    
+    return constraints;
+  }
+
+  // Initialize teacher schedule tracking
+  initializeTeacherSchedules(constraints) {
+    // Add homeroom teacher
+    if (constraints.homeroomTeacher) {
+      constraints.teacherSchedules.set(constraints.homeroomTeacher._id.toString(), {
+        schedule: Array(7).fill().map(() => Array(10).fill(false)),
+        workload: { daily: Array(7).fill(0), weekly: 0 },
+        maxLessonsPerDay: 8,
+        maxLessonsPerWeek: 30,
+        unavailableTimes: [] // Can be extended from teacher profile
+      });
+    }
+
+    // Add subject teachers
+    constraints.subjects.forEach(subject => {
+      // Find specialized teacher for this subject
+      this.findSpecializedTeacher(subject._id).then(teacher => {
+        if (teacher && !constraints.teacherSchedules.has(teacher._id.toString())) {
+          constraints.teacherSchedules.set(teacher._id.toString(), {
+            schedule: Array(7).fill().map(() => Array(10).fill(false)),
+            workload: { daily: Array(7).fill(0), weekly: 0 },
+            maxLessonsPerDay: 8,
+            maxLessonsPerWeek: 30,
+            unavailableTimes: []
+          });
+        }
+      });
+    });
+  }
+
+  // Initialize subject requirements
+  initializeSubjectRequirements(constraints) {
+    constraints.subjects.forEach(subject => {
+      const weeklyHours = subject.weeklyHours || 3;
+      const requiresDoublePeriods = constraints.prioritySubjects.includes(subject.subjectName);
+      
+      constraints.subjectRequirements.set(subject._id.toString(), {
+        subject: subject,
+        required: weeklyHours,
+        scheduled: 0,
+        doublePeriods: 0,
+        requiresDoublePeriods: requiresDoublePeriods,
+        minDoublePeriods: requiresDoublePeriods ? Math.floor(weeklyHours * 0.6 / 2) : 0
+      });
+    });
+  }
+
+  // Step 1: Schedule fixed periods (CRITICAL priority)
+  async scheduleFixedPeriods(constraints, weekStartDate, timeSlots, homeroomTeacher, createdBy) {
+    console.log('🏷️ Scheduling fixed periods...');
+    
+    // Schedule flag ceremony (Monday, period 1)
+    const mondayDate = new Date(weekStartDate);
+    mondayDate.setDate(weekStartDate.getDate() + 0); // Monday
+    
+    const flagLesson = await this.createLesson({
+      classId: constraints.classId,
+      dayIndex: 0,
+      period: 1,
+      type: 'fixed',
+      fixedInfo: { type: 'flag_ceremony', description: 'Chào cờ' },
+      teacher: homeroomTeacher,
+      date: mondayDate,
+      timeSlot: timeSlots[0],
+      createdBy
+    });
+    
+    constraints.schedule[0][0] = flagLesson;
+    this.bookTeacherSlot(constraints, homeroomTeacher._id, 0, 1);
+    
+    // Schedule class meeting (Saturday, period 5)
+    const saturdayDate = new Date(weekStartDate);
+    saturdayDate.setDate(weekStartDate.getDate() + 5); // Saturday
+    
+    const classMeetingLesson = await this.createLesson({
+      classId: constraints.classId,
+      dayIndex: 5,
+      period: 5,
+      type: 'fixed',
+      fixedInfo: { type: 'class_meeting', description: 'Sinh hoạt lớp' },
+      teacher: homeroomTeacher,
+      date: saturdayDate,
+      timeSlot: timeSlots[4],
+      createdBy
+    });
+    
+    constraints.schedule[5][4] = classMeetingLesson;
+    this.bookTeacherSlot(constraints, homeroomTeacher._id, 5, 5);
+    
+    console.log('✅ Fixed periods scheduled successfully');
+  }
+
+  // Step 2: Schedule double periods for priority subjects (HIGH priority)
+  async scheduleDoublePeriods(constraints, subjects, weekStartDate, timeSlots, createdBy) {
+    console.log('🔗 Scheduling double periods for priority subjects...');
+    
+    const prioritySubjects = subjects.filter(s => 
+      constraints.prioritySubjects.includes(s.subjectName)
+    );
+    
+    for (const subject of prioritySubjects) {
+      const requirement = constraints.subjectRequirements.get(subject._id.toString());
+      const teacher = await this.findSpecializedTeacher(subject._id);
+      
+      if (!teacher) continue;
+      
+      // Schedule required double periods
+      for (let dp = 0; dp < requirement.minDoublePeriods; dp++) {
+        const slot = await this.findBestDoubleSlot(constraints, subject, teacher);
+        
+        if (slot) {
+          await this.scheduleDoubleLesson(
+            constraints, 
+            subject, 
+            teacher, 
+            slot.dayIndex, 
+            slot.startPeriod, 
+            weekStartDate, 
+            timeSlots, 
+            createdBy
+          );
+          
+          requirement.doublePeriods++;
+          requirement.scheduled += 2;
+          constraints.stats.doublePeriods++;
+          
+          console.log(`✅ Double period scheduled: ${subject.subjectName} on day ${slot.dayIndex + 1}, periods ${slot.startPeriod}-${slot.startPeriod + 1}`);
+        } else {
+          console.log(`⚠️ Could not find slot for double period: ${subject.subjectName}`);
+        }
+      }
+    }
+  }
+
+  // Step 3: Schedule remaining single periods
+  async scheduleSinglePeriods(constraints, subjects, weekStartDate, timeSlots, createdBy) {
+    console.log('📚 Scheduling remaining single periods...');
+    
+    // Create list of remaining periods to schedule
+    const remainingPeriods = [];
+    
+    for (const subject of subjects) {
+      const requirement = constraints.subjectRequirements.get(subject._id.toString());
+      const remaining = requirement.required - requirement.scheduled;
+      
+      for (let i = 0; i < remaining; i++) {
+        remainingPeriods.push({
+          subject: subject,
+          priority: this.getSubjectPriority(subject),
+          teacher: await this.findSpecializedTeacher(subject._id)
+        });
+      }
+    }
+    
+    // Sort by priority (high priority subjects first)
+    remainingPeriods.sort((a, b) => b.priority - a.priority);
+    
+    // Schedule each period
+    for (const period of remainingPeriods) {
+      if (!period.teacher) continue;
+      
+      const slot = await this.findBestSingleSlot(constraints, period.subject, period.teacher);
+      
+      if (slot) {
+        const lesson = await this.scheduleSingleLesson(
+          constraints,
+          period.subject,
+          period.teacher,
+          slot.dayIndex,
+          slot.period,
+          weekStartDate,
+          timeSlots,
+          createdBy
+        );
+        
+        const requirement = constraints.subjectRequirements.get(period.subject._id.toString());
+        requirement.scheduled++;
+        
+        console.log(`✅ Single period scheduled: ${period.subject.subjectName} on day ${slot.dayIndex + 1}, period ${slot.period}`);
+      } else {
+        constraints.violations.push({
+          type: 'CANNOT_SCHEDULE_PERIOD',
+          subject: period.subject.subjectName,
+          reason: 'No available time slot found'
+        });
+      }
+    }
+  }
+
+  // Find best slot for double period
+  async findBestDoubleSlot(constraints, subject, teacher) {
+    const morningSlots = [[1,2], [2,3], [3,4]]; // periods 1-2, 2-3, 3-4
+    const afternoonSlots = [[6,7], [7,8], [8,9]]; // periods 6-7, 7-8, 8-9
+    
+    // Priority subjects prefer morning slots
+    const slotsToCheck = constraints.prioritySubjects.includes(subject.subjectName) 
+      ? [...morningSlots, ...afternoonSlots]
+      : [...afternoonSlots, ...morningSlots];
+    
+    for (let dayIndex = 0; dayIndex < 6; dayIndex++) { // Monday to Saturday
+      for (const [period1, period2] of slotsToCheck) {
+        if (this.canScheduleDoubleSlot(constraints, teacher._id, dayIndex, period1, period2)) {
+          return { dayIndex, startPeriod: period1 };
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  // Check if double slot is available
+  canScheduleDoubleSlot(constraints, teacherId, dayIndex, period1, period2) {
+    // Check class availability
+    if (constraints.schedule[dayIndex][period1 - 1] !== null || 
+        constraints.schedule[dayIndex][period2 - 1] !== null) {
+      return false;
+    }
+    
+    // Check teacher availability
+    const teacherSchedule = constraints.teacherSchedules.get(teacherId.toString());
+    if (!teacherSchedule) return false;
+    
+    if (teacherSchedule.schedule[dayIndex][period1 - 1] || 
+        teacherSchedule.schedule[dayIndex][period2 - 1]) {
+      return false;
+    }
+    
+    // Check daily workload limit
+    if (teacherSchedule.workload.daily[dayIndex] + 2 > teacherSchedule.maxLessonsPerDay) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  // Schedule double lesson
+  async scheduleDoubleLesson(constraints, subject, teacher, dayIndex, startPeriod, weekStartDate, timeSlots, createdBy) {
+    const date = new Date(weekStartDate);
+    date.setDate(weekStartDate.getDate() + dayIndex);
+    
+    // Create first lesson
+    const lesson1 = await this.createLesson({
+      classId: constraints.classId,
+      dayIndex,
+      period: startPeriod,
+      type: 'regular',
+      subject,
+      teacher,
+      date,
+      timeSlot: timeSlots[startPeriod - 1],
+      createdBy,
+      isDoublePeriod: true,
+      doublePeriodPosition: 'first'
+    });
+    
+    // Create second lesson
+    const lesson2 = await this.createLesson({
+      classId: constraints.classId,
+      dayIndex,
+      period: startPeriod + 1,
+      type: 'regular',
+      subject,
+      teacher,
+      date,
+      timeSlot: timeSlots[startPeriod],
+      createdBy,
+      isDoublePeriod: true,
+      doublePeriodPosition: 'second'
+    });
+    
+    // Update schedule
+    constraints.schedule[dayIndex][startPeriod - 1] = lesson1;
+    constraints.schedule[dayIndex][startPeriod] = lesson2;
+    
+    // Book teacher slots
+    this.bookTeacherSlot(constraints, teacher._id, dayIndex, startPeriod);
+    this.bookTeacherSlot(constraints, teacher._id, dayIndex, startPeriod + 1);
+    
+    return [lesson1, lesson2];
+  }
+
+  // Create individual lesson object
+  async createLesson(data) {
+    const date = data.date.toISOString().slice(0, 10).replace(/-/g, '');
+    const classIdShort = data.classId.toString().slice(-6);
+    const timeSlotIdShort = data.timeSlot._id.toString().slice(-4);
+    const lessonId = `${classIdShort}_${date}_${timeSlotIdShort}`;
+    
+    const lessonData = {
+      lessonId,
+      class: data.classId,
+      academicYear: data.academicYearId,
+      timeSlot: data.timeSlot._id,
+      scheduledDate: data.date,
+      type: data.type,
+      status: 'scheduled',
+      createdBy: data.createdBy
+    };
+    
+    if (data.subject) {
+      lessonData.subject = data.subject._id;
+    }
+    
+    if (data.teacher) {
+      lessonData.teacher = data.teacher._id;
+    }
+    
+    if (data.fixedInfo) {
+      lessonData.fixedInfo = data.fixedInfo;
+    }
+    
+    if (data.isDoublePeriod) {
+      lessonData.notes = `Double period - ${data.doublePeriodPosition}`;
+    }
+    
+    const lesson = new Lesson(lessonData);
+    await lesson.save();
+    
+    return lesson;
+  }
+
+  // Book teacher time slot
+  bookTeacherSlot(constraints, teacherId, dayIndex, period) {
+    const teacherSchedule = constraints.teacherSchedules.get(teacherId.toString());
+    if (teacherSchedule) {
+      teacherSchedule.schedule[dayIndex][period - 1] = true;
+      teacherSchedule.workload.daily[dayIndex]++;
+      teacherSchedule.workload.weekly++;
+    }
+  }
+
+  // Get subject priority for scheduling order
+  getSubjectPriority(subject) {
+    const priorityMap = {
+      'Mathematics': 10,
+      'Literature': 9,
+      'English': 8,
+      'Physics': 7,
+      'Chemistry': 6,
+      'Biology': 5,
+      'History': 4,
+      'Geography': 3,
+      'Physical Education': 2
+    };
+    
+    return priorityMap[subject.subjectName] || 1;
+  }
+
+  // Find specialized teacher for subject
+  async findSpecializedTeacher(subjectId) {
+    const teacher = await User.findOne({
+      subject: subjectId,
+      role: { $in: ['teacher', 'homeroom_teacher'] },
+      active: true
+    });
+    
+    return teacher;
+  }
+
+  // Validate all constraints
+  validateAllConstraints(constraints) {
+    const violations = [];
+    
+    // Check teacher constraints
+    this.validateTeacherConstraints(constraints, violations);
+    
+    // Check subject requirements
+    this.validateSubjectRequirements(constraints, violations);
+    
+    // Check double period requirements
+    this.validateDoublePeriodRequirements(constraints, violations);
+    
+    return {
+      isValid: violations.length === 0,
+      violations: violations
+    };
+  }
+
+  // Validate teacher constraints
+  validateTeacherConstraints(constraints, violations) {
+    for (const [teacherId, teacherData] of constraints.teacherSchedules) {
+      // Check daily workload limits
+      teacherData.workload.daily.forEach((daily, dayIndex) => {
+        if (daily > teacherData.maxLessonsPerDay) {
+          violations.push({
+            type: 'TEACHER_DAILY_OVERLOAD',
+            teacherId,
+            day: dayIndex,
+            actual: daily,
+            limit: teacherData.maxLessonsPerDay
+          });
+        }
+      });
+      
+      // Check weekly workload limit
+      if (teacherData.workload.weekly > teacherData.maxLessonsPerWeek) {
+        violations.push({
+          type: 'TEACHER_WEEKLY_OVERLOAD',
+          teacherId,
+          actual: teacherData.workload.weekly,
+          limit: teacherData.maxLessonsPerWeek
+        });
+      }
+    }
+  }
+
+  // Print scheduling summary
+  printSchedulingSummary(constraints, validationResult) {
+    console.log(`\n📊 SCHEDULING SUMMARY`);
+    console.log('='.repeat(50));
+    console.log(`Total lessons scheduled: ${constraints.stats.totalLessons}`);
+    console.log(`Double periods created: ${constraints.stats.doublePeriods}`);
+    console.log(`Constraint violations: ${validationResult.violations.length}`);
+    
+    if (validationResult.violations.length > 0) {
+      console.log(`\n❌ VIOLATIONS:`);
+      validationResult.violations.forEach(v => {
+        console.log(`  - ${v.type}: ${v.reason || 'Details in violation object'}`);
+      });
+    } else {
+      console.log(`\n✅ All constraints satisfied!`);
+    }
+  }
+
+  // Helper method để đảm bảo time slots exist
+  async ensureTimeSlots() {
+    const existingSlots = await TimeSlot.countDocuments();
+    if (existingSlots === 0) {
+      console.log('⏰ Creating default time slots...');
+      await TimeSlot.createDefaultTimeSlots();
+    }
+  }
+
+  // Khởi tạo thời khóa biểu cho các lớp trong năm học (38 tuần, 7 ngày/tuần bao gồm chủ nhật) - LEGACY
+  async initializeSchedulesForAcademicYear(data, token) {
+    try {
+      const { academicYear, gradeLevel } = data;
+      
+      // Verify user permissions
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id);
+      
+      if (!user || !['admin', 'manager'].includes(user.role[0])) {
+        throw new Error('Unauthorized to create schedules');
+      }
+
+      console.log(`🚀 Starting schedule initialization for grade ${gradeLevel}, academic year ${academicYear}`);
+
+      // Lấy danh sách lớp theo khối
+      const classes = await Class.find({
+        className: new RegExp(`^${gradeLevel}`),
+        academicYear,
+        active: true
+      }).populate('homeroomTeacher');
+
+      if (!classes || classes.length === 0) {
+        throw new Error(`No classes found for grade ${gradeLevel} in academic year ${academicYear}`);
+      }
+
+      console.log(`📚 Found ${classes.length} classes: ${classes.map(c => c.className).join(', ')}`);
+
+      const results = [];
+      let createdSchedulesCount = 0;
+
       // Tạo thời khóa biểu cho từng lớp
       for (const classInfo of classes) {
         try {
-          console.log(`\n🚀 Processing class: ${classInfo.className}`);
+          console.log(`\n🎯 Processing class: ${classInfo.className}`);
           
           // Kiểm tra xem lớp đã có thời khóa biểu active chưa
           const existingSchedule = await Schedule.findOne({
@@ -68,77 +882,68 @@ class ScheduleService {
           });
 
           if (existingSchedule) {
-            console.log(`⏭️ Skipping ${classInfo.className} - Schedule already exists`);
+            console.log(`⚠️ Schedule already exists for ${classInfo.className}, skipping...`);
             results.push({
-              class: classInfo.className,
+              classId: classInfo._id,
+              className: classInfo.className,
               status: 'skipped',
               message: 'Schedule already exists'
             });
             continue;
           }
 
-          // Sử dụng AdvancedSchedulerService để tạo thời khóa biểu cho lớp
+          // Tạo thời khóa biểu tối ưu
           const schedule = await this.advancedScheduler.createOptimizedSchedule(
-            classInfo._id, 
+            classInfo._id,
             academicYear
           );
 
-          // Cập nhật thông tin bổ sung
-          schedule.semester = semester;
-          schedule.createdBy = user._id;
-          schedule.status = 'active';
+          if (schedule) {
+            schedule.status = 'active';
+            await schedule.save({ validateBeforeSave: false });
+
+            console.log(`✅ Successfully created schedule for ${classInfo.className}`);
+            
+            results.push({
+              classId: classInfo._id,
+              className: classInfo.className,
+              status: 'created',
+              scheduleId: schedule._id,
+              optimizationScore: this.calculateOptimizationScore(schedule)
+            });
+            
+            createdSchedulesCount++;
+          }
+
+        } catch (classError) {
+          console.error(`❌ Failed to create schedule for ${classInfo.className}:`, classError.message);
           
-          // Lưu schedule cho lớp
-          await schedule.save();
-
-          console.log(`✅ Created class schedule for ${classInfo.className}`);
-
-          // 🚀 TẠO SCHEDULE CHO GIÁO VIÊN
-          const teacherScheduleResults = await this.createTeacherSchedulesFromClassSchedule(
-            schedule, 
-            classInfo, 
-            user._id, 
-            teacherSchedulesCreated
-          );
-
           results.push({
-            class: classInfo.className,
-            status: 'created',
-            scheduleId: schedule._id,
-            totalPeriods: schedule.getTotalScheduledPeriods ? schedule.getTotalScheduledPeriods() : 0,
-            optimizationScore: schedule.statistics?.optimizationScore || 0,
-            teacherSchedules: teacherScheduleResults
-          });
-
-        } catch (error) {
-          console.log(`❌ Error creating schedule for ${classInfo.className}: ${error.message}`);
-          results.push({
-            class: classInfo.className,
-            status: 'error',
-            message: error.message
+            classId: classInfo._id,
+            className: classInfo.className,
+            status: 'failed',
+            error: classError.message
           });
         }
       }
 
-      const successCount = results.filter(r => r.status === 'created').length;
-      const skipCount = results.filter(r => r.status === 'skipped').length;
-      const errorCount = results.filter(r => r.status === 'error').length;
-      const totalTeacherSchedules = teacherSchedulesCreated.size;
+      const summary = {
+        totalClasses: classes.length,
+        createdSchedules: createdSchedulesCount,
+        skippedSchedules: results.filter(r => r.status === 'skipped').length,
+        failedSchedules: results.filter(r => r.status === 'failed').length,
+        successRate: ((createdSchedulesCount / classes.length) * 100).toFixed(2) + '%'
+      };
 
-      console.log(`\n📊 Summary: ${successCount} created, ${skipCount} skipped, ${errorCount} errors`);
-      console.log(`👨‍🏫 Teacher schedules created/updated: ${totalTeacherSchedules}`);
+      console.log('\n📊 Schedule Creation Summary:');
+      console.log(`- Total Classes: ${summary.totalClasses}`);
+      console.log(`- Created: ${summary.createdSchedules}`);
+      console.log(`- Skipped: ${summary.skippedSchedules}`);
+      console.log(`- Failed: ${summary.failedSchedules}`);
+      console.log(`- Success Rate: ${summary.successRate}`);
 
       return {
-        academicYear,
-        gradeLevel: gradeLevel || 'all',
-        semester,
-        totalClasses: classes.length,
-        summary: {
-          created: successCount,
-          skipped: skipCount,
-          errors: errorCount,
-          teacherSchedules: totalTeacherSchedules
-        },
+        summary,
         results
       };
 
@@ -147,853 +952,312 @@ class ScheduleService {
     }
   }
 
-  // Tạo schedule cho giáo viên từ class schedule
-  async createTeacherSchedulesFromClassSchedule(classSchedule, classInfo, createdBy, teacherSchedulesCreated) {
-    const teacherResults = [];
-    const teachersInClass = new Set();
-
+  // Tính điểm tối ưu hóa cho thời khóa biểu (updated for Period model)
+  async calculateOptimizationScore(schedule) {
     try {
-      // Thu thập tất cả giáo viên từ class schedule
-      classSchedule.weeks.forEach(week => {
-        week.days.forEach(day => {
-          day.periods.forEach(period => {
-            if (period.teacher && period.periodType !== 'empty') {
-              teachersInClass.add(period.teacher.toString());
-            }
-          });
-        });
+      console.log(`📊 Calculating optimization score for schedule ${schedule._id}...`);
+      
+      const totalRegularPeriods = await Period.countDocuments({
+        schedule: schedule._id,
+        periodType: 'regular'
       });
-
-      console.log(`👨‍🏫 Found ${teachersInClass.size} teachers in ${classInfo.className}`);
-
-      // Tạo/cập nhật schedule cho từng giáo viên
-      for (const teacherId of teachersInClass) {
-        try {
-          let teacherSchedule;
-          
-          // Kiểm tra xem giáo viên đã có schedule chưa
-          const existingTeacherSchedule = await TeacherSchedule.findOne({
-            teacher: teacherId,
-            academicYear: classSchedule.academicYear,
-            status: 'active'
-          });
-
-          if (existingTeacherSchedule) {
-            teacherSchedule = existingTeacherSchedule;
-            console.log(`🔄 Updating existing teacher schedule for teacher ${teacherId}`);
-          } else {
-            // Tạo template mới cho giáo viên
-            teacherSchedule = TeacherSchedule.createTemplate(
-              teacherId,
-              classSchedule.academicYear,
-              createdBy
-            );
-            teacherSchedule.semester = classSchedule.semester;
-            teacherSchedule.status = 'active';
-            console.log(`🆕 Creating new teacher schedule for teacher ${teacherId}`);
-          }
-
-          // Copy periods từ class schedule sang teacher schedule
-          await this.copyPeriodsToTeacherSchedule(classSchedule, teacherSchedule, teacherId, classInfo);
-
-          // Lưu teacher schedule
-          await teacherSchedule.save({ validateBeforeSave: false });
-
-          teacherSchedulesCreated.set(teacherId, teacherSchedule._id);
-          teacherResults.push({
-            teacherId: teacherId,
-            scheduleId: teacherSchedule._id,
-            status: existingTeacherSchedule ? 'updated' : 'created'
-          });
-
-        } catch (teacherError) {
-          console.error(`❌ Error creating teacher schedule for ${teacherId}: ${teacherError.message}`);
-          teacherResults.push({
-            teacherId: teacherId,
-            status: 'error',
-            message: teacherError.message
-          });
-        }
+      
+      const assignedPeriods = await Period.countDocuments({
+        schedule: schedule._id,
+        periodType: 'regular',
+        subject: { $exists: true, $ne: null },
+        teacher: { $exists: true, $ne: null }
+      });
+      
+      // Check for valid periodId format
+      const validPeriodIds = await Period.countDocuments({
+        schedule: schedule._id,
+        periodId: { $regex: /^[a-f0-9]{6}_week\d{2}_day\d_period\d{2}$/ }
+      });
+      
+      const totalPeriods = await Period.countDocuments({
+        schedule: schedule._id
+      });
+      
+      // Tính phần trăm phân công
+      const assignmentRate = totalRegularPeriods > 0 ? (assignedPeriods / totalRegularPeriods) : 0;
+      // Tính phần trăm periodId hợp lệ
+      const periodIdValidityRate = totalPeriods > 0 ? (validPeriodIds / totalPeriods) : 0;
+      
+      // Tổng điểm dựa trên cả assignment và periodId validity
+      const score = Math.round((assignmentRate * 0.7 + periodIdValidityRate * 0.3) * 100);
+      
+      console.log(`📈 Optimization Score: ${score}% (${assignedPeriods}/${totalRegularPeriods} assigned, ${validPeriodIds}/${totalPeriods} valid periodIds)`);
+      
+      // Log sample periodIds for verification
+      const samplePeriods = await Period.find({
+        schedule: schedule._id,
+        periodId: { $exists: true, $ne: null }
+      }).select('periodId weekNumber dayOfWeek periodNumber').limit(3).lean();
+      
+      if (samplePeriods.length > 0) {
+        console.log(`🆔 Sample periodIds: ${samplePeriods.map(p => p.periodId).join(', ')}`);
       }
-
-      return teacherResults;
-
+      
+      return Math.max(0, Math.min(100, score));
     } catch (error) {
-      console.error(`❌ Error creating teacher schedules: ${error.message}`);
-      return [];
+      console.error('❌ Error calculating optimization score:', error.message);
+      return 0;
     }
   }
-
-  // Copy periods từ class schedule sang teacher schedule
-  async copyPeriodsToTeacherSchedule(classSchedule, teacherSchedule, teacherId, classInfo) {
-    classSchedule.weeks.forEach((classWeek, weekIndex) => {
-      const teacherWeek = teacherSchedule.weeks[weekIndex];
-      if (!teacherWeek) return;
-
-      classWeek.days.forEach((classDay, dayIndex) => {
-        const teacherDay = teacherWeek.days[dayIndex];
-        if (!teacherDay) return;
-
-        // Tìm tất cả periods của giáo viên này trong ngày
-        const teacherPeriods = classDay.periods.filter(period => 
-          period.teacher && period.teacher.toString() === teacherId.toString()
-        );
-
-        // Thêm periods vào teacher schedule
-        teacherPeriods.forEach(period => {
-          const teacherPeriod = {
-            _id: new mongoose.Types.ObjectId(),
-            periodNumber: period.periodNumber,
-            class: classInfo._id,
-            className: classInfo.className,
-            subject: period.subject,
-            session: period.session,
-            timeStart: period.timeStart,
-            timeEnd: period.timeEnd,
-            periodType: period.periodType,
-            status: 'scheduled', // Teacher schedule uses different status
-            notes: period.notes,
-            makeupInfo: period.makeupInfo,
-            extracurricularInfo: period.extracurricularInfo
-          };
-
-          // periodId sẽ được tạo tự động trong pre-save hook
-          teacherDay.periods.push(teacherPeriod);
-        });
-      });
-    });
-
-    // Cập nhật statistics
-    teacherSchedule.statistics.totalPeriods = teacherSchedule.getTotalScheduledPeriods();
-    
-    // Cập nhật classes info
-    const existingClassIndex = teacherSchedule.classes.findIndex(
-      cls => cls.class.toString() === classInfo._id.toString()
-    );
-    
-    if (existingClassIndex === -1) {
-      teacherSchedule.classes.push({
-        class: classInfo._id,
-        className: classInfo.className,
-        subject: null, // Sẽ được cập nhật sau
-        periodsPerWeek: 0 // Sẽ được tính toán
-      });
-    }
-  }
-
-
 
   // Tạo thời khóa biểu cho một lớp cụ thể
-  async createScheduleForClass(classId, academicYear, semester, subjects, teachers, createdBy) {
+  async initializeScheduleForClass(data, token) {
     try {
-      console.log(`🚀 Creating optimized schedule for class ${classId}...`);
+      const { classId, academicYear } = data;
       
-      // Sử dụng thuật toán tối ưu hóa mới
-      const optimizedSchedule = await this.advancedScheduler.createOptimizedSchedule(
-        classId, 
-        academicYear
-      );
+      // Verify permissions
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id);
       
-      // Cập nhật thông tin bổ sung
-      optimizedSchedule.semester = semester;
-      optimizedSchedule.createdBy = createdBy;
-      optimizedSchedule.status = 'active';
-      
-      // Lưu vào database
-              await optimizedSchedule.save({ validateBeforeSave: false });
-      
-      console.log(`✅ Optimized schedule created successfully with score: ${optimizedSchedule.statistics?.optimizationScore || 0}`);
-      
-      return optimizedSchedule;
-      
-    } catch (error) {
-      console.log(`⚠️ Advanced scheduling failed, falling back to basic algorithm: ${error.message}`);
-      
-      // Get class info to obtain homeroom teacher ID
-      const classInfo = await Class.findById(classId).populate('homeroomTeacher');
-      const homeroomTeacherId = classInfo?.homeroomTeacher?._id || null;
-      
-      // Fallback to basic algorithm
-      const schedule = Schedule.createTemplate(classId, academicYear, createdBy, homeroomTeacherId);
-      schedule.semester = semester;
-
-      // Phân bố môn học theo tuần (33 tiết)
-      const weeklyDistribution = this.distributeSubjectsForWeek(subjects, 33);
-      
-      // Sắp xếp thời khóa biểu với logic phân công giáo viên đúng
-      await this.arrangeScheduleWithTeacherAssignment(schedule, weeklyDistribution, classId);
-
-      // Lưu vào database
-      await schedule.save();
-      
-      return schedule;
-    }
-  }
-
-  // Phân bố môn học trong tuần
-  distributeSubjectsForWeek(subjects, totalPeriods) {
-    const distribution = [];
-    let remainingPeriods = totalPeriods;
-
-    // Sắp xếp môn học theo số tiết/tuần giảm dần
-    const sortedSubjects = subjects.sort((a, b) => b.weeklyHours - a.weeklyHours);
-
-    for (const subject of sortedSubjects) {
-      const periodsForSubject = Math.min(subject.weeklyHours, remainingPeriods);
-      
-      for (let i = 0; i < periodsForSubject; i++) {
-        distribution.push({
-          subject: subject._id,
-          subjectName: subject.subjectName,
-          subjectCode: subject.subjectCode,
-          department: subject.department
-        });
+      if (!user || !['admin', 'manager', 'teacher'].includes(user.role[0])) {
+        throw new Error('Unauthorized to create schedule');
       }
+
+      const schedule = await this.advancedScheduler.createOptimizedSchedule(classId, academicYear);
       
-      remainingPeriods -= periodsForSubject;
-      if (remainingPeriods <= 0) break;
-    }
+      if (schedule) {
+        schedule.status = 'active';
+        await schedule.save({ validateBeforeSave: false });
+      }
 
-    // Nếu còn tiết trống, phân bố thêm cho các môn chính
-    const coreSubjects = subjects.filter(s => s.category === 'core');
-    let index = 0;
-    while (remainingPeriods > 0 && coreSubjects.length > 0) {
-      const subject = coreSubjects[index % coreSubjects.length];
-      distribution.push({
-        subject: subject._id,
-        subjectName: subject.subjectName,
-        subjectCode: subject.subjectCode,
-        department: subject.department
-      });
-      remainingPeriods--;
-      index++;
-    }
-
-    return distribution;
-  }
-
-  // Sắp xếp thời khóa biểu với logic phân công giáo viên đúng
-  async arrangeScheduleWithTeacherAssignment(schedule, distribution, teacherAssignmentMap) {
-    try {
-      // Lấy danh sách môn học từ distribution
-      const uniqueSubjects = [];
-      const subjectMap = new Map();
-      
-      distribution.forEach(item => {
-        if (!subjectMap.has(item.subject.toString())) {
-          uniqueSubjects.push({
-            _id: item.subject,
-            subjectName: item.subjectName,
-            subjectCode: item.subjectCode,
-            department: item.department
-          });
-          subjectMap.set(item.subject.toString(), true);
-        }
-      });
-
-      // Tạo bản đồ phân công giáo viên
-      const teacherAssignmentMap = await this.teacherAssignment.createTeacherAssignmentMap(
-        classId, 
-        uniqueSubjects
-      );
-
-      // Sắp xếp thời khóa biểu với giáo viên đã phân công
-      this.arrangeScheduleWithAssignedTeachers(schedule, distribution, teacherAssignmentMap);
-
-      return teacherAssignmentMap;
+      return {
+        scheduleId: schedule._id,
+        optimizationScore: this.calculateOptimizationScore(schedule),
+        message: 'Schedule created successfully'
+      };
 
     } catch (error) {
-      console.log(`⚠️ Teacher assignment failed: ${error.message}`);
-      // Fallback to old method
-      this.arrangeSchedule(schedule, distribution, []);
-      return new Map();
+      throw new Error(`Failed to create schedule for class: ${error.message}`);
     }
   }
 
-  // Sắp xếp thời khóa biểu với giáo viên đã được phân công
-  arrangeScheduleWithAssignedTeachers(schedule, distribution, teacherAssignmentMap) {
-    const timeSlots = {
-      morning: [
-        { period: 1, start: '07:00', end: '07:45' },
-        { period: 2, start: '07:50', end: '08:35' },
-        { period: 3, start: '08:40', end: '09:25' },
-        { period: 4, start: '09:45', end: '10:30' },
-        { period: 5, start: '10:35', end: '11:20' }
-      ],
-      afternoon: [
-        { period: 6, start: '13:30', end: '14:15' },
-        { period: 7, start: '14:20', end: '15:05' }
-      ]
-    };
-
-    // Tạo pool các môn học có sẵn
-    const subjectPool = [...distribution];
-    
-    // Phân bố cho 6 ngày trong tuần (Thứ 2 - Thứ 7)
-    for (let dayIndex = 0; dayIndex < schedule.schedule.length; dayIndex++) {
-      const day = schedule.schedule[dayIndex];
-      const dailySubjects = []; // Track subjects used in this day
-      
-      // Combine morning and afternoon slots for better distribution
-      const allSlots = [
-        ...timeSlots.morning.map(slot => ({...slot, session: 'morning'})),
-        ...timeSlots.afternoon.map(slot => ({...slot, session: 'afternoon'}))
-      ];
-
-      // Phân bố các tiết trong ngày với ràng buộc
-      for (let slotIndex = 0; slotIndex < allSlots.length && subjectPool.length > 0; slotIndex++) {
-        const slot = allSlots[slotIndex];
-        
-        // Tìm môn học phù hợp cho tiết này
-        const selectedSubject = this.selectSubjectForPeriodWithAssignment(
-          subjectPool, 
-          dailySubjects, 
-          slotIndex, 
-          teacherAssignmentMap, 
-          day.dayOfWeek, 
-          slot.period
-        );
-        
-        if (selectedSubject) {
-          // Thêm tiết học vào lịch
-          day.periods.push({
-            periodNumber: slot.period,
-            subject: selectedSubject.subject,
-            teacher: selectedSubject.teacher,
-            session: slot.session,
-            timeStart: slot.start,
-            timeEnd: slot.end
-          });
-          
-          // Track môn học đã sử dụng trong ngày
-          dailySubjects.push({
-            subject: selectedSubject.subject,
-            periodIndex: slotIndex,
-            subjectName: selectedSubject.subjectName
-          });
-          
-          // Remove from pool
-          const poolIndex = subjectPool.findIndex(s => s.subject.toString() === selectedSubject.subject.toString());
-          if (poolIndex !== -1) {
-            subjectPool.splice(poolIndex, 1);
-          }
-        }
-      }
-    }
-
-    // Nếu còn thừa tiết chưa phân bố, cố gắng phân bố lại
-    if (subjectPool.length > 0) {
-      console.log(`⚠️ Warning: ${subjectPool.length} periods could not be scheduled due to constraints`);
-      this.distributeRemainingPeriodsWithAssignment(schedule, subjectPool, teacherAssignmentMap, timeSlots);
-    }
-  }
-
-  // Chọn môn học với giáo viên đã được phân công
-  selectSubjectForPeriodWithAssignment(subjectPool, dailySubjects, currentPeriodIndex, teacherAssignmentMap, dayOfWeek, periodNumber) {
-    // Tìm các môn đã có trong ngày và số lần xuất hiện
-    const subjectCount = {};
-    dailySubjects.forEach(item => {
-      const subjectId = item.subject.toString();
-      subjectCount[subjectId] = (subjectCount[subjectId] || 0) + 1;
-    });
-
-    // Tìm môn học của tiết trước đó (nếu có)
-    const previousSubject = currentPeriodIndex > 0 ? dailySubjects[currentPeriodIndex - 1] : null;
-    const twoPeriodsBefore = currentPeriodIndex > 1 ? dailySubjects[currentPeriodIndex - 2] : null;
-
-    // Filter subjects based on constraints
-    const validSubjects = subjectPool.filter(subjectInfo => {
-      const subjectId = subjectInfo.subject.toString();
-      
-      // Ràng buộc 1: Mỗi môn tối đa 2 tiết/ngày
-      if (subjectCount[subjectId] >= 2) {
-        return false;
-      }
-      
-      // Ràng buộc 2: Không được có 3 tiết liên tiếp cùng môn
-      if (previousSubject && twoPeriodsBefore) {
-        if (previousSubject.subject.toString() === subjectId && 
-            twoPeriodsBefore.subject.toString() === subjectId) {
-          return false;
-        }
-      }
-      
-      // Ràng buộc 3: Nếu môn này đã có 1 tiết và tiết trước cũng là môn này thì skip
-      if (previousSubject && previousSubject.subject.toString() === subjectId) {
-        if (subjectCount[subjectId] >= 1) {
-          return false;
-        }
-      }
-      
-      return true;
-    });
-
-    // Ưu tiên các môn chưa được sử dụng trong ngày
-    const unusedSubjects = validSubjects.filter(subjectInfo => {
-      const subjectId = subjectInfo.subject.toString();
-      return !subjectCount[subjectId];
-    });
-
-    const prioritySubjects = unusedSubjects.length > 0 ? unusedSubjects : validSubjects;
-    
-    // Tìm môn học có giáo viên đã được phân công
-    for (const subjectInfo of prioritySubjects) {
-      const assignedTeacher = this.teacherAssignment.getAssignedTeacher(teacherAssignmentMap, subjectInfo.subject);
-      if (assignedTeacher) {
-        return {
-          subject: subjectInfo.subject,
-          teacher: assignedTeacher._id,
-          subjectName: subjectInfo.subjectName,
-          subjectCode: subjectInfo.subjectCode
-        };
-      }
-    }
-    
-    return null;
-  }
-
-  // Phân bố các tiết còn lại với giáo viên đã phân công
-  distributeRemainingPeriodsWithAssignment(schedule, remainingPeriods, teacherAssignmentMap, timeSlots) {
-    for (const subjectInfo of remainingPeriods) {
-      let placed = false;
-      
-      for (let dayIndex = 0; dayIndex < schedule.schedule.length && !placed; dayIndex++) {
-        const day = schedule.schedule[dayIndex];
-        const maxPeriodsPerDay = 7; // 5 sáng + 2 chiều
-        
-        if (day.periods.length < maxPeriodsPerDay) {
-          // Tìm slot trống
-          const usedPeriods = day.periods.map(p => p.periodNumber);
-          const allPeriods = [1, 2, 3, 4, 5, 6, 7];
-          const availablePeriods = allPeriods.filter(p => !usedPeriods.includes(p));
-          
-          if (availablePeriods.length > 0) {
-            const periodNumber = availablePeriods[0];
-            const assignedTeacher = this.teacherAssignment.getAssignedTeacher(teacherAssignmentMap, subjectInfo.subject);
-            
-            if (assignedTeacher) {
-              const slot = this.getTimeSlotByPeriod(periodNumber, timeSlots);
-              if (slot) {
-                day.periods.push({
-                  periodNumber: periodNumber,
-                  subject: subjectInfo.subject,
-                  teacher: assignedTeacher._id,
-                  session: slot.session,
-                  timeStart: slot.start,
-                  timeEnd: slot.end
-                });
-                placed = true;
-              }
-            }
-          }
-        }
-      }
-      
-      if (!placed) {
-        console.log(`⚠️ Could not place subject: ${subjectInfo.subjectName}`);
-      }
-    }
-  }
-
-  // Sắp xếp thời khóa biểu với ràng buộc: mỗi môn tối đa 2 tiết liền kề/ngày (phương thức cũ)
-  arrangeSchedule(schedule, distribution, teachers) {
-    const timeSlots = {
-      morning: [
-        { period: 1, start: '07:00', end: '07:45' },
-        { period: 2, start: '07:50', end: '08:35' },
-        { period: 3, start: '08:40', end: '09:25' },
-        { period: 4, start: '09:45', end: '10:30' },
-        { period: 5, start: '10:35', end: '11:20' }
-      ],
-      afternoon: [
-        { period: 6, start: '13:30', end: '14:15' },
-        { period: 7, start: '14:20', end: '15:05' }
-      ]
-    };
-
-    // Tạo pool các môn học có sẵn
-    const subjectPool = [...distribution];
-    
-    // Phân bố cho 6 ngày trong tuần (Thứ 2 - Thứ 7)
-    for (let dayIndex = 0; dayIndex < schedule.schedule.length; dayIndex++) {
-      const day = schedule.schedule[dayIndex];
-      const dailySubjects = []; // Track subjects used in this day
-      
-      // Combine morning and afternoon slots for better distribution
-      const allSlots = [
-        ...timeSlots.morning.map(slot => ({...slot, session: 'morning'})),
-        ...timeSlots.afternoon.map(slot => ({...slot, session: 'afternoon'}))
-      ];
-
-      // Phân bố các tiết trong ngày với ràng buộc
-      for (let slotIndex = 0; slotIndex < allSlots.length && subjectPool.length > 0; slotIndex++) {
-        const slot = allSlots[slotIndex];
-        
-        // Tìm môn học phù hợp cho tiết này
-        const selectedSubject = this.selectSubjectForPeriod(
-          subjectPool, 
-          dailySubjects, 
-          slotIndex, 
-          teachers, 
-          day.dayOfWeek, 
-          slot.period
-        );
-        
-        if (selectedSubject) {
-          // Thêm tiết học vào lịch
-          day.periods.push({
-            periodNumber: slot.period,
-            subject: selectedSubject.subject,
-            teacher: selectedSubject.teacher,
-            session: slot.session,
-            timeStart: slot.start,
-            timeEnd: slot.end
-          });
-          
-          // Track môn học đã sử dụng trong ngày
-          dailySubjects.push({
-            subject: selectedSubject.subject,
-            periodIndex: slotIndex,
-            subjectName: selectedSubject.subjectName
-          });
-          
-          // Remove from pool
-          const poolIndex = subjectPool.findIndex(s => s.subject.toString() === selectedSubject.subject.toString());
-          if (poolIndex !== -1) {
-            subjectPool.splice(poolIndex, 1);
-          }
-        }
-      }
-    }
-
-    // Nếu còn thừa tiết chưa phân bố, cố gắng phân bố lại
-    if (subjectPool.length > 0) {
-      console.log(`⚠️ Warning: ${subjectPool.length} periods could not be scheduled due to constraints`);
-      this.distributeRemainingPeriods(schedule, subjectPool, teachers, timeSlots);
-    }
-  }
-
-  // Chọn môn học phù hợp cho tiết học với ràng buộc
-  selectSubjectForPeriod(subjectPool, dailySubjects, currentPeriodIndex, teachers, dayOfWeek, periodNumber) {
-    // Tìm các môn đã có trong ngày và số lần xuất hiện
-    const subjectCount = {};
-    dailySubjects.forEach(item => {
-      const subjectId = item.subject.toString();
-      subjectCount[subjectId] = (subjectCount[subjectId] || 0) + 1;
-    });
-
-    // Tìm môn học của tiết trước đó (nếu có)
-    const previousSubject = currentPeriodIndex > 0 ? dailySubjects[currentPeriodIndex - 1] : null;
-    const twoPeriodsBefore = currentPeriodIndex > 1 ? dailySubjects[currentPeriodIndex - 2] : null;
-
-    // Filter subjects based on constraints
-    const validSubjects = subjectPool.filter(subjectInfo => {
-      const subjectId = subjectInfo.subject.toString();
-      
-      // Ràng buộc 1: Mỗi môn tối đa 2 tiết/ngày
-      if (subjectCount[subjectId] >= 2) {
-        return false;
-      }
-      
-      // Ràng buộc 2: Không được có 3 tiết liên tiếp cùng môn
-      if (previousSubject && twoPeriodsBefore) {
-        if (previousSubject.subject.toString() === subjectId && 
-            twoPeriodsBefore.subject.toString() === subjectId) {
-          return false;
-        }
-      }
-      
-      // Ràng buộc 3: Nếu môn này đã có 1 tiết và tiết trước cũng là môn này thì skip
-      // (trừ khi đây là tiết thứ 2 liên tiếp được phép)
-      if (previousSubject && previousSubject.subject.toString() === subjectId) {
-        // Chỉ cho phép nếu môn này mới có 1 tiết trong ngày
-        if (subjectCount[subjectId] >= 1) {
-          return false;
-        }
-      }
-      
-      return true;
-    });
-
-    // Ưu tiên các môn chưa được sử dụng trong ngày
-    const unusedSubjects = validSubjects.filter(subjectInfo => {
-      const subjectId = subjectInfo.subject.toString();
-      return !subjectCount[subjectId];
-    });
-
-    const prioritySubjects = unusedSubjects.length > 0 ? unusedSubjects : validSubjects;
-    
-    // Tìm giáo viên có sẵn cho các môn học ưu tiên
-    for (const subjectInfo of prioritySubjects) {
-      const teacher = this.findAvailableTeacher(teachers, subjectInfo.subject, dayOfWeek, periodNumber);
-      if (teacher) {
-        return {
-          subject: subjectInfo.subject,
-          teacher: teacher._id,
-          subjectName: subjectInfo.subjectName,
-          subjectCode: subjectInfo.subjectCode
-        };
-      }
-    }
-    
-    return null;
-  }
-
-  // Phân bố các tiết còn lại nếu có
-  distributeRemainingPeriods(schedule, remainingPeriods, teachers, timeSlots) {
-    // Thử phân bố các tiết còn lại vào các slot trống
-    for (const subjectInfo of remainingPeriods) {
-      let placed = false;
-      
-      for (let dayIndex = 0; dayIndex < schedule.schedule.length && !placed; dayIndex++) {
-        const day = schedule.schedule[dayIndex];
-        const maxPeriodsPerDay = 7; // 5 sáng + 2 chiều
-        
-        if (day.periods.length < maxPeriodsPerDay) {
-          // Tìm slot trống
-          const usedPeriods = day.periods.map(p => p.periodNumber);
-          const allPeriods = [1, 2, 3, 4, 5, 6, 7];
-          const availablePeriods = allPeriods.filter(p => !usedPeriods.includes(p));
-          
-          if (availablePeriods.length > 0) {
-            const periodNumber = availablePeriods[0];
-            const teacher = this.findAvailableTeacher(teachers, subjectInfo.subject, day.dayOfWeek, periodNumber);
-            
-            if (teacher) {
-              const slot = this.getTimeSlotByPeriod(periodNumber, timeSlots);
-              if (slot) {
-                day.periods.push({
-                  periodNumber: periodNumber,
-                  subject: subjectInfo.subject,
-                  teacher: teacher._id,
-                  session: slot.session,
-                  timeStart: slot.start,
-                  timeEnd: slot.end
-                });
-                placed = true;
-              }
-            }
-          }
-        }
-      }
-      
-      if (!placed) {
-        console.log(`⚠️ Could not place subject: ${subjectInfo.subjectName}`);
-      }
-    }
-  }
-
-  // Helper: Lấy time slot theo period number
-  getTimeSlotByPeriod(periodNumber, timeSlots) {
-    if (periodNumber >= 1 && periodNumber <= 5) {
-      const slot = timeSlots.morning[periodNumber - 1];
-      return { ...slot, session: 'morning' };
-    } else if (periodNumber >= 6 && periodNumber <= 7) {
-      const slot = timeSlots.afternoon[periodNumber - 6];
-      return { ...slot, session: 'afternoon' };
-    }
-    return null;
-  }
-
-  // Tìm giáo viên có thể dạy môn học tại thời điểm cụ thể
-  findAvailableTeacher(teachers, subjectId, dayOfWeek, periodNumber) {
-    // Tìm giáo viên có thể dạy môn này
-    const availableTeachers = teachers.filter(teacher => 
-      teacher.subjects.some(subject => subject._id.toString() === subjectId.toString())
-    );
-
-    if (availableTeachers.length === 0) {
-      return null; // Không có giáo viên có thể dạy môn này
-    }
-
-    // Logic đơn giản: trả về giáo viên đầu tiên
-    // Trong thực tế, cần kiểm tra xung đột lịch dạy
-    return availableTeachers[0];
-  }
-
-  // Lấy danh sách lớp theo khối và năm học
-  async getClassesByGradeAndYear(academicYear, gradeLevel) {
-    // Extract grade từ className (ví dụ: "12A1" -> grade 12)
-    const gradePattern = new RegExp(`^${gradeLevel}[A-Z]`);
-    
-    return await Class.find({
-      academicYear,
-      className: { $regex: gradePattern },
-      active: true
-    }).populate('homeroomTeacher', 'name email');
-  }
-
-  // Lấy thời khóa biểu của một lớp
+  // Lấy thời khóa biểu của lớp theo tuần (updated for Period model)
   async getClassSchedule(className, academicYear, weekNumber = 1) {
     try {
-      // Tìm lớp theo tên
-      const classInfo = await Class.findOne({
-        className: className.toUpperCase(),
-        academicYear,
-        active: true
-      });
-
+      const classInfo = await Class.findOne({ className, academicYear });
       if (!classInfo) {
         throw new Error(`Class ${className} not found in academic year ${academicYear}`);
       }
 
-      // Lấy thời khóa biểu
       const schedule = await Schedule.findOne({
         class: classInfo._id,
         academicYear,
-        weekNumber,
         status: 'active'
       })
-      .populate('class', 'className homeroomTeacher')
-      .populate('schedule.periods.subject', 'subjectName subjectCode department')
-      .populate('schedule.periods.teacher', 'name email')
-      .populate('createdBy', 'name email');
+      .populate('class', 'className academicYear')
+      .lean();
 
       if (!schedule) {
-        throw new Error(`No active schedule found for class ${className} in week ${weekNumber} of academic year ${academicYear}`);
+        throw new Error(`No active schedule found for class ${className}`);
       }
 
+      // Get the specific week
+      const week = schedule.weeks.find(w => w.weekNumber === weekNumber);
+      if (!week) {
+        throw new Error(`Week ${weekNumber} not found in schedule`);
+      }
+
+      // Populate periods for the week
+      const periodIds = [];
+      week.days.forEach(day => {
+        periodIds.push(...day.periods);
+      });
+
+      const periods = await Period.find({
+        _id: { $in: periodIds }
+      })
+      .populate('subject', 'subjectName subjectCode')
+      .populate('teacher', 'name email')
+      .lean();
+
+      // Create period lookup map
+      const periodMap = {};
+      periods.forEach(period => {
+        periodMap[period._id.toString()] = period;
+      });
+
+      // Populate periods in days
+      week.days.forEach(day => {
+        day.periods = day.periods.map(periodId => periodMap[periodId.toString()]).filter(Boolean);
+      });
+
       return {
-        class: {
-          id: classInfo._id,
-          name: classInfo.className,
-          academicYear: classInfo.academicYear
-        },
         schedule: {
-          id: schedule._id,
-          weekNumber: schedule.weekNumber,
-          semester: schedule.semester,
-          totalPeriods: schedule.getTotalScheduledPeriods(),
+          _id: schedule._id,
+          class: schedule.class,
+          academicYear: schedule.academicYear,
           status: schedule.status,
-          dailySchedule: schedule.schedule.map(day => ({
-            dayOfWeek: day.dayOfWeek,
-            dayName: day.dayName,
-            periods: day.periods.map(period => ({
-              periodNumber: period.periodNumber,
-              session: period.session,
-              timeStart: period.timeStart,
-              timeEnd: period.timeEnd,
-              subject: {
-                id: period.subject._id,
-                name: period.subject.subjectName,
-                code: period.subject.subjectCode,
-                department: period.subject.department
-              },
-              teacher: {
-                id: period.teacher._id,
-                name: period.teacher.name,
-                email: period.teacher.email
-              }
-            }))
-          })),
-          createdBy: schedule.createdBy,
-          createdAt: schedule.createdAt,
-          updatedAt: schedule.updatedAt
-        }
+          totalWeeks: schedule.totalWeeks
+        },
+        week: week
       };
 
     } catch (error) {
-      throw new Error(`Failed to get class schedule: ${error.message}`);
+      throw new Error(`Error fetching class schedule: ${error.message}`);
     }
   }
 
-  // Lấy danh sách thời khóa biểu với filter
-  async getSchedules(filters) {
+  // Lấy thời khóa biểu theo khoảng ngày (updated for Period model)
+  async getClassScheduleByDateRange(className, academicYear, startOfWeek, endOfWeek) {
     try {
-      const { 
-        page = 1, 
-        limit = 10, 
-        academicYear, 
-        gradeLevel, 
-        status = 'active',
-        semester,
-        className 
-      } = filters;
-
-      const query = {};
+      console.log(`🔍 Getting schedule for ${className}, ${academicYear}, ${startOfWeek} to ${endOfWeek}`);
       
-      if (academicYear) query.academicYear = academicYear;
-      if (status) query.status = status;
-      if (semester) query.semester = semester;
+      const classInfo = await Class.findOne({ className, academicYear });
+      if (!classInfo) {
+        throw new Error(`Class ${className} not found in academic year ${academicYear}`);
+      }
 
-      // Nếu có className, tìm class trước
-      if (className) {
-        const classInfo = await Class.findOne({ 
-          className: className.toUpperCase(),
-          active: true 
+      const schedule = await Schedule.findOne({
+        class: classInfo._id,
+        academicYear,
+        status: 'active'
+      })
+      .populate('class', 'className academicYear gradeLevel')
+      .lean();
+
+      if (!schedule) {
+        throw new Error(`No active schedule found for class ${className}`);
+      }
+
+      const startDate = new Date(startOfWeek);
+      const endDate = new Date(endOfWeek);
+      
+      // Find weeks that fall within the date range
+      const relevantWeeks = schedule.weeks.filter(week => {
+        const weekStart = new Date(week.startDate);
+        const weekEnd = new Date(week.endDate);
+        return weekStart <= endDate && weekEnd >= startDate;
+      });
+
+      if (relevantWeeks.length === 0) {
+        throw new Error(`No weeks found in date range ${startOfWeek} to ${endOfWeek}`);
+      }
+
+      console.log(`📅 Found ${relevantWeeks.length} weeks in date range`);
+
+      // Get all period IDs from relevant weeks
+      const periodIds = [];
+      relevantWeeks.forEach(week => {
+        week.days.forEach(day => {
+          periodIds.push(...day.periods);
         });
-        if (classInfo) {
-          query.class = classInfo._id;
-        } else {
-          return {
-            schedules: [],
-            totalCount: 0,
-            totalPages: 0,
-            currentPage: page,
-            hasNext: false,
-            hasPrev: false
-          };
+      });
+
+      // Fetch all periods with population and include periodId
+      const periods = await Period.find({
+        _id: { $in: periodIds }
+      })
+      .populate('subject', 'subjectName subjectCode')
+      .populate('teacher', 'name email')
+      .select('_id periodId weekNumber dayOfWeek dayName date periodNumber subject teacher session timeStart timeEnd periodType status notes')
+      .lean();
+
+      console.log(`📚 Found ${periods.length} periods total`);
+
+      // Log sample periodIds for verification
+      const samplePeriods = periods.slice(0, 3);
+      if (samplePeriods.length > 0) {
+        console.log(`🆔 Sample periodIds: ${samplePeriods.map(p => p.periodId).join(', ')}`);
+      }
+
+      // Create period lookup map
+      const periodMap = {};
+      periods.forEach(period => {
+        periodMap[period._id.toString()] = period;
+      });
+
+      // Populate periods in weeks and days
+      relevantWeeks.forEach(week => {
+        week.days.forEach(day => {
+          day.periods = day.periods.map(periodId => periodMap[periodId.toString()]).filter(Boolean);
+          // Sort periods by period number
+          day.periods.sort((a, b) => a.periodNumber - b.periodNumber);
+        });
+      });
+
+      // Create weekly schedule format for compatibility
+      const weeklySchedule = [];
+      
+      // Create all 7 days of week structure
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      
+      for (let dayOfWeek = 1; dayOfWeek <= 7; dayOfWeek++) {
+        let dayFound = false;
+        
+        // Look for this day in relevant weeks
+        relevantWeeks.forEach(week => {
+          const dayInWeek = week.days.find(day => day.dayOfWeek === dayOfWeek);
+          if (dayInWeek) {
+            const dayDate = new Date(dayInWeek.date);
+            if (dayDate >= startDate && dayDate <= endDate) {
+              weeklySchedule.push({
+                dayOfWeek: dayInWeek.dayOfWeek,
+                dayName: dayInWeek.dayName,
+                date: dayInWeek.date,
+                periods: dayInWeek.periods || []
+              });
+              dayFound = true;
+            }
+          }
+        });
+        
+        // If no day found, create empty structure
+        if (!dayFound) {
+          const currentDate = new Date(startDate);
+          currentDate.setDate(startDate.getDate() + (dayOfWeek - 1));
+          
+          if (currentDate <= endDate) {
+            weeklySchedule.push({
+              dayOfWeek: dayOfWeek,
+              dayName: dayNames[dayOfWeek - 1],
+              date: currentDate.toISOString().split('T')[0],
+              periods: []
+            });
+          }
         }
       }
 
-      // Nếu có gradeLevel, tìm tất cả lớp thuộc khối đó
-      if (gradeLevel && !className) {
-        const gradePattern = new RegExp(`^${gradeLevel}[A-Z]`);
-        const classes = await Class.find({
-          className: { $regex: gradePattern },
-          active: true
-        });
-        query.class = { $in: classes.map(c => c._id) };
-      }
-
-      const totalCount = await Schedule.countDocuments(query);
-      const totalPages = Math.ceil(totalCount / limit);
-      const skip = (page - 1) * limit;
-
-      const schedules = await Schedule.find(query)
-        .populate('class', 'className academicYear homeroomTeacher')
-        .populate('schedule.periods.subject', 'subjectName subjectCode')
-        .populate('schedule.periods.teacher', 'name email')
-        .populate('createdBy', 'name email')
-        .sort({ updatedAt: -1 })
-        .skip(skip)
-        .limit(limit);
+      console.log(`📊 Returning schedule with ${weeklySchedule.length} days`);
 
       return {
-        schedules: schedules.map(schedule => ({
-          id: schedule._id,
-          class: {
-            id: schedule.class._id,
-            name: schedule.class.className,
-            academicYear: schedule.class.academicYear
-          },
-          semester: schedule.semester,
-          weekNumber: schedule.weekNumber,
-          totalPeriods: schedule.getTotalScheduledPeriods(),
+        class: schedule.class,
+        academicYear: schedule.academicYear,
+        weeks: relevantWeeks,
+        weeklySchedule: weeklySchedule,
+        dateRange: {
+          startOfWeek,
+          endOfWeek
+        },
+        metadata: {
+          totalWeeks: schedule.totalWeeks,
+          scheduleId: schedule._id,
           status: schedule.status,
-          createdAt: schedule.createdAt,
-          updatedAt: schedule.updatedAt
-        })),
-        totalCount,
-        totalPages,
-        currentPage: page,
-        hasNext: page < totalPages,
-        hasPrev: page > 1
+          totalPeriods: periods.length,
+          periodIdFormat: 'scheduleId_week##_day#_period##'
+        }
       };
 
     } catch (error) {
-      throw new Error(`Failed to get schedules: ${error.message}`);
+      console.error('❌ Error in getClassScheduleByDateRange:', error.message);
+      throw new Error(`Error fetching schedule by date range: ${error.message}`);
     }
   }
 
-  // Cập nhật trạng thái thời khóa biểu
-  async updateScheduleStatus(scheduleId, status, token) {
+  // Update period status (updated for Period model)
+  async updatePeriodStatus(scheduleId, dayOfWeek, periodNumber, status, options = {}, token) {
     try {
+      // Verify permissions
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await User.findById(decoded.id);
       
-      if (!user || !user.role.some(role => ['admin', 'manager', 'teacher'].includes(role))) {
-        throw new Error('Unauthorized');
+      if (!user || !['admin', 'manager', 'teacher'].includes(user.role[0])) {
+        throw new Error('Unauthorized to update period status');
       }
 
       const schedule = await Schedule.findById(scheduleId);
@@ -1001,251 +1265,189 @@ class ScheduleService {
         throw new Error('Schedule not found');
       }
 
-      schedule.status = status;
-      schedule.lastModifiedBy = user._id;
-      
-      await schedule.save();
+      // Find the period directly using Period model
+      const period = await Period.findOne({
+        schedule: scheduleId,
+        dayOfWeek: dayOfWeek,
+        periodNumber: periodNumber
+      });
+
+      if (!period) {
+        throw new Error('Period not found');
+      }
+
+      // Update the period status
+      const success = await period.updateStatus(status, {
+        ...options,
+        updatedBy: user._id
+      });
+
+      if (!success) {
+        throw new Error('Failed to update period status');
+      }
+
+      console.log(`✅ Updated period status: ${period.periodId} -> ${status}`);
 
       return {
-        message: 'Schedule status updated successfully',
-        schedule: {
-          id: schedule._id,
-          status: schedule.status,
-          updatedAt: schedule.updatedAt
+        success: true,
+        message: 'Period status updated successfully',
+        periodId: period.periodId,
+        period: {
+          weekNumber: period.weekNumber,
+          dayOfWeek: period.dayOfWeek,
+          periodNumber: period.periodNumber,
+          status: period.status
         }
       };
 
     } catch (error) {
-      throw new Error(`Failed to update schedule status: ${error.message}`);
+      throw new Error(`Error updating period status: ${error.message}`);
     }
   }
 
-  // Lấy schedule theo ID
-  async getScheduleById(scheduleId) {
+  // Get learning progress (updated for Period model)
+  async getLearningProgress(className, academicYear, options = {}) {
     try {
-      const schedule = await Schedule.findById(scheduleId)
-        .populate('class', 'className academicYear homeroomTeacher')
-        .populate('schedule.periods.subject', 'subjectName subjectCode department')
-        .populate('schedule.periods.teacher', 'name email')
-        .populate('createdBy', 'name email')
-        .populate('lastModifiedBy', 'name email');
-
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      return {
-        id: schedule._id,
-        class: {
-          id: schedule.class._id,
-          name: schedule.class.className,
-          academicYear: schedule.class.academicYear
-        },
-        semester: schedule.semester,
-        weekNumber: schedule.weekNumber,
-        totalPeriods: schedule.getTotalScheduledPeriods(),
-        status: schedule.status,
-        schedule: schedule.schedule,
-        notes: schedule.notes,
-        createdBy: schedule.createdBy,
-        lastModifiedBy: schedule.lastModifiedBy,
-        createdAt: schedule.createdAt,
-        updatedAt: schedule.updatedAt
-      };
-    } catch (error) {
-      throw new Error(`Failed to get schedule by ID: ${error.message}`);
-    }
-  }
-
-  // Thống kê schedule
-  async getScheduleStats(academicYear) {
-    try {
-      const query = { academicYear };
-      
-      const totalSchedules = await Schedule.countDocuments(query);
-      
-      // Thống kê theo status
-      const statusStats = await Schedule.aggregate([
-        { $match: query },
-        { $group: { _id: '$status', count: { $sum: 1 } } }
-      ]);
-
-      // Thống kê theo semester
-      const semesterStats = await Schedule.aggregate([
-        { $match: query },
-        { $group: { _id: '$semester', count: { $sum: 1 } } }
-      ]);
-
-      return {
-        academicYear,
-        totalSchedules,
-        statusBreakdown: statusStats.reduce((acc, stat) => {
-          acc[stat._id] = stat.count;
-          return acc;
-        }, {}),
-        semesterBreakdown: semesterStats.reduce((acc, stat) => {
-          acc[stat._id] = stat.count;
-          return acc;
-        }, {})
-      };
-    } catch (error) {
-      throw new Error(`Failed to get schedule stats: ${error.message}`);
-    }
-  }
-
-  // Helper methods
-  getTimeSlots() {
-    return {
-      morning: [
-        { period: 1, start: '07:00', end: '07:45' },
-        { period: 2, start: '07:50', end: '08:35' },
-        { period: 3, start: '08:40', end: '09:25' },
-        { period: 4, start: '09:45', end: '10:30' },
-        { period: 5, start: '10:35', end: '11:20' }
-      ],
-      afternoon: [
-        { period: 6, start: '13:30', end: '14:15' },
-        { period: 7, start: '14:20', end: '15:05' }
-      ]
-    };
-  }
-
-  async getAcademicYearOptions() {
-    try {
-      const years = await Class.distinct('academicYear');
-      return years.sort().reverse(); // Năm gần nhất trước
-    } catch (error) {
-      throw new Error(`Failed to get academic year options: ${error.message}`);
-    }
-  }
-
-  // Lấy thời khóa biểu theo date range
-  async getClassScheduleByDateRange(className, academicYear, startOfWeek, endOfWeek) {
-    try {
-      // Tìm lớp theo tên
-      const classInfo = await Class.findOne({
-        className: className.toUpperCase(),
-        academicYear,
-        active: true
-      });
-
+      const classInfo = await Class.findOne({ className, academicYear });
       if (!classInfo) {
-        throw new Error(`Class ${className} not found in academic year ${academicYear}`);
+        throw new Error(`Class ${className} not found`);
       }
 
-      // Lấy thời khóa biểu active
       const schedule = await Schedule.findOne({
         class: classInfo._id,
         academicYear,
         status: 'active'
-      })
-      .populate('class', 'className homeroomTeacher')
-      .populate('schedule.periods.subject', 'subjectName subjectCode department')
-      .populate('schedule.periods.teacher', 'name email')
-      .populate('createdBy', 'name email');
-
-      if (!schedule) {
-        throw new Error(`No active schedule found for class ${className} in academic year ${academicYear}`);
-      }
-
-      // Parse dates
-      const startDate = new Date(startOfWeek);
-      const endDate = new Date(endOfWeek);
-      
-      // Calculate which days of week fall in the range
-      const daysInRange = [];
-      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-        const dayOfWeek = d.getDay();
-        // Convert Sunday=0 to our format (Monday=2, Tuesday=3, etc.)
-        if (dayOfWeek >= 1 && dayOfWeek <= 6) { // Monday to Saturday
-          const ourDayOfWeek = dayOfWeek + 1;
-          if (!daysInRange.some(day => day.dayOfWeek === ourDayOfWeek)) {
-            daysInRange.push({
-              dayOfWeek: ourDayOfWeek,
-              date: new Date(d).toISOString().split('T')[0],
-              dayName: ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek]
-            });
-          }
-        }
-      }
-
-      // Filter schedule for days in range
-      const filteredSchedule = schedule.schedule.filter(day => 
-        daysInRange.some(rangeDay => rangeDay.dayOfWeek === day.dayOfWeek)
-      ).map(day => {
-        const rangeDay = daysInRange.find(rd => rd.dayOfWeek === day.dayOfWeek);
-        return {
-          ...day.toObject(),
-          date: rangeDay.date,
-          periods: day.periods.map(period => ({
-            periodNumber: period.periodNumber,
-            session: period.session,
-            timeStart: period.timeStart,
-            timeEnd: period.timeEnd,
-            subject: period.subject ? {
-              id: period.subject._id,
-              name: period.subject.subjectName,
-              code: period.subject.subjectCode,
-              department: period.subject.department
-            } : null,
-            teacher: period.teacher ? {
-              id: period.teacher._id,
-              name: period.teacher.name,
-              email: period.teacher.email
-            } : null
-          }))
-        };
       });
 
+      if (!schedule) {
+        throw new Error(`No active schedule found for class ${className}`);
+      }
+
+      // Get overall progress using Schedule method (which uses Period aggregation)
+      const overallProgress = await schedule.getLearningProgress();
+      
+      // Get subject progress
+      const subjectProgress = await schedule.getProgressBySubject();
+
+      // Get period type statistics
+      const periodTypeStats = await schedule.getPeriodTypeStatistics();
+
       return {
-        class: {
-          id: classInfo._id,
-          name: classInfo.className,
-          academicYear: classInfo.academicYear
-        },
-        schedule: {
-          id: schedule._id,
-          semester: schedule.semester,
-          totalPeriods: schedule.getTotalScheduledPeriods(),
-          status: schedule.status,
-          dateRange: {
-            startOfWeek,
-            endOfWeek,
-            daysInRange: daysInRange.length
-          },
-          dailySchedule: filteredSchedule,
-          createdBy: schedule.createdBy,
-          createdAt: schedule.createdAt,
-          updatedAt: schedule.updatedAt
+        overall: overallProgress,
+        bySubject: subjectProgress,
+        byType: periodTypeStats,
+        classInfo: {
+          className: classInfo.className,
+          academicYear: academicYear,
+          gradeLevel: classInfo.gradeLevel
         }
       };
 
     } catch (error) {
-      throw new Error(`Failed to get class schedule by date range: ${error.message}`);
+      throw new Error(`Error getting learning progress: ${error.message}`);
     }
   }
 
-  // Lấy tất cả schedules có sẵn (cho debugging)
+  // Updated methods that work with Period model
+  async calculateOverallProgress(schedule) {
+    return await schedule.getLearningProgress();
+  }
+
+  async calculateSubjectProgress(schedule) {
+    return await schedule.getProgressBySubject();
+  }
+
+  async getProgressDetails(schedule) {
+    const overall = await this.calculateOverallProgress(schedule);
+    const bySubject = await this.calculateSubjectProgress(schedule);
+    
+    return {
+      overall,
+      bySubject,
+      lastUpdated: new Date()
+    };
+  }
+
+  // Helper method để lấy tên ngày tiếng Việt
+  getDayNameVN(dayOfWeek) {
+    const dayNames = {
+      1: 'Chủ nhật',
+      2: 'Thứ 2', 
+      3: 'Thứ 3',
+      4: 'Thứ 4',
+      5: 'Thứ 5',
+      6: 'Thứ 6',
+      7: 'Thứ 7'
+    };
+    return dayNames[dayOfWeek] || 'Unknown';
+  }
+
+  // Lấy khung giờ học (10 tiết)
+  getTimeSlots() {
+    return [
+      { period: 1, start: '07:00', end: '07:45', session: 'morning' },
+      { period: 2, start: '07:50', end: '08:35', session: 'morning' },
+      { period: 3, start: '08:40', end: '09:25', session: 'morning' },
+      { period: 4, start: '09:45', end: '10:30', session: 'morning' },
+      { period: 5, start: '10:35', end: '11:20', session: 'morning' },
+      { period: 6, start: '13:30', end: '14:15', session: 'afternoon' },
+      { period: 7, start: '14:20', end: '15:05', session: 'afternoon' },
+      { period: 8, start: '15:10', end: '15:55', session: 'afternoon' },
+      { period: 9, start: '16:00', end: '16:45', session: 'afternoon' },
+      { period: 10, start: '16:50', end: '17:35', session: 'afternoon' }
+    ];
+  }
+
+  // Lấy danh sách lớp theo khối và năm học
+  async getClassesByGradeAndYear(academicYear, gradeLevel) {
+    try {
+      const classes = await Class.find({
+        className: new RegExp(`^${gradeLevel}`),
+        academicYear,
+        active: true
+      }).populate('homeroomTeacher', 'name email').lean();
+
+      return classes;
+    } catch (error) {
+      throw new Error(`Failed to get classes: ${error.message}`);
+    }
+  }
+
+  // Kiểm tra lớp có tồn tại không
+  async checkClassExists(className, academicYear) {
+    try {
+      const classInfo = await Class.findOne({ className, academicYear });
+      
+      return {
+        exists: !!classInfo,
+        class: classInfo ? {
+          id: classInfo._id,
+          className: classInfo.className,
+          academicYear: classInfo.academicYear,
+          gradeLevel: classInfo.gradeLevel
+        } : null
+      };
+    } catch (error) {
+      throw new Error(`Failed to check class existence: ${error.message}`);
+    }
+  }
+
+  // Lấy danh sách schedules có sẵn
   async getAvailableSchedules(academicYear, className) {
     try {
-      const query = {};
-      
-      if (academicYear) query.academicYear = academicYear;
+      const query = { academicYear };
       
       if (className) {
-        const classInfo = await Class.findOne({ 
-          className: className.toUpperCase(),
-          active: true 
-        });
+        const classInfo = await Class.findOne({ className, academicYear });
         if (classInfo) {
           query.class = classInfo._id;
         }
       }
 
       const schedules = await Schedule.find(query)
-        .populate('class', 'className academicYear')
-        .select('class academicYear semester weekNumber status createdAt')
-        .sort({ academicYear: -1, 'class.className': 1 });
+        .populate('class', 'className academicYear gradeLevel')
+        .select('class academicYear status totalWeeks createdAt')
+        .lean();
 
       return {
         total: schedules.length,
@@ -1253,9 +1455,9 @@ class ScheduleService {
           id: schedule._id,
           className: schedule.class.className,
           academicYear: schedule.academicYear,
-          semester: schedule.semester,
-          weekNumber: schedule.weekNumber,
+          gradeLevel: schedule.class.gradeLevel,
           status: schedule.status,
+          totalWeeks: schedule.totalWeeks,
           createdAt: schedule.createdAt
         }))
       };
@@ -1264,1418 +1466,786 @@ class ScheduleService {
     }
   }
 
-  // Kiểm tra lớp có tồn tại không
-  async checkClassExists(className, academicYear) {
+  // Lấy thông tin schedule theo ID
+  async getScheduleById(scheduleId) {
     try {
-      const classInfo = await Class.findOne({
-        className: className.toUpperCase(),
-        academicYear,
-        active: true
-      }).populate('homeroomTeacher', 'name email');
+      const schedule = await Schedule.findById(scheduleId)
+        .populate('class', 'className academicYear gradeLevel')
+        .populate('weeks.days.periods.subject', 'subjectName subjectCode')
+        .populate('weeks.days.periods.teacher', 'name email')
+        .populate('createdBy', 'name email')
+        .lean();
 
-      if (!classInfo) {
-        return {
-          exists: false,
-          message: `Class ${className} not found in academic year ${academicYear}`,
-          suggestions: await this.getSimilarClasses(className, academicYear)
-        };
+      if (!schedule) {
+        throw new Error('Schedule not found');
       }
 
-      // Kiểm tra có schedule không
-      const scheduleCount = await Schedule.countDocuments({
-        class: classInfo._id,
-        academicYear
-      });
+      return schedule;
+    } catch (error) {
+      throw new Error(`Failed to get schedule: ${error.message}`);
+    }
+  }
+
+  // Lấy thống kê thời khóa biểu
+  async getScheduleStats(academicYear) {
+    try {
+      const totalSchedules = await Schedule.countDocuments({ academicYear });
+      const activeSchedules = await Schedule.countDocuments({ academicYear, status: 'active' });
+      const draftSchedules = await Schedule.countDocuments({ academicYear, status: 'draft' });
+      
+      const gradeStats = await Schedule.aggregate([
+        { $match: { academicYear } },
+        { $lookup: { from: 'classes', localField: 'class', foreignField: '_id', as: 'classInfo' } },
+        { $unwind: '$classInfo' },
+        { $group: { _id: '$classInfo.gradeLevel', count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]);
 
       return {
-        exists: true,
-        class: {
-          id: classInfo._id,
-          className: classInfo.className,
-          academicYear: classInfo.academicYear,
-          homeroomTeacher: classInfo.homeroomTeacher
+        academicYear,
+        summary: {
+          totalSchedules,
+          activeSchedules,
+          draftSchedules,
+          archivedSchedules: totalSchedules - activeSchedules - draftSchedules
         },
-        schedules: {
-          total: scheduleCount,
-          hasActiveSchedule: scheduleCount > 0
-        }
+        byGrade: gradeStats.map(stat => ({
+          gradeLevel: stat._id,
+          scheduleCount: stat.count
+        }))
       };
     } catch (error) {
-      throw new Error(`Failed to check class exists: ${error.message}`);
+      throw new Error(`Failed to get schedule statistics: ${error.message}`);
     }
   }
 
-  // Helper: Tìm lớp tương tự
-  async getSimilarClasses(className, academicYear) {
+  // Lấy danh sách năm học
+  async getAcademicYearOptions() {
     try {
-      // Lấy grade level từ className (ví dụ: 12A4 -> 12)
-      const gradeMatch = className.match(/^(\d+)/);
-      if (!gradeMatch) return [];
-
-      const gradeLevel = gradeMatch[1];
-      const gradePattern = new RegExp(`^${gradeLevel}[A-Z]`);
-      
-      const similarClasses = await Class.find({
-        className: { $regex: gradePattern },
-        academicYear,
-        active: true
-      }).select('className').limit(5);
-
-      return similarClasses.map(c => c.className);
+      const years = await Schedule.distinct('academicYear');
+      return years.sort().reverse();
     } catch (error) {
-      return [];
+      throw new Error(`Failed to get academic year options: ${error.message}`);
     }
   }
 
-  // Cập nhật trạng thái tiết học
-  async updatePeriodStatus(scheduleId, dayOfWeek, periodNumber, status, options = {}, token) {
+  // Cập nhật trạng thái schedule
+  async updateScheduleStatus(scheduleId, status, token) {
     try {
-      // Verify user permissions
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await User.findById(decoded.id);
       
-      if (!user || !['admin', 'manager', 'teacher'].includes(user.role)) {
-        throw new Error('Unauthorized to update period status');
+      if (!user || !['admin', 'manager'].includes(user.role[0])) {
+        throw new Error('Unauthorized to update schedule status');
       }
 
+      const schedule = await Schedule.findByIdAndUpdate(
+        scheduleId,
+        { 
+          status, 
+          lastModifiedBy: user._id 
+        },
+        { new: true }
+      ).populate('class', 'className');
+
+      if (!schedule) {
+        throw new Error('Schedule not found');
+      }
+
+      return {
+        message: `Schedule status updated to ${status}`,
+        schedule: {
+          id: schedule._id,
+          className: schedule.class.className,
+          status: schedule.status
+        }
+      };
+    } catch (error) {
+      throw new Error(`Failed to update schedule status: ${error.message}`);
+    }
+  }
+
+  // Xóa schedule
+  async deleteSchedule(scheduleId, token) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id);
+      
+      if (!user || !['admin'].includes(user.role[0])) {
+        throw new Error('Unauthorized to delete schedule');
+      }
+
+      const schedule = await Schedule.findByIdAndDelete(scheduleId);
+      if (!schedule) {
+        throw new Error('Schedule not found');
+      }
+
+      return {
+        message: 'Schedule deleted successfully'
+      };
+    } catch (error) {
+      throw new Error(`Failed to delete schedule: ${error.message}`);
+    }
+  }
+
+  // Lấy danh sách schedules với filter
+  async getSchedules(filters) {
+    try {
+      const { page = 1, limit = 10, academicYear, gradeLevel, status } = filters;
+      
+      const query = {};
+      if (academicYear) query.academicYear = academicYear;
+      if (status) query.status = status;
+
+      let schedules = await Schedule.find(query)
+        .populate('class', 'className academicYear gradeLevel')
+        .populate('createdBy', 'name email')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean();
+
+      // Filter by grade level if specified
+      if (gradeLevel) {
+        schedules = schedules.filter(schedule => 
+          schedule.class.gradeLevel === gradeLevel
+        );
+      }
+
+      const total = await Schedule.countDocuments(query);
+
+      return {
+        schedules: schedules.map(schedule => ({
+          id: schedule._id,
+          className: schedule.class.className,
+          academicYear: schedule.academicYear,
+          gradeLevel: schedule.class.gradeLevel,
+          status: schedule.status,
+          totalWeeks: schedule.totalWeeks,
+          createdBy: schedule.createdBy?.name,
+          createdAt: schedule.createdAt
+        })),
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit)
+        }
+      };
+    } catch (error) {
+      throw new Error(`Failed to get schedules: ${error.message}`);
+    }
+  }
+
+  // Save schedule với validation
+  async saveScheduleWithValidation(schedule) {
+    try {
+      // Verify all periods have valid periodId format
+      const totalPeriods = await Period.countDocuments({
+        schedule: schedule._id
+      });
+      
+      const validPeriodIds = await Period.countDocuments({
+        schedule: schedule._id,
+        periodId: { $regex: /^[a-f0-9]{6}_week\d{2}_day\d_period\d{2}$/ }
+      });
+      
+      if (validPeriodIds < totalPeriods) {
+        console.log(`⚠️ Warning: ${totalPeriods - validPeriodIds} periods have invalid periodId format`);
+        
+        // Fix invalid periodIds
+        const periodsWithInvalidIds = await Period.find({
+          schedule: schedule._id,
+          $or: [
+            { periodId: { $exists: false } },
+            { periodId: null },
+            { periodId: { $not: { $regex: /^[a-f0-9]{6}_week\d{2}_day\d_period\d{2}$/ } } }
+          ]
+        });
+        
+        console.log(`🔧 Fixing ${periodsWithInvalidIds.length} periods with invalid periodIds...`);
+        
+        for (const period of periodsWithInvalidIds) {
+          const scheduleId = schedule._id.toString().slice(-6);
+          const weekNum = String(period.weekNumber).padStart(2, '0');
+          const dayNum = String(period.dayOfWeek);
+          const periodNum = String(period.periodNumber).padStart(2, '0');
+          const newPeriodId = `${scheduleId}_week${weekNum}_day${dayNum}_period${periodNum}`;
+          
+          period.periodId = newPeriodId;
+          await period.save();
+          
+          console.log(`🆔 Fixed periodId: ${newPeriodId}`);
+        }
+      }
+      
+      await schedule.save({ validateBeforeSave: false });
+      console.log(`✅ Schedule saved with ${totalPeriods} periods`);
+      
+      return schedule;
+    } catch (error) {
+      console.error('Failed to save schedule:', error);
+      throw error;
+    }
+  }
+
+  // Helper method to verify period integrity
+  async verifyPeriodIntegrity(scheduleId) {
+    try {
       const schedule = await Schedule.findById(scheduleId);
       if (!schedule) {
         throw new Error('Schedule not found');
       }
 
-      // Validate status
-      const validStatuses = ['not_started', 'completed', 'absent', 'makeup'];
-      if (!validStatuses.includes(status)) {
-        throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
-      }
+      // Count periods by type
+      const periodStats = await Period.aggregate([
+        { $match: { schedule: schedule._id } },
+        {
+          $group: {
+            _id: '$periodType',
+            count: { $sum: 1 },
+            validPeriodIds: {
+              $sum: {
+                $cond: [
+                  { $regexMatch: { input: '$periodId', regex: /^[a-f0-9]{6}_week\d{2}_day\d_period\d{2}$/ } },
+                  1,
+                  0
+                ]
+              }
+            }
+          }
+        }
+      ]);
 
-      // Update period status
-      const updated = schedule.updatePeriodStatus(dayOfWeek, periodNumber, status, options);
-      if (!updated) {
-        throw new Error(`Period ${periodNumber} not found for day ${dayOfWeek}`);
-      }
-
-      schedule.lastModifiedBy = user._id;
-      await schedule.save();
+      const totalPeriods = await Period.countDocuments({ schedule: schedule._id });
+      
+      console.log(`📊 Period Integrity Report for Schedule ${scheduleId}:`);
+      console.log(`- Total Periods: ${totalPeriods}`);
+      
+      periodStats.forEach(stat => {
+        console.log(`- ${stat._id}: ${stat.count} periods (${stat.validPeriodIds} valid periodIds)`);
+      });
 
       return {
-        message: 'Period status updated successfully',
-        schedule: schedule,
-        updatedPeriod: {
-          dayOfWeek,
-          periodNumber,
-          status,
-          updatedAt: new Date()
-        }
+        totalPeriods,
+        stats: periodStats,
+        isValid: periodStats.every(stat => stat.count === stat.validPeriodIds)
       };
-
     } catch (error) {
-      throw new Error(`Failed to update period status: ${error.message}`);
+      console.error('Error verifying period integrity:', error.message);
+      throw error;
     }
   }
 
-  // Lấy tiến độ học tập của lớp
-  async getLearningProgress(className, academicYear, options = {}) {
+  // API MỚI: Lấy lịch học theo ngày cụ thể với đầy đủ thông tin
+  async getDaySchedule(className, academicYear, date) {
     try {
-      const classInfo = await Class.findOne({
-        className: className.toUpperCase(),
-        academicYear,
-        active: true
-      });
-
+      const targetDate = new Date(date);
+      targetDate.setHours(0, 0, 0, 0);
+      
+      // Tìm lớp học
+      const classInfo = await Class.findOne({ className, academicYear });
       if (!classInfo) {
-        throw new Error(`Class ${className} not found in academic year ${academicYear}`);
+        throw new Error(`Class ${className} not found for academic year ${academicYear}`);
       }
-
+      
+      // Tìm schedule
       const schedule = await Schedule.findOne({
         class: classInfo._id,
         academicYear,
         status: 'active'
-      })
-      .populate('schedule.periods.subject', 'subjectName subjectCode department')
-      .populate('schedule.periods.teacher', 'name email');
-
+      });
+      
       if (!schedule) {
         throw new Error(`No active schedule found for class ${className}`);
       }
-
-      // Lấy tiến độ tổng quan
-      const overallProgress = schedule.getLearningProgress();
       
-      // Lấy tiến độ theo môn học
-      const progressBySubject = schedule.getProgressBySubject();
-      
-      // Populate subject info cho progress by subject
-      const populatedProgressBySubject = {};
-      for (const [subjectId, progress] of Object.entries(progressBySubject)) {
-        const subject = await Subject.findById(subjectId).select('subjectName subjectCode department');
-        if (subject) {
-          populatedProgressBySubject[subjectId] = {
-            ...progress,
-            subject: {
-              id: subject._id,
-              name: subject.subjectName,
-              code: subject.subjectCode,
-              department: subject.department
-            }
-          };
+      // Tìm periods cho ngày cụ thể
+      const periods = await Period.find({
+        schedule: schedule._id,
+        date: {
+          $gte: targetDate,
+          $lt: new Date(targetDate.getTime() + 24 * 60 * 60 * 1000) // Next day
         }
-      }
-
-      // Lấy chi tiết periods nếu yêu cầu
-      let detailedSchedule = null;
-      if (options.includeDetails) {
-        detailedSchedule = schedule.schedule.map(day => ({
-          dayOfWeek: day.dayOfWeek,
-          dayName: day.dayName,
-          periods: day.periods.map(period => ({
-            periodNumber: period.periodNumber,
-            session: period.session,
-            timeStart: period.timeStart,
-            timeEnd: period.timeEnd,
-            status: period.status,
-            actualDate: period.actualDate,
-            completedAt: period.completedAt,
-            notes: period.notes,
-            attendance: period.attendance,
-            subject: {
-              id: period.subject._id,
-              name: period.subject.subjectName,
-              code: period.subject.subjectCode,
-              department: period.subject.department
-            },
-            teacher: {
-              id: period.teacher._id,
-              name: period.teacher.name,
-              email: period.teacher.email
-            }
-          }))
-        }));
-      }
-
-      return {
-        class: {
-          id: classInfo._id,
-          name: classInfo.className,
-          academicYear: classInfo.academicYear
-        },
-        schedule: {
-          id: schedule._id,
-          semester: schedule.semester,
-          weekNumber: schedule.weekNumber
-        },
-        progress: {
-          overall: overallProgress,
-          bySubject: populatedProgressBySubject,
-          details: detailedSchedule
-        },
-        generatedAt: new Date()
+      })
+      .populate('subject', 'subjectName subjectCode')
+      .populate('teacher', 'name email')
+      .sort({ periodNumber: 1 });
+      
+      // Tính thống kê ngày
+      const stats = {
+        totalPeriods: periods.length,
+        regularPeriods: periods.filter(p => p.periodType === 'regular').length,
+        emptyPeriods: periods.filter(p => p.periodType === 'empty').length,
+        completedPeriods: periods.filter(p => p.status === 'completed').length,
+        upcomingPeriods: periods.filter(p => p.status === 'not_started').length
       };
-
+      
+      return {
+        date: targetDate,
+        className,
+        academicYear,
+        dayOfWeek: targetDate.getDay() === 0 ? 7 : targetDate.getDay() + 1, // Convert to 1-7 format
+        periods: periods.map(period => ({
+          id: period._id,
+          periodId: period.periodId,
+          periodNumber: period.periodNumber,
+          subject: period.subject,
+          teacher: period.teacher,
+          periodType: period.periodType,
+          status: period.status,
+          timeStart: period.timeStart,
+          timeEnd: period.timeEnd,
+          notes: period.notes
+        })),
+        stats
+      };
     } catch (error) {
-      throw new Error(`Failed to get learning progress: ${error.message}`);
+      throw new Error(`Failed to get day schedule: ${error.message}`);
     }
   }
 
-  // Lấy báo cáo điểm danh
-  async getAttendanceReport(className, academicYear, options = {}) {
+  // API MỚI: Lấy thông tin chi tiết của tiết học với metadata đầy đủ
+  async getDetailedPeriodInfo(periodId) {
     try {
-      const progress = await this.getLearningProgress(className, academicYear, { includeDetails: true });
+      const period = await Period.findById(periodId)
+        .populate('class', 'className')
+        .populate('schedule', 'academicYear')
+        .populate('subject', 'subjectName subjectCode department')
+        .populate('teacher', 'name email role')
+        .populate('createdBy', 'name email')
+        .populate('lastModifiedBy', 'name email');
       
-      const attendanceReport = {
-        class: progress.class,
-        schedule: progress.schedule,
-        summary: {
-          totalPeriods: progress.progress.overall.totalPeriods,
-          attendedPeriods: progress.progress.overall.completedPeriods + progress.progress.overall.makeupPeriods,
-          absentPeriods: progress.progress.overall.absentPeriods,
-          attendanceRate: progress.progress.overall.attendanceRate
+      if (!period) {
+        return null;
+      }
+      
+      // Lấy thông tin chi tiết từ Schedule model
+      const schedule = await Schedule.findById(period.schedule);
+      const detailedInfo = await schedule.getPeriodDetailsById(periodId);
+      
+      // Thêm thông tin bổ sung
+      return {
+        ...detailedInfo,
+        
+        // Thông tin audit
+        audit: {
+          createdBy: period.createdBy,
+          createdAt: period.createdAt,
+          lastModifiedBy: period.lastModifiedBy,
+          updatedAt: period.updatedAt
         },
-        bySubject: {},
-        dailyReport: []
+        
+        // Thông tin lớp và năm học
+        context: {
+          class: period.class,
+          academicYear: period.schedule.academicYear
+        },
+        
+        // Thống kê liên quan
+        statistics: await this.getPeriodStatistics(period)
       };
+    } catch (error) {
+      throw new Error(`Failed to get detailed period info: ${error.message}`);
+    }
+  }
 
-      // Group by subject
-      Object.entries(progress.progress.bySubject).forEach(([subjectId, subjectProgress]) => {
-        attendanceReport.bySubject[subjectId] = {
-          subject: subjectProgress.subject,
-          totalPeriods: subjectProgress.total,
-          attendedPeriods: subjectProgress.completed + subjectProgress.makeup,
-          absentPeriods: subjectProgress.absent,
-          attendanceRate: subjectProgress.attendanceRate
-        };
-      });
+  // Helper method để lấy thống kê period
+  async getPeriodStatistics(period) {
+    try {
+      // Thống kê theo teacher
+      const teacherStats = period.teacher ? await Period.aggregate([
+        { $match: { teacher: period.teacher, schedule: period.schedule } },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 }
+          }
+        }
+      ]) : [];
+      
+      // Thống kê theo subject
+      const subjectStats = period.subject ? await Period.aggregate([
+        { $match: { subject: period.subject, schedule: period.schedule } },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 }
+          }
+        }
+      ]) : [];
+      
+      return {
+        teacher: teacherStats.reduce((acc, stat) => {
+          acc[stat._id] = stat.count;
+          return acc;
+        }, {}),
+        subject: subjectStats.reduce((acc, stat) => {
+          acc[stat._id] = stat.count;
+          return acc;
+        }, {})
+      };
+    } catch (error) {
+      console.error('Error getting period statistics:', error.message);
+      return { teacher: {}, subject: {} };
+    }
+  }
 
-      // Daily attendance report
-      if (progress.progress.details) {
-        progress.progress.details.forEach(day => {
-          const dayReport = {
-            dayOfWeek: day.dayOfWeek,
-            dayName: day.dayName,
-            totalPeriods: day.periods.length,
-            attendedPeriods: day.periods.filter(p => ['completed', 'makeup'].includes(p.status)).length,
-            absentPeriods: day.periods.filter(p => p.status === 'absent').length,
-            periods: day.periods.map(period => ({
-              periodNumber: period.periodNumber,
-              subject: period.subject.name,
-              teacher: period.teacher.name,
-              status: period.status,
-              attendance: period.attendance
-            }))
-          };
+  // API MỚI: Bulk update nhiều tiết học cùng lúc
+  async bulkUpdatePeriods(periodsData, userId) {
+    try {
+      const results = {
+        updated: 0,
+        failed: 0,
+        errors: []
+      };
+      
+      for (const periodData of periodsData) {
+        try {
+          const { periodId, updates } = periodData;
           
-          dayReport.attendanceRate = dayReport.totalPeriods > 0 
-            ? (dayReport.attendedPeriods / dayReport.totalPeriods * 100).toFixed(2)
-            : 0;
-            
-          attendanceReport.dailyReport.push(dayReport);
-        });
-      }
-
-      return attendanceReport;
-
-    } catch (error) {
-      throw new Error(`Failed to get attendance report: ${error.message}`);
-    }
-  }
-
-  // Bulk update period statuses
-  async bulkUpdatePeriodStatus(scheduleId, updates, token) {
-    try {
-      // Verify user permissions
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id);
-      
-      if (!user || !['admin', 'manager', 'teacher'].includes(user.role)) {
-        throw new Error('Unauthorized to update period status');
-      }
-
-      const schedule = await Schedule.findById(scheduleId);
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      const results = [];
-      const validStatuses = ['not_started', 'completed', 'absent', 'makeup'];
-
-      for (const update of updates) {
-        const { dayOfWeek, periodNumber, status, options = {} } = update;
-        
-        if (!validStatuses.includes(status)) {
-          results.push({
-            dayOfWeek,
-            periodNumber,
-            success: false,
-            error: `Invalid status: ${status}`
+          const period = await Period.findById(periodId);
+          if (!period) {
+            results.failed++;
+            results.errors.push(`Period ${periodId} not found`);
+            continue;
+          }
+          
+          // Apply updates
+          Object.keys(updates).forEach(key => {
+            if (key !== '_id' && key !== 'periodId') {
+              period[key] = updates[key];
+            }
           });
-          continue;
+          
+          period.lastModifiedBy = userId;
+          await period.save();
+          
+          results.updated++;
+        } catch (periodError) {
+          results.failed++;
+          results.errors.push(`Error updating period ${periodData.periodId}: ${periodError.message}`);
         }
-
-        const updated = schedule.updatePeriodStatus(dayOfWeek, periodNumber, status, options);
-        results.push({
-          dayOfWeek,
-          periodNumber,
-          success: updated,
-          error: updated ? null : 'Period not found'
-        });
       }
-
-      schedule.lastModifiedBy = user._id;
-      await schedule.save();
-
-      return {
-        message: 'Bulk update completed',
-        results,
-        totalUpdates: updates.length,
-        successfulUpdates: results.filter(r => r.success).length,
-        failedUpdates: results.filter(r => !r.success).length
-      };
-
+      
+      return results;
     } catch (error) {
-      throw new Error(`Failed to bulk update period status: ${error.message}`);
+      throw new Error(`Failed to bulk update periods: ${error.message}`);
     }
   }
 
-  // Lấy lịch dạy của giáo viên theo khoảng thời gian
-  async getTeacherScheduleByDateRange(teacherId, academicYear, startOfWeek, endOfWeek) {
+  // API MỚI: Lấy lịch giảng dạy của giáo viên theo tuần
+  async getTeacherWeeklySchedule(teacherId, weekNumber, academicYear) {
     try {
-      // Validate teacher exists
-      const teacher = await User.findById(teacherId).populate('subject', 'subjectName subjectCode').select('name email role subject');
+      const periods = await Period.find({
+        teacher: teacherId,
+        weekNumber: weekNumber
+      })
+      .populate('class', 'className')
+      .populate('subject', 'subjectName subjectCode')
+      .populate('schedule', 'academicYear')
+      .sort({ dayOfWeek: 1, periodNumber: 1 });
       
-      console.log('🔍 Found teacher:', {
-        id: teacher?._id,
-        name: teacher?.name,
-        role: teacher?.role,
-        roleType: typeof teacher?.role,
-        isArray: Array.isArray(teacher?.role)
-      });
+      // Filter by academic year
+      const filteredPeriods = periods.filter(p => 
+        p.schedule && p.schedule.academicYear === academicYear
+      );
       
-      if (!teacher) {
-        throw new Error('Teacher not found - user does not exist');
+      // Group by day
+      const weekSchedule = {};
+      const dayNames = ['', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      
+      for (let day = 1; day <= 7; day++) {
+        weekSchedule[dayNames[day]] = filteredPeriods
+          .filter(p => p.dayOfWeek === day)
+          .map(p => ({
+            id: p._id,
+            periodId: p.periodId,
+            periodNumber: p.periodNumber,
+            class: p.class,
+            subject: p.subject,
+            periodType: p.periodType,
+            status: p.status,
+            timeStart: p.timeStart,
+            timeEnd: p.timeEnd,
+            date: p.date
+          }));
       }
       
-      // Check if role includes 'teacher' (handle both string and array)
-      const hasTeacherRole = Array.isArray(teacher.role) 
-        ? teacher.role.includes('teacher')
-        : teacher.role === 'teacher';
-        
-      if (!hasTeacherRole) {
-        throw new Error(`User found but role is ${JSON.stringify(teacher.role)}, not teacher`);
+      // Calculate stats
+      const stats = {
+        totalPeriods: filteredPeriods.length,
+        regularPeriods: filteredPeriods.filter(p => p.periodType === 'regular').length,
+        makeupPeriods: filteredPeriods.filter(p => p.periodType === 'makeup').length,
+        completedPeriods: filteredPeriods.filter(p => p.status === 'completed').length,
+        classes: [...new Set(filteredPeriods.map(p => p.class.className))],
+        subjects: [...new Set(filteredPeriods.map(p => p.subject?.subjectName).filter(Boolean))]
+      };
+      
+      return {
+        teacherId,
+        weekNumber,
+        academicYear,
+        schedule: weekSchedule,
+        stats
+      };
+    } catch (error) {
+      throw new Error(`Failed to get teacher weekly schedule: ${error.message}`);
+    }
+  }
+
+  // API MỚI: Search và filter periods với điều kiện phức tạp
+  async searchPeriods(filters) {
+    try {
+      const query = {};
+      
+      // Build query based on filters
+      if (filters.teacher) query.teacher = filters.teacher;
+      if (filters.subject) query.subject = filters.subject;
+      if (filters.class) query.class = filters.class;
+      if (filters.schedule) query.schedule = filters.schedule;
+      if (filters.periodType) query.periodType = filters.periodType;
+      if (filters.status) query.status = filters.status;
+      if (filters.weekNumber) query.weekNumber = parseInt(filters.weekNumber);
+      if (filters.dayOfWeek) query.dayOfWeek = parseInt(filters.dayOfWeek);
+      if (filters.periodNumber) query.periodNumber = parseInt(filters.periodNumber);
+      
+      // Date range filter
+      if (filters.startDate || filters.endDate) {
+        query.date = {};
+        if (filters.startDate) query.date.$gte = new Date(filters.startDate);
+        if (filters.endDate) query.date.$lte = new Date(filters.endDate);
+      }
+      
+      // Pagination
+      const page = parseInt(filters.page) || 1;
+      const limit = parseInt(filters.limit) || 20;
+      const skip = (page - 1) * limit;
+      
+      const periods = await Period.find(query)
+        .populate('class', 'className')
+        .populate('subject', 'subjectName subjectCode')
+        .populate('teacher', 'name email')
+        .populate('schedule', 'academicYear')
+        .sort({ weekNumber: 1, dayOfWeek: 1, periodNumber: 1 })
+        .skip(skip)
+        .limit(limit);
+      
+      const total = await Period.countDocuments(query);
+      
+      return {
+        periods: periods.map(p => ({
+          id: p._id,
+          periodId: p.periodId,
+          class: p.class,
+          subject: p.subject,
+          teacher: p.teacher,
+          schedule: p.schedule,
+          weekNumber: p.weekNumber,
+          dayOfWeek: p.dayOfWeek,
+          dayName: p.dayName,
+          periodNumber: p.periodNumber,
+          periodType: p.periodType,
+          status: p.status,
+          date: p.date,
+          timeStart: p.timeStart,
+          timeEnd: p.timeEnd
+        })),
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        },
+        filters: query
+      };
+    } catch (error) {
+      throw new Error(`Failed to search periods: ${error.message}`);
+    }
+  }
+
+  // NEW: Get detailed lesson schedule by date range using Lesson model
+  async getDetailedLessonScheduleByDateRange(className, academicYear, startOfWeek, endOfWeek) {
+    try {
+      console.log(`🔍 Getting detailed lesson schedule for ${className}, ${academicYear}, ${startOfWeek} to ${endOfWeek}`);
+      
+      const classInfo = await Class.findOne({ className, academicYear });
+      if (!classInfo) {
+        throw new Error(`Class ${className} not found in academic year ${academicYear}`);
       }
 
-      // Parse dates
       const startDate = new Date(startOfWeek);
       const endDate = new Date(endOfWeek);
-      
-      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-        throw new Error('Invalid date format. Use YYYY-MM-DD');
-      }
+      endDate.setHours(23, 59, 59, 999); // End of day
 
-      // Generate days in range
-      const daysInRange = [];
-      const currentDate = new Date(startDate);
+      // Find all lessons in the date range for this class
+      const lessons = await Lesson.find({
+        class: classInfo._id,
+        scheduledDate: {
+          $gte: startDate,
+          $lte: endDate
+        }
+      })
+      .populate('subject', 'subjectName subjectCode department weeklyHours')
+      .populate('teacher', 'name email phoneNumber role')
+      .populate('timeSlot', 'period startTime endTime')
+      .populate('academicYear', 'name startDate endDate isActive')
+      .sort({ scheduledDate: 1, 'timeSlot.period': 1 })
+      .lean();
+
+      console.log(`📚 Found ${lessons.length} lessons in date range`);
+
+      // Group lessons by date and organize by day
+      const scheduleByDay = {};
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+      lessons.forEach(lesson => {
+        const dateKey = lesson.scheduledDate.toISOString().split('T')[0];
+        const dayOfWeek = lesson.scheduledDate.getDay();
+        
+        if (!scheduleByDay[dateKey]) {
+          scheduleByDay[dateKey] = {
+            date: dateKey,
+            dayOfWeek: dayOfWeek,
+            dayName: dayNames[dayOfWeek],
+            dayNameVN: this.getDayNameVN(dayOfWeek + 1), // Convert to 1-7 format
+            lessons: []
+          };
+        }
+
+        // Enhanced lesson info
+        const lessonInfo = {
+          lessonId: lesson.lessonId,
+          _id: lesson._id,
+          type: lesson.type,
+          status: lesson.status,
+          period: lesson.timeSlot?.period || 0,
+          timeSlot: {
+            period: lesson.timeSlot?.period || 0,
+            startTime: lesson.timeSlot?.startTime || '',
+            endTime: lesson.timeSlot?.endTime || ''
+          },
+          subject: lesson.subject ? {
+            _id: lesson.subject._id,
+            name: lesson.subject.subjectName,
+            code: lesson.subject.subjectCode,
+            department: lesson.subject.department,
+            weeklyHours: lesson.subject.weeklyHours
+          } : null,
+          teacher: lesson.teacher ? {
+            _id: lesson.teacher._id,
+            name: lesson.teacher.name,
+            email: lesson.teacher.email,
+            phoneNumber: lesson.teacher.phoneNumber,
+            role: lesson.teacher.role
+          } : null,
+          topic: lesson.topic || '',
+          notes: lesson.notes || '',
+          actualDate: lesson.actualDate,
+          evaluation: lesson.evaluation || null,
+          attendance: lesson.attendance || null,
+          makeupInfo: lesson.makeupInfo || null,
+          extracurricularInfo: lesson.extracurricularInfo || null,
+          fixedInfo: lesson.fixedInfo || null,
+          createdAt: lesson.createdAt,
+          updatedAt: lesson.updatedAt
+        };
+
+        scheduleByDay[dateKey].lessons.push(lessonInfo);
+      });
+
+      // Sort lessons by period within each day
+      Object.values(scheduleByDay).forEach(day => {
+        day.lessons.sort((a, b) => a.period - b.period);
+      });
+
+      // Convert to array and sort by date
+      const weeklySchedule = Object.values(scheduleByDay).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      // Fill in missing days with empty structure
+      const fullWeekSchedule = [];
+      let currentDate = new Date(startDate);
       
       while (currentDate <= endDate) {
+        const dateKey = currentDate.toISOString().split('T')[0];
         const dayOfWeek = currentDate.getDay();
-        // Skip Sunday (0) and only include Monday (1) to Saturday (6)
-        if (dayOfWeek >= 1 && dayOfWeek <= 6) {
-          daysInRange.push({
-            date: currentDate.toISOString().split('T')[0],
-            dayOfWeek: dayOfWeek + 1, // Convert to our format (Monday = 2, Saturday = 7)
-            dayName: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek - 1]
+        
+        const existingDay = scheduleByDay[dateKey];
+        if (existingDay) {
+          fullWeekSchedule.push(existingDay);
+        } else {
+          fullWeekSchedule.push({
+            date: dateKey,
+            dayOfWeek: dayOfWeek,
+            dayName: dayNames[dayOfWeek],
+            dayNameVN: this.getDayNameVN(dayOfWeek + 1),
+            lessons: []
           });
         }
+        
         currentDate.setDate(currentDate.getDate() + 1);
       }
 
-      // Find all schedules where this teacher teaches
-      const schedules = await Schedule.find({
-        academicYear,
-        status: 'active',
-        'schedule.periods.teacher': teacherId
-      })
-      .populate('class', 'className academicYear')
-      .populate('schedule.periods.subject', 'subjectName subjectCode department')
-      .populate('schedule.periods.teacher', 'name email')
-      .lean();
+      // Calculate statistics
+      const totalLessons = lessons.length;
+      const completedLessons = lessons.filter(l => l.status === 'completed').length;
+      const scheduledLessons = lessons.filter(l => l.status === 'scheduled').length;
+      const cancelledLessons = lessons.filter(l => l.status === 'cancelled').length;
 
-      console.log(`📋 Found ${schedules.length} schedules for teacher ${teacher.name}`);
-
-      // Extract teacher's periods from all schedules
-      const teacherPeriods = [];
-      
-      schedules.forEach(schedule => {
-        schedule.schedule.forEach(day => {
-          // Only include days in our date range
-          const dayInRange = daysInRange.find(rd => rd.dayOfWeek === day.dayOfWeek);
-          if (dayInRange) {
-            // Filter periods taught by this teacher
-            const teacherDayPeriods = day.periods.filter(period => 
-              period.teacher && period.teacher._id.toString() === teacherId.toString()
-            );
-
-            if (teacherDayPeriods.length > 0) {
-              teacherPeriods.push({
-                date: dayInRange.date,
-                dayOfWeek: day.dayOfWeek,
-                dayName: day.dayName,
-                class: {
-                  id: schedule.class._id,
-                  name: schedule.class.className
-                },
-                periods: teacherDayPeriods.map(period => ({
-                  periodNumber: period.periodNumber,
-                  session: period.session,
-                  timeStart: period.timeStart,
-                  timeEnd: period.timeEnd,
-                  status: period.status,
-                  actualDate: period.actualDate,
-                  completedAt: period.completedAt,
-                  notes: period.notes,
-                  attendance: period.attendance,
-                  subject: period.subject ? {
-                    id: period.subject._id,
-                    name: period.subject.subjectName,
-                    code: period.subject.subjectCode,
-                    department: period.subject.department
-                  } : null,
-                  fixed: period.fixed || false,
-                  specialType: period.specialType || null,
-                  periodType: period.periodType || 'regular',
-                  makeupInfo: period.makeupInfo,
-                  extracurricularInfo: period.extracurricularInfo
-                }))
-              });
-            }
+      const subjectStats = {};
+      lessons.forEach(lesson => {
+        if (lesson.subject) {
+          if (!subjectStats[lesson.subject.subjectCode]) {
+            subjectStats[lesson.subject.subjectCode] = {
+              subjectName: lesson.subject.subjectName,
+              total: 0,
+              completed: 0,
+              scheduled: 0,
+              cancelled: 0
+            };
           }
-        });
-      });
-
-      // Group by date and sort
-      const groupedByDate = {};
-      teacherPeriods.forEach(daySchedule => {
-        if (!groupedByDate[daySchedule.date]) {
-          groupedByDate[daySchedule.date] = {
-            date: daySchedule.date,
-            dayOfWeek: daySchedule.dayOfWeek,
-            dayName: daySchedule.dayName,
-            classes: []
-          };
-        }
-        
-        groupedByDate[daySchedule.date].classes.push({
-          class: daySchedule.class,
-          periods: daySchedule.periods
-        });
-      });
-
-      // Convert to array and sort by dayOfWeek (Monday=2, Tuesday=3, etc.)
-      const dailySchedule = Object.values(groupedByDate).sort((a, b) => 
-        a.dayOfWeek - b.dayOfWeek
-      );
-
-      // Create weekly schedule format for easier reading
-      const weeklySchedule = {};
-      const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const dayNamesVN = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
-      
-      // Initialize all days using English day names as keys
-      dayNames.forEach((dayName, index) => {
-        const dayOfWeek = index + 2; // Monday = 2
-        weeklySchedule[dayName] = {
-          dayName: dayName,
-          dayNameVN: dayNamesVN[index],
-          dayOfWeek: dayOfWeek,
-          date: null,
-          periods: []
-        };
-      });
-
-      // Fill in the actual schedule data
-      dailySchedule.forEach(day => {
-        const dayName = dayNames[day.dayOfWeek - 2];
-        if (weeklySchedule[dayName]) {
-          weeklySchedule[dayName].date = day.date;
-          
-          // Flatten all periods from all classes for this day
-          day.classes.forEach(classSchedule => {
-            classSchedule.periods.forEach(period => {
-              weeklySchedule[dayName].periods.push({
-                className: classSchedule.class.name,
-                periodNumber: period.periodNumber,
-                timeStart: period.timeStart,
-                timeEnd: period.timeEnd,
-                subject: period.subject?.name || 'Fixed Period',
-                status: period.status,
-                fixed: period.fixed,
-                specialType: period.specialType,
-                periodType: period.periodType,
-                makeupInfo: period.makeupInfo,
-                extracurricularInfo: period.extracurricularInfo
-              });
-            });
-          });
-
-          // Sort periods by period number
-          weeklySchedule[dayName].periods.sort((a, b) => a.periodNumber - b.periodNumber);
+          subjectStats[lesson.subject.subjectCode].total++;
+          subjectStats[lesson.subject.subjectCode][lesson.status]++;
         }
       });
 
-      // Calculate statistics with period type breakdown
-      const totalPeriods = teacherPeriods.reduce((sum, day) => sum + day.periods.length, 0);
-      const completedPeriods = teacherPeriods.reduce((sum, day) => 
-        sum + day.periods.filter(p => p.status === 'completed').length, 0
-      );
-      const absentPeriods = teacherPeriods.reduce((sum, day) => 
-        sum + day.periods.filter(p => p.status === 'absent').length, 0
-      );
-
-      // Period type statistics
-      const periodTypeStats = {
-        regular: 0,
-        makeup: 0,
-        extracurricular: 0,
-        fixed: 0
-      };
-
-      teacherPeriods.forEach(day => {
-        day.periods.forEach(period => {
-          const periodType = period.periodType || 'regular';
-          if (periodTypeStats[periodType] !== undefined) {
-            periodTypeStats[periodType]++;
-          }
-        });
-      });
+      console.log(`📊 Returning detailed schedule with ${fullWeekSchedule.length} days and ${totalLessons} lessons`);
 
       return {
-        teacher: {
-          id: teacher._id,
-          name: teacher.name,
-          email: teacher.email,
-          subject: teacher.subject
+        success: true,
+        class: {
+          _id: classInfo._id,
+          className: classInfo.className,
+          academicYear: classInfo.academicYear,
+          gradeLevel: classInfo.gradeLevel,
+          homeroomTeacher: classInfo.homeroomTeacher
         },
         dateRange: {
           startOfWeek,
           endOfWeek,
-          daysInRange: daysInRange.length
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString()
         },
+        schedule: fullWeekSchedule,
         statistics: {
-          totalPeriods,
-          completedPeriods,
-          absentPeriods,
-          pendingPeriods: totalPeriods - completedPeriods - absentPeriods,
-          completionRate: totalPeriods > 0 ? ((completedPeriods / totalPeriods) * 100).toFixed(2) : 0,
-          periodTypeBreakdown: periodTypeStats
+          totalLessons,
+          completedLessons,
+          scheduledLessons,
+          cancelledLessons,
+          completionRate: totalLessons > 0 ? ((completedLessons / totalLessons) * 100).toFixed(2) + '%' : '0%',
+          subjectStats
         },
-        weeklySchedule, // New format: organized by day of week
-        dailySchedule,  // Original format: organized by date
-        totalClasses: schedules.length,
-        generatedAt: new Date()
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to get teacher schedule by date range: ${error.message}`);
-    }
-  }
-
-  // Lấy thống kê theo loại tiết học
-  async getPeriodTypeStatistics(className, academicYear) {
-    try {
-      const classInfo = await Class.findOne({
-        className: className.toUpperCase(),
-        academicYear,
-        active: true
-      });
-
-      if (!classInfo) {
-        throw new Error(`Class ${className} not found in academic year ${academicYear}`);
-      }
-
-      const schedule = await Schedule.findOne({
-        class: classInfo._id,
-        academicYear,
-        status: 'active'
-      });
-
-      if (!schedule) {
-        throw new Error(`No active schedule found for class ${className}`);
-      }
-
-      const stats = schedule.getPeriodTypeStatistics();
-
-      return {
-        class: {
-          id: classInfo._id,
-          name: classInfo.className,
-          academicYear: classInfo.academicYear
-        },
-        statistics: stats,
-        generatedAt: new Date()
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to get period type statistics: ${error.message}`);
-    }
-  }
-
-  // Lấy danh sách tiết học theo loại
-  async getPeriodsByType(className, academicYear, periodType) {
-    try {
-      const classInfo = await Class.findOne({
-        className: className.toUpperCase(),
-        academicYear,
-        active: true
-      });
-
-      if (!classInfo) {
-        throw new Error(`Class ${className} not found in academic year ${academicYear}`);
-      }
-
-      const schedule = await Schedule.findOne({
-        class: classInfo._id,
-        academicYear,
-        status: 'active'
-      })
-      .populate('schedule.periods.subject', 'subjectName subjectCode department')
-      .populate('schedule.periods.teacher', 'name email');
-
-      if (!schedule) {
-        throw new Error(`No active schedule found for class ${className}`);
-      }
-
-      const periods = schedule.getPeriodsByType(periodType);
-
-      return {
-        class: {
-          id: classInfo._id,
-          name: classInfo.className,
-          academicYear: classInfo.academicYear
-        },
-        periodType,
-        totalPeriods: periods.length,
-        periods: periods.map(period => ({
-          ...period,
-          subject: period.subject ? {
-            id: period.subject._id,
-            name: period.subject.subjectName,
-            code: period.subject.subjectCode,
-            department: period.subject.department
-          } : null,
-          teacher: period.teacher ? {
-            id: period.teacher._id,
-            name: period.teacher.name,
-            email: period.teacher.email
-          } : null
-        })),
-        generatedAt: new Date()
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to get periods by type: ${error.message}`);
-    }
-  }
-
-  // Nhận biết loại tiết học
-  async identifyPeriodType(className, academicYear, dayOfWeek, periodNumber) {
-    try {
-      const classInfo = await Class.findOne({
-        className: className.toUpperCase(),
-        academicYear,
-        active: true
-      });
-
-      if (!classInfo) {
-        throw new Error(`Class ${className} not found in academic year ${academicYear}`);
-      }
-
-      const schedule = await Schedule.findOne({
-        class: classInfo._id,
-        academicYear,
-        status: 'active'
-      })
-      .populate('schedule.periods.subject', 'subjectName subjectCode department')
-      .populate('schedule.periods.teacher', 'name email');
-
-      if (!schedule) {
-        throw new Error(`No active schedule found for class ${className}`);
-      }
-
-      const periodInfo = schedule.identifyPeriodType(dayOfWeek, periodNumber);
-
-      if (!periodInfo) {
-        return {
-          class: {
-            id: classInfo._id,
-            name: classInfo.className,
-            academicYear: classInfo.academicYear
-          },
-          dayOfWeek,
-          periodNumber,
-          exists: false,
-          message: 'Period not found'
-        };
-      }
-
-      return {
-        class: {
-          id: classInfo._id,
-          name: classInfo.className,
-          academicYear: classInfo.academicYear
-        },
-        dayOfWeek,
-        periodNumber,
-        exists: true,
-        periodType: periodInfo.periodType,
-        isRegular: periodInfo.isRegular,
-        isMakeup: periodInfo.isMakeup,
-        isExtracurricular: periodInfo.isExtracurricular,
-        isFixed: periodInfo.isFixed,
-        details: {
-          subject: periodInfo.details.subject ? {
-            id: periodInfo.details.subject._id,
-            name: periodInfo.details.subject.subjectName,
-            code: periodInfo.details.subject.subjectCode,
-            department: periodInfo.details.subject.department
-          } : null,
-          teacher: periodInfo.details.teacher ? {
-            id: periodInfo.details.teacher._id,
-            name: periodInfo.details.teacher.name,
-            email: periodInfo.details.teacher.email
-          } : null,
-          status: periodInfo.details.status,
-          makeupInfo: periodInfo.details.makeupInfo,
-          extracurricularInfo: periodInfo.details.extracurricularInfo,
-          specialType: periodInfo.details.specialType
+        metadata: {
+          totalDays: fullWeekSchedule.length,
+          daysWithLessons: weeklySchedule.length,
+          architecture: 'lesson-based',
+          generatedAt: new Date().toISOString()
         }
       };
 
     } catch (error) {
-      throw new Error(`Failed to identify period type: ${error.message}`);
-    }
-  }
-
-  // Thêm tiết dạy bù
-  async addMakeupPeriod(scheduleId, dayOfWeek, periodNumber, teacherId, subjectId, makeupInfo, timeSlot, token) {
-    try {
-      // Verify user permissions
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id);
-      
-      if (!user || !['admin', 'manager', 'teacher'].includes(user.role)) {
-        throw new Error('Unauthorized to add makeup period');
-      }
-
-      const schedule = await Schedule.findById(scheduleId);
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      // Validate teacher and subject
-      const teacher = await User.findById(teacherId);
-      if (!teacher || !teacher.role.includes('teacher')) {
-        throw new Error('Invalid teacher');
-      }
-
-      const subject = await Subject.findById(subjectId);
-      if (!subject) {
-        throw new Error('Invalid subject');
-      }
-
-      // Generate time slot if not provided
-      if (!timeSlot) {
-        const defaultTimeSlots = this.getTimeSlots();
-        const allSlots = [...defaultTimeSlots.morning, ...defaultTimeSlots.afternoon];
-        timeSlot = allSlots.find(slot => slot.period === periodNumber);
-        
-        if (!timeSlot) {
-          throw new Error('Invalid period number');
-        }
-      }
-
-      // Add makeup period
-      const success = schedule.addMakeupPeriod(
-        dayOfWeek,
-        periodNumber,
-        teacherId,
-        subjectId,
-        makeupInfo,
-        timeSlot
-      );
-
-      if (!success) {
-        throw new Error('Failed to add makeup period - slot may be occupied');
-      }
-
-      schedule.lastModifiedBy = user._id;
-      await schedule.save();
-
-      return {
-        message: 'Makeup period added successfully',
-        schedule: schedule,
-        addedPeriod: {
-          dayOfWeek,
-          periodNumber,
-          periodType: 'makeup',
-          teacher: teacher.name,
-          subject: subject.subjectName,
-          makeupInfo
-        }
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to add makeup period: ${error.message}`);
-    }
-  }
-
-  // Thêm hoạt động ngoại khóa
-  async addExtracurricularPeriod(scheduleId, dayOfWeek, periodNumber, teacherId, extracurricularInfo, timeSlot, token) {
-    try {
-      // Verify user permissions
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id);
-      
-      if (!user || !['admin', 'manager', 'teacher'].includes(user.role)) {
-        throw new Error('Unauthorized to add extracurricular period');
-      }
-
-      const schedule = await Schedule.findById(scheduleId);
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      // Validate teacher
-      const teacher = await User.findById(teacherId);
-      if (!teacher || !teacher.role.includes('teacher')) {
-        throw new Error('Invalid teacher');
-      }
-
-      // Generate time slot if not provided
-      if (!timeSlot) {
-        const defaultTimeSlots = this.getTimeSlots();
-        const allSlots = [...defaultTimeSlots.morning, ...defaultTimeSlots.afternoon];
-        timeSlot = allSlots.find(slot => slot.period === periodNumber);
-        
-        if (!timeSlot) {
-          throw new Error('Invalid period number');
-        }
-      }
-
-      // Add extracurricular period
-      const success = schedule.addExtracurricularPeriod(
-        dayOfWeek,
-        periodNumber,
-        teacherId,
-        extracurricularInfo,
-        timeSlot
-      );
-
-      if (!success) {
-        throw new Error('Failed to add extracurricular period - slot may be occupied');
-      }
-
-      schedule.lastModifiedBy = user._id;
-      await schedule.save();
-
-      return {
-        message: 'Extracurricular period added successfully',
-        schedule: schedule,
-        addedPeriod: {
-          dayOfWeek,
-          periodNumber,
-          periodType: 'extracurricular',
-          teacher: teacher.name,
-          extracurricularInfo
-        }
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to add extracurricular period: ${error.message}`);
-    }
-  }
-
-  // Lấy danh sách slot trống
-  async getAvailableSlots(className, academicYear) {
-    try {
-      const classInfo = await Class.findOne({
-        className: className.toUpperCase(),
-        academicYear,
-        active: true
-      });
-
-      if (!classInfo) {
-        throw new Error(`Class ${className} not found in academic year ${academicYear}`);
-      }
-
-      const schedule = await Schedule.findOne({
-        class: classInfo._id,
-        academicYear,
-        status: 'active'
-      });
-
-      if (!schedule) {
-        throw new Error(`No active schedule found for class ${className}`);
-      }
-
-      const availableSlots = [];
-      const timeSlots = this.getTimeSlots();
-      const allSlots = [
-        ...timeSlots.morning.map(slot => ({ ...slot, session: 'morning' })),
-        ...timeSlots.afternoon.map(slot => ({ ...slot, session: 'afternoon' }))
-      ];
-
-      schedule.schedule.forEach(day => {
-        const occupiedPeriods = day.periods.map(p => p.periodNumber);
-        
-        allSlots.forEach(slot => {
-          if (!occupiedPeriods.includes(slot.period)) {
-            availableSlots.push({
-              dayOfWeek: day.dayOfWeek,
-              dayName: day.dayName,
-              periodNumber: slot.period,
-              session: slot.session,
-              timeStart: slot.start,
-              timeEnd: slot.end
-            });
-          }
-        });
-      });
-
-      return {
-        class: {
-          id: classInfo._id,
-          name: classInfo.className,
-          academicYear: classInfo.academicYear
-        },
-        totalAvailableSlots: availableSlots.length,
-        availableSlots: availableSlots.sort((a, b) => {
-          if (a.dayOfWeek !== b.dayOfWeek) {
-            return a.dayOfWeek - b.dayOfWeek;
-          }
-          return a.periodNumber - b.periodNumber;
-        }),
-        generatedAt: new Date()
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to get available slots: ${error.message}`);
-    }
-  }
-
-  // Lấy chi tiết tiết học
-  async getPeriodDetails(className, academicYear, dayOfWeek, periodNumber) {
-    try {
-      const classInfo = await Class.findOne({
-        className: className.toUpperCase(),
-        academicYear,
-        active: true
-      });
-
-      if (!classInfo) {
-        throw new Error(`Class ${className} not found in academic year ${academicYear}`);
-      }
-
-      const schedule = await Schedule.findOne({
-        class: classInfo._id,
-        academicYear,
-        status: 'active'
-      })
-      .populate('schedule.periods.subject', 'subjectName subjectCode department weeklyHours')
-      .populate('schedule.periods.teacher', 'name email role')
-      .populate('class', 'className academicYear homeroomTeacher')
-      .populate('createdBy', 'name email')
-      .populate('lastModifiedBy', 'name email');
-
-      if (!schedule) {
-        throw new Error(`No active schedule found for class ${className}`);
-      }
-
-      const periodDetails = schedule.getPeriodDetails(dayOfWeek, periodNumber);
-
-      if (!periodDetails) {
-        return {
-          class: {
-            id: classInfo._id,
-            name: classInfo.className,
-            academicYear: classInfo.academicYear
-          },
-          schedule: {
-            id: schedule._id,
-            status: schedule.status,
-            createdBy: schedule.createdBy,
-            lastModifiedBy: schedule.lastModifiedBy,
-            createdAt: schedule.createdAt,
-            updatedAt: schedule.updatedAt
-          },
-          dayOfWeek,
-          periodNumber,
-          exists: false,
-          message: `No period found for ${periodDetails?.basic?.dayNameVN || `day ${dayOfWeek}`} period ${periodNumber}`
-        };
-      }
-
-      // Populate subject and teacher information
-      if (periodDetails.academic.subject) {
-        const populatedSubject = await Subject.findById(periodDetails.academic.subject).select('subjectName subjectCode department weeklyHours category');
-        periodDetails.academic.subject = populatedSubject ? {
-          id: populatedSubject._id,
-          name: populatedSubject.subjectName,
-          code: populatedSubject.subjectCode,
-          department: populatedSubject.department,
-          weeklyHours: populatedSubject.weeklyHours,
-          category: populatedSubject.category
-        } : null;
-      }
-
-      if (periodDetails.academic.teacher) {
-        const populatedTeacher = await User.findById(periodDetails.academic.teacher).select('name email role');
-        periodDetails.academic.teacher = populatedTeacher ? {
-          id: populatedTeacher._id,
-          name: populatedTeacher.name,
-          email: populatedTeacher.email,
-          role: populatedTeacher.role
-        } : null;
-      }
-
-      return {
-        class: {
-          id: classInfo._id,
-          name: classInfo.className,
-          academicYear: classInfo.academicYear,
-          homeroomTeacher: schedule.class.homeroomTeacher
-        },
-        schedule: {
-          id: schedule._id,
-          status: schedule.status,
-          semester: schedule.semester,
-          weekNumber: schedule.weekNumber,
-          totalPeriods: schedule.getTotalScheduledPeriods(),
-          createdBy: schedule.createdBy,
-          lastModifiedBy: schedule.lastModifiedBy,
-          createdAt: schedule.createdAt,
-          updatedAt: schedule.updatedAt
-        },
-        exists: true,
-        period: periodDetails,
-        generatedAt: new Date()
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to get period details: ${error.message}`);
-    }
-  }
-
-  // Đánh giá tiết học
-  async evaluatePeriod(scheduleId, dayOfWeek, periodNumber, evaluationData, evaluatorId, evaluatorRole) {
-    try {
-      const schedule = await Schedule.findById(scheduleId);
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      // Kiểm tra tiết học có tồn tại không
-      const daySchedule = schedule.getScheduleByDay(dayOfWeek);
-      if (!daySchedule) {
-        throw new Error(`No schedule found for day ${dayOfWeek}`);
-      }
-
-      const period = daySchedule.periods.find(p => p.periodNumber === periodNumber);
-      if (!period) {
-        throw new Error(`No period found for day ${dayOfWeek}, period ${periodNumber}`);
-      }
-
-      // Kiểm tra tiết học đã hoàn thành chưa
-      if (period.status !== 'completed') {
-        throw new Error('Can only evaluate completed periods');
-      }
-
-      // Thực hiện đánh giá
-      const evaluation = schedule.evaluatePeriod(
-        dayOfWeek, 
-        periodNumber, 
-        evaluationData, 
-        evaluatorId, 
-        evaluatorRole
-      );
-
-      if (!evaluation) {
-        throw new Error('Failed to evaluate period');
-      }
-
-      // Lưu thay đổi
-      await schedule.save();
-
-      // Populate thông tin evaluator
-      const evaluator = await User.findById(evaluatorId).select('name email role');
-
-      return {
-        scheduleId: schedule._id,
-        dayOfWeek,
-        periodNumber,
-        evaluation: {
-          ...evaluation,
-          evaluatedBy: evaluator ? {
-            id: evaluator._id,
-            name: evaluator.name,
-            email: evaluator.email,
-            role: evaluator.role
-          } : evaluation.evaluatedBy
-        },
-        evaluatedAt: new Date()
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to evaluate period: ${error.message}`);
-    }
-  }
-
-  // Lấy đánh giá tiết học
-  async getPeriodEvaluation(scheduleId, dayOfWeek, periodNumber) {
-    try {
-      const schedule = await Schedule.findById(scheduleId)
-        .populate('schedule.periods.evaluation.evaluatedBy', 'name email role');
-
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      const evaluation = schedule.getPeriodEvaluation(dayOfWeek, periodNumber);
-
-      if (!evaluation) {
-        return {
-          scheduleId: schedule._id,
-          dayOfWeek,
-          periodNumber,
-          hasEvaluation: false,
-          message: 'No evaluation found for this period'
-        };
-      }
-
-      return {
-        scheduleId: schedule._id,
-        dayOfWeek,
-        periodNumber,
-        hasEvaluation: true,
-        evaluation: {
-          overallRating: evaluation.overallRating,
-          overallRatingText: ['', 'Kém', 'Trung bình', 'Khá', 'Tốt', 'Xuất sắc'][evaluation.overallRating] || 'Chưa đánh giá',
-          criteria: evaluation.criteria,
-          feedback: evaluation.feedback,
-          evaluatedBy: evaluation.evaluatedBy,
-          evaluatedAt: evaluation.evaluatedAt,
-          evaluatorRole: evaluation.evaluatorRole,
-          evaluatorRoleVN: {
-            'admin': 'Quản trị viên',
-            'manager': 'Quản lý',
-            'principal': 'Hiệu trưởng',
-            'head_teacher': 'Tổ trưởng',
-            'peer_teacher': 'Giáo viên đồng nghiệp'
-          }[evaluation.evaluatorRole] || 'Không xác định'
-        }
-      };
-
-    } catch (error) {
-      throw new Error(`Failed to get period evaluation: ${error.message}`);
-    }
-  }
-  // ========== API MỚI CHO SCHEMA TUẦN-NGÀY-TIẾT ==========
-
-  // Lấy chi tiết tiết học theo ID
-  async getPeriodById(scheduleId, periodId) {
-    try {
-      const schedule = await Schedule.findById(scheduleId)
-        .populate('weeks.days.periods.subject', 'subjectName subjectCode department')
-        .populate('weeks.days.periods.teacher', 'name email')
-        .populate('class', 'className academicYear');
-
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      const periodDetails = schedule.getPeriodDetailsById(periodId);
-      if (!periodDetails) {
-        throw new Error('Period not found');
-      }
-
-      return {
-        schedule: {
-          id: schedule._id,
-          class: schedule.class,
-          academicYear: schedule.academicYear
-        },
-        period: periodDetails
-      };
-    } catch (error) {
-      throw new Error(`Failed to get period by ID: ${error.message}`);
-    }
-  }
-
-  // Lấy danh sách tiết rỗng
-  async getEmptySlots(scheduleId, weekNumber = null) {
-    try {
-      const schedule = await Schedule.findById(scheduleId)
-        .populate('class', 'className academicYear');
-
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      const emptySlots = schedule.getAvailableEmptySlots(weekNumber);
-
-      return {
-        schedule: {
-          id: schedule._id,
-          class: schedule.class,
-          academicYear: schedule.academicYear
-        },
-        weekNumber: weekNumber,
-        totalEmptySlots: emptySlots.length,
-        emptySlots: emptySlots
-      };
-    } catch (error) {
-      throw new Error(`Failed to get empty slots: ${error.message}`);
-    }
-  }
-
-  // Lấy thời khóa biểu theo tuần
-  async getScheduleByWeek(scheduleId, weekNumber) {
-    try {
-      const schedule = await Schedule.findById(scheduleId)
-        .populate('weeks.days.periods.subject', 'subjectName subjectCode department')
-        .populate('weeks.days.periods.teacher', 'name email')
-        .populate('class', 'className academicYear');
-
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      const week = schedule.getScheduleByWeek(weekNumber);
-      if (!week) {
-        throw new Error(`Week ${weekNumber} not found`);
-      }
-
-      return {
-        schedule: {
-          id: schedule._id,
-          class: schedule.class,
-          academicYear: schedule.academicYear,
-          totalWeeks: schedule.totalWeeks
-        },
-        week: {
-          weekNumber: week.weekNumber,
-          startDate: week.startDate,
-          endDate: week.endDate,
-          days: week.days.map(day => ({
-            dayOfWeek: day.dayOfWeek,
-            dayName: day.dayName,
-            dayNameVN: ['', 'CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][day.dayOfWeek],
-            date: day.date,
-            periods: day.periods.map(period => ({
-              id: period._id,
-              periodNumber: period.periodNumber,
-              periodType: period.periodType,
-              session: period.session,
-              timeStart: period.timeStart,
-              timeEnd: period.timeEnd,
-              status: period.status,
-              subject: period.subject ? {
-                id: period.subject._id,
-                name: period.subject.subjectName,
-                code: period.subject.subjectCode,
-                department: period.subject.department
-              } : null,
-              teacher: period.teacher ? {
-                id: period.teacher._id,
-                name: period.teacher.name,
-                email: period.teacher.email
-              } : null,
-              fixed: period.fixed,
-              specialType: period.specialType,
-              makeupInfo: period.makeupInfo,
-              extracurricularInfo: period.extracurricularInfo
-            }))
-          }))
-        }
-      };
-    } catch (error) {
-      throw new Error(`Failed to get schedule by week: ${error.message}`);
-    }
-  }
-
-  // Cập nhật trạng thái tiết học theo ID
-  async updatePeriodStatusById(scheduleId, periodId, status, options, token) {
-    try {
-      // Verify token và lấy user info
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id);
-      
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      const schedule = await Schedule.findById(scheduleId);
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      const success = schedule.updatePeriodStatusById(periodId, status, options);
-      if (!success) {
-        throw new Error('Period not found or update failed');
-      }
-
-      // Cập nhật lastModifiedBy
-      schedule.lastModifiedBy = user._id;
-      await schedule.save();
-
-      const updatedPeriod = schedule.getPeriodDetailsById(periodId);
-
-      return {
-        message: 'Period status updated successfully',
-        updatedPeriod: updatedPeriod
-      };
-    } catch (error) {
-      throw new Error(`Failed to update period status: ${error.message}`);
-    }
-  }
-
-  // Thêm tiết dạy bù vào slot rỗng
-  async addMakeupToEmptySlot(scheduleId, periodId, teacherId, subjectId, makeupInfo, token) {
-    try {
-      // Verify token và lấy user info
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id);
-      
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      const schedule = await Schedule.findById(scheduleId);
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      const success = schedule.addMakeupPeriodToEmptySlot(periodId, teacherId, subjectId, makeupInfo);
-      if (!success) {
-        throw new Error('Failed to add makeup period - slot may not be empty or not found');
-      }
-
-      // Cập nhật lastModifiedBy
-      schedule.lastModifiedBy = user._id;
-      await schedule.save();
-
-      const updatedPeriod = schedule.getPeriodDetailsById(periodId);
-
-      return {
-        message: 'Makeup period added successfully',
-        period: updatedPeriod
-      };
-    } catch (error) {
-      throw new Error(`Failed to add makeup period: ${error.message}`);
-    }
-  }
-
-  // Thêm hoạt động ngoại khóa vào slot rỗng
-  async addExtracurricularToEmptySlot(scheduleId, periodId, teacherId, extracurricularInfo, token) {
-    try {
-      // Verify token và lấy user info
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id);
-      
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      const schedule = await Schedule.findById(scheduleId);
-      if (!schedule) {
-        throw new Error('Schedule not found');
-      }
-
-      const success = schedule.addExtracurricularToEmptySlot(periodId, teacherId, extracurricularInfo);
-      if (!success) {
-        throw new Error('Failed to add extracurricular activity - slot may not be empty or not found');
-      }
-
-      // Cập nhật lastModifiedBy
-      schedule.lastModifiedBy = user._id;
-      await schedule.save();
-
-      const updatedPeriod = schedule.getPeriodDetailsById(periodId);
-
-      return {
-        message: 'Extracurricular activity added successfully',
-        period: updatedPeriod
-      };
-    } catch (error) {
-      throw new Error(`Failed to add extracurricular activity: ${error.message}`);
-    }
-  }
-
-  // Helper method to save schedule with proper validation settings
-  async saveScheduleWithValidation(schedule) {
-    try {
-      return await schedule.save({ validateBeforeSave: false });
-    } catch (error) {
-      console.error('Error saving schedule:', error.message);
-      throw error;
+      console.error('❌ Error in getDetailedLessonScheduleByDateRange:', error.message);
+      throw new Error(`Error fetching detailed lesson schedule: ${error.message}`);
     }
   }
 }

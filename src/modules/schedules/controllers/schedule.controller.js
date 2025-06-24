@@ -1,7 +1,7 @@
 const scheduleService = require('../services/schedule.service');
 
 class ScheduleController {
-  // Khởi tạo thời khóa biểu cho các lớp trong năm học (33 tiết/tuần)
+  // Khởi tạo thời khóa biểu cho các lớp trong năm học (NEW ARCHITECTURE)
   async initializeSchedulesForAcademicYear(req, res, next) {
     try {
       const token = req.headers.authorization?.split(' ')[1];
@@ -12,13 +12,19 @@ class ScheduleController {
         });
       }
 
-      const result = await scheduleService.initializeSchedulesForAcademicYear(req.body, token);
+      console.log('🚀 Using NEW architecture for schedule initialization...');
+
+      // Sử dụng method mới với Lesson-based architecture
+      const result = await scheduleService.initializeSchedulesWithNewArchitecture(req.body, token);
+      
       res.status(201).json({
         success: true,
-        message: 'Schedules initialized successfully',
-        data: result
+        message: 'Schedules initialized successfully with new architecture',
+        data: result,
+        architecture: 'lesson-based'
       });
     } catch (error) {
+      console.error('❌ Schedule initialization error:', error.message);
       next(error);
     }
   }
@@ -104,16 +110,16 @@ class ScheduleController {
 
       let result;
       
-      // Nếu có startOfWeek và endOfWeek, dùng date range
+      // Nếu có startOfWeek và endOfWeek, dùng NEW detailed lesson-based method
       if (startOfWeek && endOfWeek) {
-        result = await scheduleService.getClassScheduleByDateRange(
+        result = await scheduleService.getDetailedLessonScheduleByDateRange(
           className, 
           academicYear, 
           startOfWeek,
           endOfWeek
         );
       } else {
-        // Fallback to weekNumber approach
+        // Fallback to weekNumber approach (legacy)
         result = await scheduleService.getClassSchedule(
           className, 
           academicYear, 
@@ -1332,6 +1338,130 @@ class ScheduleController {
       
       res.status(200).json({
         success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Lấy lịch học theo ngày cụ thể với đầy đủ thông tin
+  async getDaySchedule(req, res, next) {
+    try {
+      const { className, academicYear, date } = req.query;
+      
+      if (!className || !academicYear || !date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Class name, academic year, and date are required'
+        });
+      }
+
+      const result = await scheduleService.getDaySchedule(className, academicYear, date);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Day schedule retrieved successfully',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Lấy thông tin chi tiết của tiết học với metadata đầy đủ
+  async getDetailedPeriodInfo(req, res, next) {
+    try {
+      const { periodId } = req.params;
+      
+      if (!periodId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Period ID is required'
+        });
+      }
+
+      const result = await scheduleService.getDetailedPeriodInfo(periodId);
+      
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          message: 'Period not found'
+        });
+      }
+      
+      res.status(200).json({
+        success: true,
+        message: 'Period details retrieved successfully',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Bulk update nhiều tiết học cùng lúc
+  async bulkUpdatePeriods(req, res, next) {
+    try {
+      const { periods } = req.body;
+      const userId = req.user._id;
+      
+      if (!periods || !Array.isArray(periods) || periods.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Periods array is required and cannot be empty'
+        });
+      }
+
+      const result = await scheduleService.bulkUpdatePeriods(periods, userId);
+      
+      res.status(200).json({
+        success: true,
+        message: `Updated ${result.updated} periods successfully`,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Lấy lịch giảng dạy của giáo viên theo tuần
+  async getTeacherWeeklySchedule(req, res, next) {
+    try {
+      const { teacherId, weekNumber, academicYear } = req.query;
+      
+      if (!teacherId || !weekNumber || !academicYear) {
+        return res.status(400).json({
+          success: false,
+          message: 'Teacher ID, week number, and academic year are required'
+        });
+      }
+
+      const result = await scheduleService.getTeacherWeeklySchedule(
+        teacherId, 
+        parseInt(weekNumber), 
+        academicYear
+      );
+      
+      res.status(200).json({
+        success: true,
+        message: 'Teacher weekly schedule retrieved successfully',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API mới: Search và filter periods với điều kiện phức tạp
+  async searchPeriods(req, res, next) {
+    try {
+      const filters = req.query;
+      const result = await scheduleService.searchPeriods(filters);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Periods search completed successfully',
         data: result
       });
     } catch (error) {

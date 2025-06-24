@@ -305,4 +305,38 @@ router.post('/:scheduleId/periods/:periodId/extracurricular',
   scheduleController.addExtracurricularToEmptySlot
 );
 
+// API MỚI: Lấy lịch học theo ngày cụ thể
+// GET /api/schedules/day-schedule?className=12A1&academicYear=2024-2025&date=2024-12-16
+router.get('/day-schedule',
+  authMiddleware.protect,
+  scheduleController.getDaySchedule
+);
+
+// API MỚI: Search periods với filter phức tạp
+// GET /api/schedules/search-periods?teacher=xxx&subject=xxx&status=completed
+router.get('/search-periods',
+  authMiddleware.protect,
+  scheduleController.searchPeriods
+);
+
+// API MỚI: Lấy lịch giảng dạy của giáo viên theo tuần
+// GET /api/schedules/teacher-weekly?teacherId=xxx&weekNumber=1&academicYear=2024-2025
+router.get('/teacher-weekly',
+  authMiddleware.protect,
+  scheduleController.getTeacherWeeklySchedule
+);
+
+// GET /api/schedules/periods/:periodId/detailed - Lấy chi tiết tiết học với metadata đầy đủ
+router.get('/periods/:periodId/detailed',
+  authMiddleware.protect,
+  scheduleController.getDetailedPeriodInfo
+);
+
+// PUT /api/schedules/bulk-update-periods - Bulk update nhiều tiết học
+router.put('/bulk-update-periods',
+  authMiddleware.protect,
+  authMiddleware.authorize('admin', 'manager', 'teacher'),
+  scheduleController.bulkUpdatePeriods
+);
+
 module.exports = router; 
