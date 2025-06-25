@@ -1,6 +1,7 @@
 const User = require('../../auth/models/user.model');
 const Class = require('../../classes/models/class.model');
 const Schedule = require('../models/schedule.model');
+const Period = require('../models/period.model');
 
 class TeacherAssignmentService {
   constructor() {
@@ -338,27 +339,15 @@ class TeacherAssignmentService {
    */
   async createOptimizedScheduleWithConflictCheck(classId, subjects, teacherAssignmentMap, className) {
     const Schedule = require('../models/schedule.model');
+    const Period = require('../models/period.model');
     const Class = require('../../classes/models/class.model');
     
     // Get homeroom teacher ID
     const classInfo = await Class.findById(classId).populate('homeroomTeacher');
     const homeroomTeacherId = classInfo.homeroomTeacher._id;
     
-    // Create schedule template
-    const schedule = {
-      class: classId,
-      academicYear: '2024-2025',
-      semester: 1,
-      status: 'active',
-      createdBy: homeroomTeacherId, // Add required createdBy field
-      schedule: []
-    };
-
-    // Tạo template sử dụng method mới
-    const templateSchedule = await Schedule.createTemplate(classId, '2024-2025', homeroomTeacherId);
-    schedule.weeks = templateSchedule.weeks;
-    schedule.academicStartDate = templateSchedule.academicStartDate;
-    schedule.totalWeeks = templateSchedule.totalWeeks;
+    // Create schedule template using new method
+    const schedule = await Schedule.createTemplate(classId, '2024-2025', homeroomTeacherId, homeroomTeacherId);
 
     // Create subject periods list with better distribution
     const subjectPeriods = this.createBalancedSubjectDistribution(subjects);
@@ -368,115 +357,143 @@ class TeacherAssignmentService {
     let placedPeriods = 0;
     let conflictCount = 0;
 
-         // Try to place subjects with better distribution strategy
-     // Chỉ xếp cho tuần đầu tiên, các tuần khác sẽ copy
-     const firstWeek = schedule.weeks[0];
-     if (!firstWeek) {
-       throw new Error('No weeks found in schedule template');
-     }
+    // Try to place subjects with better distribution strategy
+    // Chỉ xếp cho tuần đầu tiên, các tuần khác sẽ copy
+    const firstWeek = schedule.weeks[0];
+    if (!firstWeek) {
+      throw new Error('No weeks found in schedule template');
+    }
 
-     let currentPeriodIndex = 0;
-     const dailySubjectCount = {}; // Track subjects per day to avoid overloading
-     
-     for (let dayIndex = 0; dayIndex < 6; dayIndex++) {
-       const daySchedule = firstWeek.days[dayIndex];
-       const dayOfWeek = dayIndex + 2;
-       dailySubjectCount[dayIndex] = {};
-       
-       // Skip flag ceremony (Monday period 1) and class meeting (Saturday period 7)
-       const skipPeriods = [];
-       if (dayIndex === 0) skipPeriods.push(1); // Monday period 1: Flag ceremony
-       if (dayIndex === 5) skipPeriods.push(7); // Saturday period 7: Class meeting
+    let currentPeriodIndex = 0;
+    const dailySubjectCount = {}; // Track subjects per day to avoid overloading
+    
+    for (let dayIndex = 0; dayIndex < 6; dayIndex++) {
+      const dayOfWeek = dayIndex + 2; // Monday = 2, Tuesday = 3, ..., Saturday = 7
+      dailySubjectCount[dayIndex] = {};
+      
+      // Skip flag ceremony (Monday period 1) and class meeting (Saturday period 7)
+      const skipPeriods = [];
+      if (dayIndex === 0) skipPeriods.push(1); // Monday period 1: Flag ceremony
+      if (dayIndex === 5) skipPeriods.push(7); // Saturday period 7: Class meeting
 
-       // Try to place periods for this day
-       for (let period = 1; period <= 10 && currentPeriodIndex < subjectPeriods.length; period++) {
-         if (skipPeriods.includes(period)) continue;
+      // Try to place periods for this day (max 8 regular periods)
+      for (let period = 1; period <= 8 && currentPeriodIndex < subjectPeriods.length; period++) {
+        if (skipPeriods.includes(period)) continue;
 
-         // Tìm tiết regular tương ứng
-         const existingPeriod = daySchedule.periods.find(p => p.periodNumber === period && p.periodType === 'regular');
-         if (!existingPeriod) continue; // Skip nếu không tìm thấy period regular
+        // Find corresponding period in Period collection with periodId tracking
+        const existingPeriod = await Period.findOne({
+          schedule: schedule._id,
+          weekNumber: 1,
+          dayOfWeek: dayOfWeek,
+          periodNumber: period,
+          periodType: 'regular'
+        });
 
-         // Find best subject for this time slot
-         let bestSubjectIndex = -1;
-         let bestSubject = null;
-         let bestTeacher = null;
+        if (!existingPeriod) {
+          console.log(`⚠️ Period not found: week 1, day ${dayOfWeek}, period ${period}`);
+          continue;
+        }
 
-         // Look for a subject that can be placed here
-         for (let i = currentPeriodIndex; i < Math.min(currentPeriodIndex + 10, subjectPeriods.length); i++) {
-           const subject = subjectPeriods[i];
-           const assignedTeacher = this.getAssignedTeacher(teacherAssignmentMap, subject._id);
-           
-           if (assignedTeacher && this.isTeacherAvailable(assignedTeacher._id, dayOfWeek, period)) {
-             // Check if we haven't placed too many of this subject today
-             const subjectCountToday = dailySubjectCount[dayIndex][subject.subjectName] || 0;
-             if (subjectCountToday < 2) { // Max 2 periods per subject per day
-               bestSubjectIndex = i;
-               bestSubject = subject;
-               bestTeacher = assignedTeacher;
-               break;
-             }
-           }
-         }
+        // Verify periodId format
+        if (!existingPeriod.periodId) {
+          const scheduleId = schedule._id.toString().slice(-6);
+          const weekNum = String(1).padStart(2, '0');
+          const dayNum = String(dayOfWeek);
+          const periodNum = String(period).padStart(2, '0');
+          existingPeriod.periodId = `${scheduleId}_week${weekNum}_day${dayNum}_period${periodNum}`;
+          console.log(`🆔 Generated missing periodId: ${existingPeriod.periodId}`);
+        }
 
-         if (bestSubject && bestTeacher) {
-           // Book the teacher
-           this.bookTeacher(bestTeacher._id, dayOfWeek, period);
-           
-           // Track subject count for this day
-           dailySubjectCount[dayIndex][bestSubject.subjectName] = (dailySubjectCount[dayIndex][bestSubject.subjectName] || 0) + 1;
-           
-           // Cập nhật tiết regular với thông tin môn học và giáo viên
-           existingPeriod.subject = bestSubject._id;
-           existingPeriod.teacher = bestTeacher._id;
+        // Find best subject for this time slot
+        let bestSubjectIndex = -1;
+        let bestSubject = null;
+        let bestTeacher = null;
 
-           console.log(`✅ Tiết ${period} - ${this.getDayName(dayIndex)}: ${bestSubject.subjectName} (${bestTeacher.name})`);
-           
-           // Remove the placed subject from the list
-           subjectPeriods.splice(bestSubjectIndex, 1);
-           placedPeriods++;
-         } else {
-           // Try to find any available subject/teacher combination
-           let foundAlternative = false;
-           for (let i = currentPeriodIndex; i < subjectPeriods.length; i++) {
-             const subject = subjectPeriods[i];
-             const assignedTeacher = this.getAssignedTeacher(teacherAssignmentMap, subject._id);
-             
-             if (assignedTeacher) {
-               const alternativeTeacher = await this.findAlternativeTeacher(subject, assignedTeacher._id, dayOfWeek, period);
-               if (alternativeTeacher) {
-                 this.bookTeacher(alternativeTeacher._id, dayOfWeek, period);
-                 
-                 // Cập nhật tiết regular với thông tin môn học và giáo viên
-                 existingPeriod.subject = subject._id;
-                 existingPeriod.teacher = alternativeTeacher._id;
+        // Look for a subject that can be placed here
+        for (let i = currentPeriodIndex; i < Math.min(currentPeriodIndex + 10, subjectPeriods.length); i++) {
+          const subject = subjectPeriods[i];
+          const assignedTeacher = this.getAssignedTeacher(teacherAssignmentMap, subject._id);
+          
+          if (assignedTeacher && this.isTeacherAvailable(assignedTeacher._id, dayOfWeek, period)) {
+            // Check if we haven't placed too many of this subject today
+            const subjectCountToday = dailySubjectCount[dayIndex][subject.subjectName] || 0;
+            if (subjectCountToday < 2) { // Max 2 periods per subject per day
+              bestSubjectIndex = i;
+              bestSubject = subject;
+              bestTeacher = assignedTeacher;
+              break;
+            }
+          }
+        }
 
-                 console.log(`✅ Thay thế: Tiết ${period} - ${this.getDayName(dayIndex)}: ${subject.subjectName} (${alternativeTeacher.name})`);
-                 subjectPeriods.splice(i, 1);
-                 placedPeriods++;
-                 foundAlternative = true;
-                 break;
-               }
-             }
-           }
-           
-           if (!foundAlternative) {
-             console.log(`⚠️ Không thể xếp tiết ${period} - ${this.getDayName(dayIndex)}`);
-             conflictCount++;
-           }
-         }
-       }
-     }
+        if (bestSubject && bestTeacher) {
+          // Book the teacher
+          this.bookTeacher(bestTeacher._id, dayOfWeek, period);
+          
+          // Track subject count for this day
+          dailySubjectCount[dayIndex][bestSubject.subjectName] = (dailySubjectCount[dayIndex][bestSubject.subjectName] || 0) + 1;
+          
+          // Update period with subject and teacher
+          existingPeriod.subject = bestSubject._id;
+          existingPeriod.teacher = bestTeacher._id;
+          
+          // Save the individual period document
+          await existingPeriod.save();
 
-     // Copy lịch từ tuần đầu tiên sang các tuần khác
-     this.copyScheduleToAllWeeks(schedule);
+          console.log(`✅ Tiết ${period} - ${this.getDayName(dayIndex)} [${existingPeriod.periodId}]: ${bestSubject.subjectName} (${bestTeacher.name})`);
+          
+          // Remove the placed subject from the list
+          subjectPeriods.splice(bestSubjectIndex, 1);
+          placedPeriods++;
+        } else {
+          // Try to find any available subject/teacher combination
+          let foundAlternative = false;
+          for (let i = currentPeriodIndex; i < subjectPeriods.length; i++) {
+            const subject = subjectPeriods[i];
+            const assignedTeacher = this.getAssignedTeacher(teacherAssignmentMap, subject._id);
+            
+            if (assignedTeacher) {
+              const alternativeTeacher = await this.findAlternativeTeacher(subject, assignedTeacher._id, dayOfWeek, period);
+              if (alternativeTeacher) {
+                this.bookTeacher(alternativeTeacher._id, dayOfWeek, period);
+                
+                // Update period with subject and teacher
+                existingPeriod.subject = subject._id;
+                existingPeriod.teacher = alternativeTeacher._id;
+                
+                // Save the individual period document
+                await existingPeriod.save();
+
+                console.log(`✅ Thay thế: Tiết ${period} - ${this.getDayName(dayIndex)} [${existingPeriod.periodId}]: ${subject.subjectName} (${alternativeTeacher.name})`);
+                subjectPeriods.splice(i, 1);
+                placedPeriods++;
+                foundAlternative = true;
+                break;
+              }
+            }
+          }
+          
+          if (!foundAlternative) {
+            console.log(`⚠️ Không thể xếp tiết ${period} - ${this.getDayName(dayIndex)}`);
+            conflictCount++;
+          }
+        }
+      }
+    }
+
+    // Copy lịch từ tuần đầu tiên sang các tuần khác
+    await this.copyScheduleToAllWeeks(schedule);
 
     // Add fixed periods
-    this.addFixedPeriods(schedule, homeroomTeacherId);
+    await this.addFixedPeriods(schedule, homeroomTeacherId);
     
-    console.log(`📈 Đã xếp ${placedPeriods}/${subjectPeriods.length} tiết học`);
+    // Save the main schedule document after all period updates
+    await schedule.save({ validateBeforeSave: false });
+    
+    console.log(`📈 Đã xếp ${placedPeriods}/${subjectPeriods.length + placedPeriods} tiết học`);
     console.log(`⚠️ Số xung đột: ${conflictCount}`);
 
-    return new Schedule(schedule);
+    return schedule;
   }
 
   /**
@@ -576,72 +593,117 @@ class TeacherAssignmentService {
   /**
    * Add fixed periods (flag ceremony, class meeting)
    */
-  addFixedPeriods(schedule, homeroomTeacherId) {
-    // Thêm tiết chào cờ (Thứ 2, tiết 1) và sinh hoạt lớp (Thứ 7, tiết 7) cho tất cả các tuần
-    schedule.weeks.forEach(week => {
-      // Tiết chào cờ - Thứ 2, tiết 1
-      const mondayPeriod1 = week.days[0].periods.find(p => p.periodNumber === 1);
-      if (mondayPeriod1) {
-        mondayPeriod1.subject = null;
-        mondayPeriod1.teacher = homeroomTeacherId;
-        mondayPeriod1.periodType = 'fixed';
-        mondayPeriod1.specialType = 'flag_ceremony';
-        mondayPeriod1.fixed = true;
-      }
+  async addFixedPeriods(schedule, homeroomTeacherId) {
+    try {
+      console.log('🏷️ Adding fixed periods to all weeks...');
+      
+      // Find and update flag ceremony periods (Monday, period 1) for all weeks
+      const flagUpdateResult = await Period.updateMany({
+        schedule: schedule._id,
+        dayOfWeek: 2, // Monday
+        periodNumber: 1
+      }, {
+        $set: {
+          periodType: 'fixed',
+          specialType: 'flag_ceremony',
+          teacher: homeroomTeacherId,
+          subject: null
+        }
+      });
 
-      // Sinh hoạt lớp - Thứ 7, tiết 7
-      const saturdayPeriod7 = week.days[5].periods.find(p => p.periodNumber === 7);
-      if (saturdayPeriod7) {
-        saturdayPeriod7.subject = null;
-        saturdayPeriod7.teacher = homeroomTeacherId;
-        saturdayPeriod7.periodType = 'fixed';
-        saturdayPeriod7.specialType = 'class_meeting';
-        saturdayPeriod7.fixed = true;
-      }
-    });
+      // Find and update class meeting periods (Saturday, period 7) for all weeks
+      const classMeetingUpdateResult = await Period.updateMany({
+        schedule: schedule._id,
+        dayOfWeek: 7, // Saturday
+        periodNumber: 7
+      }, {
+        $set: {
+          periodType: 'fixed',
+          specialType: 'class_meeting',
+          teacher: homeroomTeacherId,
+          subject: null
+        }
+      });
+
+      console.log(`✅ Updated ${flagUpdateResult.modifiedCount} flag ceremony periods`);
+      console.log(`✅ Updated ${classMeetingUpdateResult.modifiedCount} class meeting periods`);
+      console.log('✅ Added fixed periods (flag ceremony and class meeting) to all weeks');
+    } catch (error) {
+      console.error('❌ Error adding fixed periods:', error.message);
+    }
   }
 
   /**
    * Copy schedule from first week to all other weeks
    */
-  copyScheduleToAllWeeks(schedule) {
-    const firstWeek = schedule.weeks[0];
-    if (!firstWeek) return;
-
-    // Copy lịch từ tuần đầu tiên sang các tuần khác
-    for (let weekIndex = 1; weekIndex < schedule.weeks.length; weekIndex++) {
-      const currentWeek = schedule.weeks[weekIndex];
+  async copyScheduleToAllWeeks(schedule) {
+    try {
+      console.log('📅 Copying schedule template to all 38 weeks...');
       
-      // Copy từng ngày
-      for (let dayIndex = 0; dayIndex < firstWeek.days.length; dayIndex++) {
-        const firstWeekDay = firstWeek.days[dayIndex];
-        const currentWeekDay = currentWeek.days[dayIndex];
-        
-        // Copy từng tiết (chỉ copy subject và teacher cho regular periods)
-        for (let periodIndex = 0; periodIndex < firstWeekDay.periods.length; periodIndex++) {
-          const firstWeekPeriod = firstWeekDay.periods[periodIndex];
-          const currentWeekPeriod = currentWeekDay.periods[periodIndex];
-          
-          if (currentWeekPeriod && firstWeekPeriod) {
-            // Chỉ copy cho regular periods
-            if (firstWeekPeriod.periodType === 'regular' && firstWeekPeriod.subject && firstWeekPeriod.teacher) {
-              currentWeekPeriod.subject = firstWeekPeriod.subject;
-              currentWeekPeriod.teacher = firstWeekPeriod.teacher;
-              currentWeekPeriod.periodType = 'regular';
-            }
-            // Copy fixed periods (chào cờ, sinh hoạt lớp)
-            else if (firstWeekPeriod.periodType === 'fixed' || firstWeekPeriod.fixed) {
-              currentWeekPeriod.teacher = firstWeekPeriod.teacher;
-              currentWeekPeriod.periodType = 'fixed';
-              currentWeekPeriod.specialType = firstWeekPeriod.specialType;
-              currentWeekPeriod.fixed = firstWeekPeriod.fixed;
-              // Empty periods giữ nguyên là empty, không copy subject/teacher
-            }
-            // Empty periods giữ nguyên
-            // Không cần làm gì cho empty periods vì chúng đã được tạo đúng
-          }
+      // Get all periods from week 1 with subject and teacher assignments
+      const week1AssignedPeriods = await Period.find({
+        schedule: schedule._id,
+        weekNumber: 1,
+        $or: [
+          { periodType: 'regular', subject: { $exists: true, $ne: null } },
+          { periodType: 'fixed' }
+        ]
+      }).lean();
+
+      console.log(`📚 Found ${week1AssignedPeriods.length} assigned periods in week 1 to copy`);
+
+      // Update corresponding periods in weeks 2-38
+      for (const week1Period of week1AssignedPeriods) {
+        const updateData = {
+          subject: week1Period.subject,
+          teacher: week1Period.teacher,
+          periodType: week1Period.periodType
+        };
+
+        if (week1Period.specialType) {
+          updateData.specialType = week1Period.specialType;
         }
+
+        // Update all corresponding periods in other weeks using the same pattern
+        const updateResult = await Period.updateMany({
+          schedule: schedule._id,
+          weekNumber: { $gt: 1 }, // Weeks 2-38
+          dayOfWeek: week1Period.dayOfWeek,
+          periodNumber: week1Period.periodNumber
+        }, { $set: updateData });
+
+        console.log(`🔄 Updated ${updateResult.modifiedCount} periods for dayOfWeek ${week1Period.dayOfWeek}, period ${week1Period.periodNumber}`);
       }
+
+      console.log(`✅ Copied schedule template to all weeks`);
+      
+      // Verify the copy by counting updated periods
+      const totalUpdatedPeriods = await Period.countDocuments({
+        schedule: schedule._id,
+        weekNumber: { $gt: 1 },
+        $or: [
+          { periodType: 'regular', subject: { $exists: true, $ne: null } },
+          { periodType: 'fixed' }
+        ]
+      });
+      
+      console.log(`📊 Total updated periods across all weeks: ${totalUpdatedPeriods}`);
+      
+      // Verify periodId format consistency
+      const validPeriodIdCount = await Period.countDocuments({
+        schedule: schedule._id,
+        periodId: { $regex: /^[a-f0-9]{6}_week\d{2}_day\d_period\d{2}$/ }
+      });
+      
+      const totalPeriods = await Period.countDocuments({
+        schedule: schedule._id
+      });
+      
+      console.log(`🆔 PeriodId format validation: ${validPeriodIdCount}/${totalPeriods} periods have correct format`);
+      
+    } catch (error) {
+      console.error('❌ Error copying schedule to all weeks:', error.message);
+      throw error;
     }
   }
 
@@ -655,8 +717,11 @@ class TeacherAssignmentService {
       { start: '08:40', end: '09:25', session: 'morning' },
       { start: '09:45', end: '10:30', session: 'morning' },
       { start: '10:35', end: '11:20', session: 'morning' },
-      { start: '13:30', end: '14:15', session: 'afternoon' },
-      { start: '14:20', end: '15:05', session: 'afternoon' }
+      { start: '12:30', end: '13:15', session: 'afternoon' },
+      { start: '13:20', end: '14:05', session: 'afternoon' },
+      { start: '14:10', end: '14:55', session: 'afternoon' },
+      { start: '15:00', end: '15:45', session: 'afternoon' },
+      { start: '15:50', end: '16:35', session: 'afternoon' }
     ];
     return timeSlots[periodNumber - 1] || timeSlots[0];
   }

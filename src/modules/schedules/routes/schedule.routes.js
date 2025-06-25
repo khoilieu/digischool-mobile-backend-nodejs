@@ -72,7 +72,17 @@ router.get('/class',
 // Ví dụ: /api/schedules/teacher?teacherId=64f8b9c123456789abcdef07&academicYear=2024-2025&startOfWeek=2024-12-19&endOfWeek=2024-12-25
 router.get('/teacher',
   authMiddleware.protect,
+  authMiddleware.authorize('teacher', 'manager'),
   scheduleController.getTeacherSchedule
+);
+
+// GET /api/schedules/lesson/:lessonId - Xem chi tiết tiết học
+// Params: lessonId
+// Ví dụ: /api/schedules/lesson/675a1b2c3d4e5f6789012345
+router.get('/lesson/:lessonId',
+  authMiddleware.protect,
+  authMiddleware.authorize('teacher', 'manager', 'student'),
+  scheduleController.getLessonDetail
 );
 
 // GET /api/schedules/available - Xem tất cả schedules có sẵn (debugging)
@@ -303,6 +313,40 @@ router.post('/:scheduleId/periods/:periodId/extracurricular',
   authMiddleware.protect,
   authMiddleware.authorize('admin', 'manager', 'teacher'),
   scheduleController.addExtracurricularToEmptySlot
+);
+
+// API MỚI: Lấy lịch học theo ngày cụ thể
+// GET /api/schedules/day-schedule?className=12A1&academicYear=2024-2025&date=2024-12-16
+router.get('/day-schedule',
+  authMiddleware.protect,
+  scheduleController.getDaySchedule
+);
+
+// API MỚI: Search periods với filter phức tạp
+// GET /api/schedules/search-periods?teacher=xxx&subject=xxx&status=completed
+router.get('/search-periods',
+  authMiddleware.protect,
+  scheduleController.searchPeriods
+);
+
+// API MỚI: Lấy lịch giảng dạy của giáo viên theo tuần
+// GET /api/schedules/teacher-weekly?teacherId=xxx&weekNumber=1&academicYear=2024-2025
+router.get('/teacher-weekly',
+  authMiddleware.protect,
+  scheduleController.getTeacherWeeklySchedule
+);
+
+// GET /api/schedules/periods/:periodId/detailed - Lấy chi tiết tiết học với metadata đầy đủ
+router.get('/periods/:periodId/detailed',
+  authMiddleware.protect,
+  scheduleController.getDetailedPeriodInfo
+);
+
+// PUT /api/schedules/bulk-update-periods - Bulk update nhiều tiết học
+router.put('/bulk-update-periods',
+  authMiddleware.protect,
+  authMiddleware.authorize('admin', 'manager', 'teacher'),
+  scheduleController.bulkUpdatePeriods
 );
 
 module.exports = router; 

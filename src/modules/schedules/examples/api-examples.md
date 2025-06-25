@@ -161,8 +161,8 @@ curl "http://localhost:3000/api/schedules/class?className=12A4&academicYear=2023
             {
               "periodNumber": 6,
               "session": "afternoon",
-              "timeStart": "13:30",
-              "timeEnd": "14:15",
+              "timeStart": "12:30",
+              "timeEnd": "13:15",
               "subject": {
                 "id": "64f8b9c123456789abcdef16",
                 "name": "Sinh học",

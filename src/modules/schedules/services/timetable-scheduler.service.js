@@ -8,8 +8,11 @@ class TimetableSchedulerService {
       { period: 3, start: '08:40', end: '09:25', session: 'morning' },
       { period: 4, start: '09:45', end: '10:30', session: 'morning' },
       { period: 5, start: '10:35', end: '11:20', session: 'morning' },
-      { period: 6, start: '13:30', end: '14:15', session: 'afternoon' },
-      { period: 7, start: '14:20', end: '15:05', session: 'afternoon' }
+      { period: 6, start: '12:30', end: '13:15', session: 'afternoon' },
+      { period: 7, start: '13:20', end: '14:05', session: 'afternoon' },
+      { period: 8, start: '14:10', end: '14:55', session: 'afternoon' },
+      { period: 9, start: '15:00', end: '15:45', session: 'afternoon' },
+      { period: 10, start: '15:50', end: '16:35', session: 'afternoon' }
     ];
 
     this.DAYS = [

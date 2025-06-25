@@ -63,6 +63,19 @@ const userSchema = new mongoose.Schema({
   active: { type: Boolean, default: true }
 }, { timestamps: true });
 
+// Virtual field for classId alias
+userSchema.virtual('classId').get(function() {
+  return this.class_id;
+});
+
+userSchema.virtual('classId').set(function(value) {
+  this.class_id = value;
+});
+
+// Ensure virtual fields are included in JSON output
+userSchema.set('toJSON', { virtuals: true });
+userSchema.set('toObject', { virtuals: true });
+
 // Method to compare password
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.passwordHash);

@@ -1,0 +1,376 @@
+const ConstraintSchedulerService = require('./constraint-scheduler.service');
+const User = require('../../auth/models/user.model');
+
+class MultiClassSchedulerService {
+  constructor() {
+    this.constraintScheduler = new ConstraintSchedulerService();
+    
+    // Teacher assignment strategy
+    this.teacherAssignments = new Map(); // subjectId -> { teachers: [], assignments: Map(teacherId -> [classIds]) }
+    this.classScheduleOffsets = new Map(); // classId -> dayOffset for schedule variation
+  }
+
+  /**
+   * MAIN METHOD: Create schedules for multiple classes with proper teacher distribution
+   */
+  async createMultiClassSchedules(weeklyScheduleIds, classIds, academicYearId, weekNum, weekStartDate, timeSlots, subjects, homeroomTeachers, createdBy) {
+    console.log(`\n🎯 BẮT ĐẦU TẠO THỜI KHÓA BIỂU ĐA LỚP - Tuần ${weekNum}`);
+    console.log(`📋 Số lớp: ${classIds.length}`);
+    console.log('='.repeat(60));
+    
+    // Step 1: Initialize teacher assignments for all subjects
+    await this.initializeTeacherAssignments(subjects, classIds);
+    
+    // Step 2: Create schedule variations for each class
+    this.initializeClassScheduleVariations(classIds);
+    
+    // Step 3: Create schedules for each class with different patterns
+    const allLessons = [];
+    
+    for (let i = 0; i < classIds.length; i++) {
+      const classId = classIds[i];
+      const weeklyScheduleId = weeklyScheduleIds[i];
+      const homeroomTeacher = homeroomTeachers[i];
+      
+      console.log(`\n📚 Tạo lịch cho lớp ${i + 1}/${classIds.length}: ${classId}`);
+      
+      // Get assigned teachers for this class
+      const classTeachers = this.getTeachersForClass(classId, subjects);
+      
+      // Create modified constraint scheduler for this specific class
+      const lessons = await this.createClassScheduleWithVariation(
+        weeklyScheduleId, classId, academicYearId, weekNum, weekStartDate, 
+        timeSlots, subjects, homeroomTeacher, createdBy, classTeachers, i
+      );
+      
+      allLessons.push(...lessons);
+    }
+    
+    // Step 4: Print comprehensive teacher assignment report
+    this.printTeacherAssignmentReport();
+    
+    console.log(`\n🎉 HOÀN THÀNH TẠO ${classIds.length} THỜI KHÓA BIỂU`);
+    console.log('='.repeat(60));
+    
+    return allLessons;
+  }
+
+  /**
+   * Step 1: Initialize teacher assignments for optimal distribution
+   */
+  async initializeTeacherAssignments(subjects, classIds) {
+    console.log('👥 Khởi tạo phân công giáo viên...');
+    
+    for (const subject of subjects) {
+      // Find all teachers for this subject
+      const teachers = await User.find({
+        subject: subject._id,
+        role: { $in: ['teacher', 'homeroom_teacher'] },
+        active: true
+      });
+      
+      if (teachers.length === 0) {
+        console.log(`⚠️ Không tìm thấy giáo viên cho môn ${subject.subjectName}`);
+        continue;
+      }
+      
+      // Distribute classes among teachers
+      const assignments = this.distributeClassesAmongTeachers(teachers, classIds);
+      
+      this.teacherAssignments.set(subject._id.toString(), {
+        subject: subject,
+        teachers: teachers,
+        assignments: assignments
+      });
+      
+      console.log(`✅ ${subject.subjectName}: ${teachers.length} GV cho ${classIds.length} lớp`);
+      for (const [teacherId, assignedClasses] of assignments) {
+        const teacher = teachers.find(t => t._id.toString() === teacherId);
+        console.log(`   - ${teacher.name}: ${assignedClasses.length} lớp (${assignedClasses.map(c => c.toString().slice(-3)).join(', ')})`);
+      }
+    }
+  }
+
+  /**
+   * Distribute classes among teachers optimally
+   */
+  distributeClassesAmongTeachers(teachers, classIds) {
+    const assignments = new Map();
+    
+    // Initialize assignments
+    teachers.forEach(teacher => {
+      assignments.set(teacher._id.toString(), []);
+    });
+    
+    // Distribute classes evenly
+    const classesPerTeacher = Math.ceil(classIds.length / teachers.length);
+    
+    classIds.forEach((classId, index) => {
+      const teacherIndex = Math.floor(index / classesPerTeacher) % teachers.length;
+      const teacher = teachers[teacherIndex];
+      assignments.get(teacher._id.toString()).push(classId);
+    });
+    
+    return assignments;
+  }
+
+  /**
+   * Step 2: Initialize different schedule patterns for each class
+   */
+  initializeClassScheduleVariations(classIds) {
+    console.log('🔄 Khởi tạo biến thể lịch học...');
+    
+    classIds.forEach((classId, index) => {
+      // Create different starting patterns for each class
+      this.classScheduleOffsets.set(classId, {
+        dayOffset: index % 3, // Rotate through 3 different day patterns
+        priorityOffset: index % 2, // Alternate priority subject placement
+        doubleSlotOffset: index // Different double period placement
+      });
+    });
+  }
+
+  /**
+   * Get assigned teachers for a specific class
+   */
+  getTeachersForClass(classId, subjects) {
+    const classTeachers = new Map();
+    
+    subjects.forEach(subject => {
+      const subjectAssignment = this.teacherAssignments.get(subject._id.toString());
+      if (subjectAssignment) {
+        // Find which teacher is assigned to this class for this subject
+        for (const [teacherId, assignedClasses] of subjectAssignment.assignments) {
+          if (assignedClasses.includes(classId)) {
+            const teacher = subjectAssignment.teachers.find(t => t._id.toString() === teacherId);
+            classTeachers.set(subject._id.toString(), teacher);
+            break;
+          }
+        }
+      }
+    });
+    
+    return classTeachers;
+  }
+
+  /**
+   * Step 3: Create schedule for a specific class with variations
+   */
+  async createClassScheduleWithVariation(weeklyScheduleId, classId, academicYearId, weekNum, weekStartDate, timeSlots, subjects, homeroomTeacher, createdBy, classTeachers, classIndex) {
+    
+    // Create a modified constraint scheduler with class-specific variations
+    const modifiedScheduler = new ModifiedConstraintScheduler(
+      this.classScheduleOffsets.get(classId),
+      classTeachers,
+      classIndex
+    );
+    
+    return await modifiedScheduler.createConstraintBasedSchedule(
+      weeklyScheduleId, classId, academicYearId, weekNum, weekStartDate, 
+      timeSlots, subjects, homeroomTeacher, createdBy
+    );
+  }
+
+  /**
+   * Print comprehensive teacher assignment report
+   */
+  printTeacherAssignmentReport() {
+    console.log(`\n📊 BÁO CÁO PHÂN CÔNG GIÁO VIÊN`);
+    console.log('='.repeat(50));
+    
+    for (const [subjectId, assignment] of this.teacherAssignments) {
+      console.log(`\n📚 ${assignment.subject.subjectName}:`);
+      
+      for (const [teacherId, assignedClasses] of assignment.assignments) {
+        const teacher = assignment.teachers.find(t => t._id.toString() === teacherId);
+        const workload = assignedClasses.length;
+        const classNames = assignedClasses.map(c => c.toString().slice(-3)).join(', ');
+        
+        console.log(`  👨‍🏫 ${teacher.name}:`);
+        console.log(`     - Số lớp: ${workload}`);
+        console.log(`     - Lớp dạy: ${classNames}`);
+        console.log(`     - Khối lượng/tuần: ${workload * (assignment.subject.weeklyHours || 3)} tiết`);
+      }
+    }
+  }
+}
+
+/**
+ * Modified Constraint Scheduler with class-specific variations
+ */
+class ModifiedConstraintScheduler extends ConstraintSchedulerService {
+  constructor(scheduleOffset, classTeachers, classIndex) {
+    super();
+    this.scheduleOffset = scheduleOffset;
+    this.classTeachers = classTeachers;
+    this.classIndex = classIndex;
+    
+    // Define priority subjects
+    this.PRIORITY_SUBJECTS = ['Mathematics', 'Literature', 'English', 'Physics', 'Chemistry'];
+  }
+
+  /**
+   * Override: Find specialized teacher - use assigned teacher for this class
+   */
+  async findSpecializedTeacher(subjectId) {
+    const assignedTeacher = this.classTeachers.get(subjectId.toString());
+    if (assignedTeacher) {
+      return assignedTeacher;
+    }
+    
+    // Fallback to original method
+    return await super.findSpecializedTeacher(subjectId);
+  }
+
+  /**
+   * Override: Find best double slot with class-specific variation - CHỈ T2-T6
+   */
+  findBestDoubleSlot(constraints, subject, teacher) {
+    // Get subject requirement
+    const requirement = constraints.subjectRequirements.get(subject._id.toString());
+    
+    const morningSlots = [[1,2], [2,3], [3,4], [4,5]];
+    const afternoonSlots = [[6,7], [7,8], [8,9]];
+    
+    // Apply class-specific offset to create variation
+    const offsetMorningSlots = this.applySlotOffset(morningSlots);
+    const offsetAfternoonSlots = this.applySlotOffset(afternoonSlots);
+    
+    const slotsToCheck = this.PRIORITY_SUBJECTS.includes(subject.subjectName) 
+      ? [...offsetMorningSlots, ...offsetAfternoonSlots] 
+      : [...offsetAfternoonSlots, ...offsetMorningSlots];
+    
+    // Tạo danh sách các slot khả dụng với điểm số
+    const availableSlots = [];
+    
+          // CHỈ kiểm tra T2-T6 (dayIndex 0-4), bỏ T7 và CN
+      for (let dayIndex = 0; dayIndex < 5; dayIndex++) {
+        // Apply day offset for variation but keep within T2-T6
+        const actualDayIndex = dayIndex;
+      
+        // Check if subject already has lessons on this day (if dailyScheduled exists)
+        if (requirement.dailyScheduled && requirement.dailyScheduled[actualDayIndex] > 0) {
+        continue; // Skip this day if subject already has lessons
+      }
+        
+        // RÀNG BUỘC MỚI: Kiểm tra ngày này đã có tiết đôi chưa (tối đa 1 cặp/ngày)
+        if (this.hasDoublePeriodInDay(constraints, actualDayIndex)) {
+          continue; // Skip if this day already has a double period
+        }
+      
+      for (const [period1, period2] of slotsToCheck) {
+        if (this.canScheduleDoubleSlot(constraints, teacher._id, actualDayIndex, period1, period2)) {
+          // Tính điểm để rãi đều
+          let score = this.calculateDoubleSlotScoreWithVariation(constraints, actualDayIndex, period1, subject);
+          
+          availableSlots.push({
+            dayIndex: actualDayIndex, 
+            startPeriod: period1,
+            score
+          });
+        }
+      }
+    }
+    
+    // Sắp xếp theo điểm (cao nhất trước)
+    availableSlots.sort((a, b) => b.score - a.score);
+    
+    return availableSlots.length > 0 ? availableSlots[0] : null;
+  }
+
+  /**
+   * Tính điểm cho slot tiết đôi với biến thể lớp
+   */
+  calculateDoubleSlotScoreWithVariation(constraints, dayIndex, period, subject) {
+    let score = 0;
+    
+    // Đếm số tiết đã có trong ngày này
+    let lessonsThisDay = 0;
+    for (let p = 0; p < 10; p++) {
+      if (constraints.schedule[dayIndex][p] !== null) {
+        lessonsThisDay++;
+        }
+      }
+    
+    // Ưu tiên ngày có ít tiết hơn (để rãi đều)
+    score += (10 - lessonsThisDay) * 20;
+    
+    // Ưu tiên buổi sáng cho môn quan trọng
+    if (this.PRIORITY_SUBJECTS.includes(subject.subjectName) && period <= 5) {
+      score += 30;
+    }
+    
+    // Tạo biến thể cho từng lớp
+    const classVariation = this.classIndex % 3;
+    if (classVariation === 0 && [0, 2].includes(dayIndex)) score += 20; // Lớp A: T2, T4
+    if (classVariation === 1 && [1, 3].includes(dayIndex)) score += 20; // Lớp B: T3, T5
+    if (classVariation === 2 && [2, 4].includes(dayIndex)) score += 20; // Lớp C: T4, T6
+    
+    // Tránh tiết đầu và cuối ngày
+    if (period === 1 || period >= 9) {
+      score -= 10;
+    }
+    
+    return score;
+  }
+
+  /**
+   * Apply slot offset for class variation
+   */
+  applySlotOffset(slots) {
+    const offset = this.scheduleOffset.doubleSlotOffset % slots.length;
+    return [...slots.slice(offset), ...slots.slice(0, offset)];
+  }
+
+  /**
+   * Kiểm tra xem ngày đã có tiết đôi chưa
+   */
+  hasDoublePeriodInDay(constraints, dayIndex) {
+    // Kiểm tra các cặp tiết liên tiếp có cùng môn không
+    for (let period = 1; period <= 9; period++) {
+      const lesson1 = constraints.schedule[dayIndex][period - 1];
+      const lesson2 = constraints.schedule[dayIndex][period];
+      
+      if (lesson1 && lesson2 && 
+          lesson1.subject && lesson2.subject &&
+          lesson1.subject.toString() === lesson2.subject.toString()) {
+        return true; // Đã có tiết đôi
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Override: Calculate slot score with class-specific preferences
+   */
+  calculateSlotScore(constraints, subject, teacher, dayIndex, period) {
+    let score = super.calculateSlotScore(constraints, subject, teacher, dayIndex, period);
+    
+    // Add class-specific variation
+    if (this.classIndex % 2 === 0) {
+      // Even classes prefer earlier periods
+      score += (11 - period) * 2;
+    } else {
+      // Odd classes prefer later periods  
+      score += period * 2;
+    }
+    
+    // Encourage different patterns for different classes
+    const dayPreference = (dayIndex + this.scheduleOffset.dayOffset) % 3;
+    if (dayPreference === 0) score += 10;
+    
+    return score;
+  }
+
+  /**
+   * Override: Print class-specific report
+   */
+  printSchedulingReport(constraints, validationResult) {
+    console.log(`\n📊 BÁO CÁO LỚP ${this.classIndex + 1}`);
+    console.log('-'.repeat(40));
+    
+    super.printSchedulingReport(constraints, validationResult);
+  }
+}
+
+module.exports = MultiClassSchedulerService;
