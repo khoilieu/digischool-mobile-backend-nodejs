@@ -72,7 +72,17 @@ router.get('/class',
 // Ví dụ: /api/schedules/teacher?teacherId=64f8b9c123456789abcdef07&academicYear=2024-2025&startOfWeek=2024-12-19&endOfWeek=2024-12-25
 router.get('/teacher',
   authMiddleware.protect,
+  authMiddleware.authorize('teacher', 'manager'),
   scheduleController.getTeacherSchedule
+);
+
+// GET /api/schedules/lesson/:lessonId - Xem chi tiết tiết học
+// Params: lessonId
+// Ví dụ: /api/schedules/lesson/675a1b2c3d4e5f6789012345
+router.get('/lesson/:lessonId',
+  authMiddleware.protect,
+  authMiddleware.authorize('teacher', 'manager', 'student'),
+  scheduleController.getLessonDetail
 );
 
 // GET /api/schedules/available - Xem tất cả schedules có sẵn (debugging)

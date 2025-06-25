@@ -21,7 +21,7 @@ class ScheduleService {
   // NEW: Khởi tạo thời khóa biểu với architecture mới (Lesson-based)
   async initializeSchedulesWithNewArchitecture(data, token) {
     try {
-      const { academicYear, gradeLevel, semester = 1 } = data;
+      const { academicYear, gradeLevel, semester = 1, scheduleType = 'MONDAY_TO_SATURDAY' } = data;
       
       // Verify user permissions
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -32,6 +32,7 @@ class ScheduleService {
       }
 
       console.log(`🚀 Starting NEW schedule initialization for grade ${gradeLevel}, academic year ${academicYear}`);
+      console.log(`📅 Schedule type: ${scheduleType} (${scheduleType === 'MONDAY_TO_FRIDAY' ? 'Thứ 2-6' : 'Thứ 2-7'})`);
 
       // Đảm bảo Academic Year exists
       let academicYearDoc = await AcademicYear.findOne({ name: academicYear });
@@ -77,13 +78,20 @@ class ScheduleService {
         const existingSchedule = await Schedule.findByClassAndYear(classInfo._id, academicYearDoc._id);
 
         if (existingSchedule) {
-          console.log(`⚠️ Schedule already exists for ${classInfo.className}, skipping...`);
-          results.push({
-            classId: classInfo._id,
-            className: classInfo.className,
-            status: 'skipped',
-            message: 'Schedule already exists'
+          console.log(`⚠️ Schedule already exists for ${classInfo.className}, deleting old data...`);
+          
+          // Xóa các lessons cũ
+          await Lesson.deleteMany({ 
+            class: classInfo._id,
+            academicYear: academicYearDoc._id 
           });
+          console.log(`🗑️ Deleted old lessons for ${classInfo.className}`);
+          
+          // Xóa schedule cũ
+          await Schedule.findByIdAndDelete(existingSchedule._id);
+          console.log(`🗑️ Deleted old schedule for ${classInfo.className}`);
+          
+          classesToCreate.push(classInfo);
         } else {
           classesToCreate.push(classInfo);
         }
@@ -94,11 +102,12 @@ class ScheduleService {
         try {
           console.log(`\n🎯 Creating schedules for ${classesToCreate.length} classes with optimized teacher distribution...`);
           
-          // Tạo schedules cho tất cả lớp cùng lúc
+          // Tạo schedules cho tất cả lớp cùng lúc với scheduleType option
           const schedules = await this.createMultiClassSchedulesWithLessons(
             classesToCreate,
             academicYearDoc._id,
-            user._id
+            user._id,
+            { scheduleType }
           );
 
           // Activate và tạo results cho từng schedule
@@ -115,6 +124,7 @@ class ScheduleService {
               className: classInfo.className,
               status: 'created',
               scheduleId: schedule._id,
+              scheduleType: scheduleType,
               totalWeeks: schedule.statistics.totalWeeks,
               totalLessons: schedule.statistics.totalLessons
             });
@@ -142,7 +152,8 @@ class ScheduleService {
         createdSchedules: createdSchedulesCount,
         skippedSchedules: results.filter(r => r.status === 'skipped').length,
         failedSchedules: results.filter(r => r.status === 'failed').length,
-        successRate: ((createdSchedulesCount / classes.length) * 100).toFixed(2) + '%'
+        successRate: ((createdSchedulesCount / classes.length) * 100).toFixed(2) + '%',
+        scheduleType: scheduleType
       };
 
       console.log('\n📊 Schedule Creation Summary:');
@@ -151,6 +162,7 @@ class ScheduleService {
       console.log(`- Skipped: ${summary.skippedSchedules}`);
       console.log(`- Failed: ${summary.failedSchedules}`);
       console.log(`- Success Rate: ${summary.successRate}`);
+      console.log(`- Schedule Type: ${scheduleType === 'MONDAY_TO_FRIDAY' ? 'Thứ 2-6' : 'Thứ 2-7'}`);
 
       return {
         summary,
@@ -232,8 +244,9 @@ class ScheduleService {
   }
 
   // NEW: Tạo schedules cho nhiều lớp với teacher distribution tối ưu
-  async createMultiClassSchedulesWithLessons(classes, academicYearId, createdBy) {
+  async createMultiClassSchedulesWithLessons(classes, academicYearId, createdBy, options = {}) {
     console.log(`\n🎯 Creating schedules for ${classes.length} classes with optimized teacher distribution...`);
+    console.log(`📅 Schedule type: ${options.scheduleType || 'MONDAY_TO_SATURDAY'}`);
 
     // Lấy time slots và subjects
     const timeSlots = await TimeSlot.getAllActive();
@@ -249,6 +262,10 @@ class ScheduleService {
     });
 
     console.log(`📚 Found ${subjects.length} subjects for grade ${gradeLevel}`);
+    
+    // Log tổng weeklyHours
+    const totalWeeklyHours = subjects.reduce((sum, subject) => sum + (subject.weeklyHours || 3), 0);
+    console.log(`📊 Total weekly hours for all subjects: ${totalWeeklyHours}`);
 
     // Tạo schedules và weekly schedules cho tất cả lớp
     const schedules = [];
@@ -308,7 +325,7 @@ class ScheduleService {
       const classIds = classes.map(c => c._id);
       const homeroomTeachers = classes.map(c => c.homeroomTeacher);
 
-      // Create lessons for all classes in this week
+      // Create lessons for all classes in this week với scheduleType option
       await this.createLessonsForMultipleClasses(
         weeklyScheduleIds,
         classIds,
@@ -318,7 +335,8 @@ class ScheduleService {
         timeSlots,
         subjects,
         homeroomTeachers,
-        createdBy
+        createdBy,
+        options
       );
 
       // Publish weekly schedules
@@ -337,26 +355,27 @@ class ScheduleService {
     return schedules;
   }
 
-  // NEW: Multi-class constraint-based scheduling với phân bổ giáo viên tối ưu
-  async createLessonsForWeek(weeklyScheduleId, classId, academicYearId, weekNum, weekStartDate, timeSlots, subjects, homeroomTeacher, createdBy) {
-    // For single class, use the simple constraint scheduler
-    const ConstraintSchedulerService = require('./constraint-scheduler.service');
-    const constraintScheduler = new ConstraintSchedulerService();
-    
-    return await constraintScheduler.createConstraintBasedSchedule(
-      weeklyScheduleId, classId, academicYearId, weekNum, weekStartDate, 
-      timeSlots, subjects, homeroomTeacher, createdBy
-    );
-  }
-
   // NEW: Multi-class scheduling method for creating different schedules
-  async createLessonsForMultipleClasses(weeklyScheduleIds, classIds, academicYearId, weekNum, weekStartDate, timeSlots, subjects, homeroomTeachers, createdBy) {
+  async createLessonsForMultipleClasses(weeklyScheduleIds, classIds, academicYearId, weekNum, weekStartDate, timeSlots, subjects, homeroomTeachers, createdBy, options = {}) {
     const MultiClassSchedulerService = require('./multi-class-scheduler.service');
     const multiClassScheduler = new MultiClassSchedulerService();
     
     return await multiClassScheduler.createMultiClassSchedules(
       weeklyScheduleIds, classIds, academicYearId, weekNum, weekStartDate,
-      timeSlots, subjects, homeroomTeachers, createdBy
+      timeSlots, subjects, homeroomTeachers, createdBy, options
+    );
+  }
+
+  // NEW: Multi-class constraint-based scheduling với phân bổ giáo viên tối ưu
+  async createLessonsForWeek(weeklyScheduleId, classId, academicYearId, weekNum, weekStartDate, timeSlots, subjects, homeroomTeacher, createdBy, options = {}) {
+    // For single class, use the simple constraint scheduler
+    const ConstraintSchedulerService = require('./constraint-scheduler.service');
+    const constraintScheduler = new ConstraintSchedulerService();
+    
+    // Truyền options vào để chọn loại lịch
+    return await constraintScheduler.createConstraintBasedSchedule(
+      weeklyScheduleId, classId, academicYearId, weekNum, weekStartDate, 
+      timeSlots, subjects, homeroomTeacher, createdBy, options
     );
   }
 
@@ -1390,11 +1409,11 @@ class ScheduleService {
       { period: 3, start: '08:40', end: '09:25', session: 'morning' },
       { period: 4, start: '09:45', end: '10:30', session: 'morning' },
       { period: 5, start: '10:35', end: '11:20', session: 'morning' },
-      { period: 6, start: '13:30', end: '14:15', session: 'afternoon' },
-      { period: 7, start: '14:20', end: '15:05', session: 'afternoon' },
-      { period: 8, start: '15:10', end: '15:55', session: 'afternoon' },
-      { period: 9, start: '16:00', end: '16:45', session: 'afternoon' },
-      { period: 10, start: '16:50', end: '17:35', session: 'afternoon' }
+      { period: 6, start: '12:30', end: '13:15', session: 'afternoon' },
+      { period: 7, start: '13:20', end: '14:05', session: 'afternoon' },
+      { period: 8, start: '14:10', end: '14:55', session: 'afternoon' },
+      { period: 9, start: '15:00', end: '15:45', session: 'afternoon' },
+      { period: 10, start: '15:50', end: '16:35', session: 'afternoon' }
     ];
   }
 
@@ -2247,6 +2266,567 @@ class ScheduleService {
       console.error('❌ Error in getDetailedLessonScheduleByDateRange:', error.message);
       throw new Error(`Error fetching detailed lesson schedule: ${error.message}`);
     }
+  }
+
+  // NEW: Get teacher schedule by date range using Lesson model
+  async getTeacherScheduleByDateRange(teacherId, academicYear, startOfWeek, endOfWeek) {
+    try {
+      console.log(`🔍 Getting teacher schedule for ${teacherId}, ${academicYear}, ${startOfWeek} to ${endOfWeek}`);
+      
+      // Validate teacher exists
+      const teacher = await User.findById(teacherId);
+      if (!teacher) {
+        throw new Error(`Teacher with ID ${teacherId} not found`);
+      }
+
+      const startDate = new Date(startOfWeek);
+      const endDate = new Date(endOfWeek);
+      endDate.setHours(23, 59, 59, 999); // End of day
+
+      // Find all lessons for this teacher in the date range
+      const lessons = await Lesson.find({
+        teacher: teacherId,
+        scheduledDate: {
+          $gte: startDate,
+          $lte: endDate
+        }
+      })
+      .populate('class', 'className gradeLevel')
+      .populate('subject', 'subjectName subjectCode department weeklyHours')
+      .populate('timeSlot', 'period startTime endTime')
+      .populate('academicYear', 'name startDate endDate isActive')
+      .sort({ scheduledDate: 1, 'timeSlot.period': 1 })
+      .lean();
+
+      console.log(`📚 Found ${lessons.length} lessons for teacher in date range`);
+
+      // Get time slots for period mapping
+      const timeSlots = await TimeSlot.find().sort({ period: 1 }).lean();
+      const timeSlotMap = {};
+      timeSlots.forEach(slot => {
+        timeSlotMap[slot.period] = slot;
+      });
+
+      // Group lessons by date and organize by day with full 10 periods
+      const scheduleByDay = {};
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+      // First, create lesson map by date and period
+      const lessonMap = {};
+      lessons.forEach(lesson => {
+        const dateKey = lesson.scheduledDate.toISOString().split('T')[0];
+        const period = lesson.timeSlot?.period || 0;
+        
+        if (!lessonMap[dateKey]) {
+          lessonMap[dateKey] = {};
+        }
+        lessonMap[dateKey][period] = lesson;
+      });
+
+      // Fill in missing days with empty structure and create full 10-period schedule
+      let currentDate = new Date(startDate);
+      
+      while (currentDate <= endDate) {
+        const dateKey = currentDate.toISOString().split('T')[0];
+        const dayOfWeek = currentDate.getDay();
+        
+        scheduleByDay[dateKey] = {
+          date: dateKey,
+          dayOfWeek: dayOfWeek,
+          dayName: dayNames[dayOfWeek],
+          dayNameVN: this.getDayNameVN(dayOfWeek + 1), // Convert to 1-7 format
+          periods: []
+        };
+
+        // Create full 10 periods for each day
+        for (let period = 1; period <= 10; period++) {
+          const lesson = lessonMap[dateKey] && lessonMap[dateKey][period];
+          const timeSlot = timeSlotMap[period];
+          
+          if (lesson) {
+            // Has lesson - populate with lesson data
+            const lessonInfo = {
+              period: period,
+              hasLesson: true,
+              lessonId: lesson.lessonId,
+              _id: lesson._id,
+              type: lesson.type,
+              status: lesson.status,
+              timeSlot: {
+                period: period,
+                startTime: timeSlot?.startTime || '',
+                endTime: timeSlot?.endTime || ''
+              },
+              class: lesson.class ? {
+                _id: lesson.class._id,
+                className: lesson.class.className,
+                gradeLevel: lesson.class.gradeLevel
+              } : null,
+              subject: lesson.subject ? {
+                _id: lesson.subject._id,
+                name: lesson.subject.subjectName,
+                code: lesson.subject.subjectCode,
+                department: lesson.subject.department,
+                weeklyHours: lesson.subject.weeklyHours
+              } : null,
+              topic: lesson.topic || '',
+              notes: lesson.notes || '',
+              actualDate: lesson.actualDate,
+              evaluation: lesson.evaluation || null,
+              attendance: lesson.attendance || null,
+              makeupInfo: lesson.makeupInfo || null,
+              extracurricularInfo: lesson.extracurricularInfo || null,
+              fixedInfo: lesson.fixedInfo || null,
+              createdAt: lesson.createdAt,
+              updatedAt: lesson.updatedAt
+            };
+            scheduleByDay[dateKey].periods.push(lessonInfo);
+          } else {
+            // No lesson - create empty period
+            const emptyPeriod = {
+              period: period,
+              hasLesson: false,
+              lessonId: null,
+              _id: null,
+              type: 'empty',
+              status: 'free',
+              timeSlot: {
+                period: period,
+                startTime: timeSlot?.startTime || '',
+                endTime: timeSlot?.endTime || ''
+              },
+              class: null,
+              subject: null,
+              topic: '',
+              notes: 'Tiết trống',
+              actualDate: null,
+              evaluation: null,
+              attendance: null,
+              makeupInfo: null,
+              extracurricularInfo: null,
+              fixedInfo: null,
+              createdAt: null,
+              updatedAt: null
+            };
+            scheduleByDay[dateKey].periods.push(emptyPeriod);
+          }
+        }
+        
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      // Convert to array and sort by date
+      const fullWeekSchedule = Object.values(scheduleByDay).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      // Calculate statistics
+      const totalLessons = lessons.length;
+      const completedLessons = lessons.filter(l => l.status === 'completed').length;
+      const scheduledLessons = lessons.filter(l => l.status === 'scheduled').length;
+      const cancelledLessons = lessons.filter(l => l.status === 'cancelled').length;
+
+      // Statistics by class
+      const classStats = {};
+      lessons.forEach(lesson => {
+        if (lesson.class) {
+          if (!classStats[lesson.class.className]) {
+            classStats[lesson.class.className] = {
+              className: lesson.class.className,
+              gradeLevel: lesson.class.gradeLevel,
+              total: 0,
+              completed: 0,
+              scheduled: 0,
+              cancelled: 0
+            };
+          }
+          classStats[lesson.class.className].total++;
+          classStats[lesson.class.className][lesson.status]++;
+        }
+      });
+
+      // Statistics by subject
+      const subjectStats = {};
+      lessons.forEach(lesson => {
+        if (lesson.subject) {
+          if (!subjectStats[lesson.subject.subjectCode]) {
+            subjectStats[lesson.subject.subjectCode] = {
+              subjectName: lesson.subject.subjectName,
+              subjectCode: lesson.subject.subjectCode,
+              total: 0,
+              completed: 0,
+              scheduled: 0,
+              cancelled: 0
+            };
+          }
+          subjectStats[lesson.subject.subjectCode].total++;
+          subjectStats[lesson.subject.subjectCode][lesson.status]++;
+        }
+      });
+
+      // Daily workload statistics with full period breakdown
+      const dailyWorkload = {};
+      fullWeekSchedule.forEach(day => {
+        const lessonsInDay = day.periods.filter(p => p.hasLesson);
+        dailyWorkload[day.dayName] = {
+          date: day.date,
+          totalPeriods: 10,
+          totalLessons: lessonsInDay.length,
+          freePeriods: 10 - lessonsInDay.length,
+          morningLessons: lessonsInDay.filter(l => l.period >= 1 && l.period <= 5).length,
+          afternoonLessons: lessonsInDay.filter(l => l.period >= 6 && l.period <= 10).length,
+          completedLessons: lessonsInDay.filter(l => l.status === 'completed').length,
+          periodBreakdown: {
+            morning: day.periods.slice(0, 5).map(p => ({ period: p.period, hasLesson: p.hasLesson, subject: p.subject?.code || null })),
+            afternoon: day.periods.slice(5, 10).map(p => ({ period: p.period, hasLesson: p.hasLesson, subject: p.subject?.code || null }))
+          }
+        };
+      });
+
+      console.log(`📊 Returning teacher schedule with ${fullWeekSchedule.length} days and ${totalLessons} lessons (full 10-period format)`);
+
+      return {
+        success: true,
+        teacher: {
+          _id: teacher._id,
+          name: teacher.name,
+          email: teacher.email,
+          role: teacher.role,
+          subject: teacher.subject
+        },
+        academicYear,
+        dateRange: {
+          startOfWeek,
+          endOfWeek,
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString()
+        },
+        schedule: fullWeekSchedule,
+        statistics: {
+          totalLessons,
+          completedLessons,
+          scheduledLessons,
+          cancelledLessons,
+          freePeriods: (fullWeekSchedule.length * 10) - totalLessons,
+          completionRate: totalLessons > 0 ? ((completedLessons / totalLessons) * 100).toFixed(2) + '%' : '0%',
+          classStats,
+          subjectStats,
+          dailyWorkload
+        },
+        metadata: {
+          totalDays: fullWeekSchedule.length,
+          daysWithLessons: fullWeekSchedule.filter(day => day.periods.some(p => p.hasLesson)).length,
+          periodsPerDay: 10,
+          totalPeriods: fullWeekSchedule.length * 10,
+          architecture: 'lesson-based',
+          displayFormat: 'full-10-periods',
+          generatedAt: new Date().toISOString()
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ Error in getTeacherScheduleByDateRange:', error.message);
+      throw new Error(`Error fetching teacher schedule: ${error.message}`);
+    }
+  }
+
+  // NEW: Get detailed lesson information by ID with authorization
+  async getLessonDetailById(lessonId, currentUser) {
+    try {
+      console.log(`🔍 Getting lesson detail for ${lessonId} by user ${currentUser._id} (${currentUser.role})`);
+      
+      // Find lesson with full population
+      const lesson = await Lesson.findById(lessonId)
+        .populate('class', 'className gradeLevel academicYear homeroomTeacher')
+        .populate('subject', 'subjectName subjectCode department weeklyHours description')
+        .populate('teacher', 'name email phoneNumber role department')
+        .populate('timeSlot', 'period startTime endTime session')
+        .populate('academicYear', 'name startDate endDate isActive')
+        .populate('createdBy', 'name email role')
+        .populate('lastModifiedBy', 'name email role')
+        .lean();
+
+      if (!lesson) {
+        throw new Error(`Lesson with ID ${lessonId} not found`);
+      }
+
+      // Authorization check
+      const hasAccess = this.checkLessonAccess(lesson, currentUser);
+      if (!hasAccess.allowed) {
+        throw new Error(hasAccess.reason);
+      }
+
+      // Get additional context information
+      const additionalInfo = await this.getLessonAdditionalInfo(lesson);
+
+      // Format response with comprehensive information
+      const lessonDetail = {
+        // Basic lesson information
+        lessonId: lesson.lessonId,
+        _id: lesson._id,
+        type: lesson.type,
+        status: lesson.status,
+        
+        // Time and schedule information
+        scheduledDate: lesson.scheduledDate,
+        actualDate: lesson.actualDate,
+        timeSlot: {
+          period: lesson.timeSlot?.period || 0,
+          startTime: lesson.timeSlot?.startTime || '',
+          endTime: lesson.timeSlot?.endTime || '',
+          session: lesson.timeSlot?.session || 'unknown'
+        },
+        
+        // Class information
+        class: lesson.class ? {
+          _id: lesson.class._id,
+          className: lesson.class.className,
+          gradeLevel: lesson.class.gradeLevel,
+          academicYear: lesson.class.academicYear,
+          homeroomTeacher: lesson.class.homeroomTeacher
+        } : null,
+        
+        // Subject information
+        subject: lesson.subject ? {
+          _id: lesson.subject._id,
+          name: lesson.subject.subjectName,
+          code: lesson.subject.subjectCode,
+          department: lesson.subject.department,
+          weeklyHours: lesson.subject.weeklyHours,
+          description: lesson.subject.description
+        } : null,
+        
+        // Teacher information
+        teacher: lesson.teacher ? {
+          _id: lesson.teacher._id,
+          name: lesson.teacher.name,
+          email: lesson.teacher.email,
+          phoneNumber: lesson.teacher.phoneNumber,
+          role: lesson.teacher.role,
+          department: lesson.teacher.department
+        } : null,
+        
+        // Academic year information
+        academicYear: lesson.academicYear ? {
+          _id: lesson.academicYear._id,
+          name: lesson.academicYear.name,
+          startDate: lesson.academicYear.startDate,
+          endDate: lesson.academicYear.endDate,
+          isActive: lesson.academicYear.isActive
+        } : null,
+        
+        // Lesson content
+        topic: lesson.topic || '',
+        notes: lesson.notes || '',
+        objectives: lesson.objectives || [],
+        materials: lesson.materials || [],
+        homework: lesson.homework || '',
+        
+        // Evaluation and attendance
+        evaluation: lesson.evaluation || null,
+        attendance: lesson.attendance || null,
+        
+        // Special lesson types
+        makeupInfo: lesson.makeupInfo || null,
+        extracurricularInfo: lesson.extracurricularInfo || null,
+        fixedInfo: lesson.fixedInfo || null,
+        
+        // Audit information
+        createdBy: lesson.createdBy ? {
+          _id: lesson.createdBy._id,
+          name: lesson.createdBy.name,
+          email: lesson.createdBy.email,
+          role: lesson.createdBy.role
+        } : null,
+        createdAt: lesson.createdAt,
+        lastModifiedBy: lesson.lastModifiedBy ? {
+          _id: lesson.lastModifiedBy._id,
+          name: lesson.lastModifiedBy.name,
+          email: lesson.lastModifiedBy.email,
+          role: lesson.lastModifiedBy.role
+        } : null,
+        updatedAt: lesson.updatedAt,
+        
+        // Additional context
+        context: additionalInfo,
+        
+        // User permissions for this lesson
+        permissions: this.getLessonPermissions(lesson, currentUser)
+      };
+
+      console.log(`✅ Successfully retrieved lesson detail for ${lessonId}`);
+      return lessonDetail;
+
+    } catch (error) {
+      console.error('❌ Error in getLessonDetailById:', error.message);
+      throw new Error(`Error fetching lesson detail: ${error.message}`);
+    }
+  }
+
+  // Helper method to check lesson access permissions
+  checkLessonAccess(lesson, currentUser) {
+    // Manager can access all lessons
+    if (currentUser.role.includes('manager') || currentUser.role.includes('admin')) {
+      return { allowed: true, reason: 'Admin/Manager access' };
+    }
+
+    // Teacher can access lessons they teach
+    if (currentUser.role.includes('teacher')) {
+      if (lesson.teacher && lesson.teacher._id.toString() === currentUser._id.toString()) {
+        return { allowed: true, reason: 'Teacher owns this lesson' };
+      }
+      
+      // Homeroom teacher can access lessons of their class
+      if (lesson.class && lesson.class.homeroomTeacher && 
+          lesson.class.homeroomTeacher.toString() === currentUser._id.toString()) {
+        return { allowed: true, reason: 'Homeroom teacher access' };
+      }
+    }
+
+    // Student can access lessons of their class
+    if (currentUser.role.includes('student')) {
+      // Note: This would require student-class relationship in the database
+      // For now, we'll allow students to view lessons (can be restricted later)
+      return { allowed: true, reason: 'Student access (general)' };
+    }
+
+    return { 
+      allowed: false, 
+      reason: 'Access denied. You do not have permission to view this lesson.' 
+    };
+  }
+
+  // Helper method to get additional lesson context
+  async getLessonAdditionalInfo(lesson) {
+    try {
+      const context = {};
+
+      // Get lesson sequence information (previous/next lesson in the same subject)
+      if (lesson.subject && lesson.class) {
+        const siblingLessons = await Lesson.find({
+          subject: lesson.subject._id,
+          class: lesson.class._id,
+          type: 'regular',
+          scheduledDate: {
+            $gte: new Date(lesson.scheduledDate.getTime() - 7 * 24 * 60 * 60 * 1000), // 1 week before
+            $lte: new Date(lesson.scheduledDate.getTime() + 7 * 24 * 60 * 60 * 1000)  // 1 week after
+          }
+        })
+        .select('lessonId scheduledDate topic status')
+        .sort({ scheduledDate: 1 })
+        .lean();
+
+        const currentIndex = siblingLessons.findIndex(l => l._id.toString() === lesson._id.toString());
+        
+        context.sequence = {
+          previousLesson: currentIndex > 0 ? siblingLessons[currentIndex - 1] : null,
+          nextLesson: currentIndex < siblingLessons.length - 1 ? siblingLessons[currentIndex + 1] : null,
+          position: currentIndex + 1,
+          total: siblingLessons.length
+        };
+      }
+
+      // Get same day lessons for context
+      const dayStart = new Date(lesson.scheduledDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(lesson.scheduledDate);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      const sameDayLessons = await Lesson.find({
+        class: lesson.class._id,
+        scheduledDate: {
+          $gte: dayStart,
+          $lte: dayEnd
+        }
+      })
+      .populate('subject', 'subjectName subjectCode')
+      .populate('timeSlot', 'period startTime endTime')
+      .select('lessonId subject timeSlot type status')
+      .sort({ 'timeSlot.period': 1 })
+      .lean();
+
+      context.daySchedule = sameDayLessons.map(l => ({
+        lessonId: l.lessonId,
+        period: l.timeSlot?.period || 0,
+        subject: l.subject?.subjectCode || 'Unknown',
+        type: l.type,
+        status: l.status,
+        isCurrent: l._id.toString() === lesson._id.toString()
+      }));
+
+      // Get weekly subject statistics
+      const weekStart = new Date(lesson.scheduledDate);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // Monday
+      weekStart.setHours(0, 0, 0, 0);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6); // Sunday
+      weekEnd.setHours(23, 59, 59, 999);
+
+      if (lesson.subject) {
+        const weeklySubjectLessons = await Lesson.countDocuments({
+          subject: lesson.subject._id,
+          class: lesson.class._id,
+          scheduledDate: {
+            $gte: weekStart,
+            $lte: weekEnd
+          },
+          type: 'regular'
+        });
+
+        context.weeklyStats = {
+          subjectLessonsThisWeek: weeklySubjectLessons,
+          expectedWeeklyHours: lesson.subject.weeklyHours || 0
+        };
+      }
+
+      return context;
+
+    } catch (error) {
+      console.error('Error getting additional lesson info:', error.message);
+      return {};
+    }
+  }
+
+  // Helper method to get user permissions for this lesson
+  getLessonPermissions(lesson, currentUser) {
+    const permissions = {
+      canView: true, // If we reach here, user can view
+      canEdit: false,
+      canDelete: false,
+      canMarkAttendance: false,
+      canAddEvaluation: false,
+      canModifyContent: false
+    };
+
+    // Admin/Manager permissions
+    if (currentUser.role.includes('manager') || currentUser.role.includes('admin')) {
+      permissions.canEdit = true;
+      permissions.canDelete = true;
+      permissions.canMarkAttendance = true;
+      permissions.canAddEvaluation = true;
+      permissions.canModifyContent = true;
+      return permissions;
+    }
+
+    // Teacher permissions
+    if (currentUser.role.includes('teacher')) {
+      // Own lessons
+      if (lesson.teacher && lesson.teacher._id.toString() === currentUser._id.toString()) {
+        permissions.canEdit = true;
+        permissions.canMarkAttendance = true;
+        permissions.canAddEvaluation = true;
+        permissions.canModifyContent = true;
+      }
+      
+      // Homeroom teacher permissions
+      if (lesson.class && lesson.class.homeroomTeacher && 
+          lesson.class.homeroomTeacher.toString() === currentUser._id.toString()) {
+        permissions.canMarkAttendance = true;
+      }
+    }
+
+    // Student permissions (read-only by default)
+    // Students can't modify anything by default
+
+    return permissions;
   }
 }
 

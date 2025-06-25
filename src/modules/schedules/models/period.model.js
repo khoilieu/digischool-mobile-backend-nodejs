@@ -325,11 +325,11 @@ periodSchema.pre('save', function(next) {
         { start: '08:40', end: '09:25' }, // Tiết 3
         { start: '09:45', end: '10:30' }, // Tiết 4
         { start: '10:35', end: '11:20' }, // Tiết 5
-        { start: '13:30', end: '14:15' }, // Tiết 6
-        { start: '14:20', end: '15:05' }, // Tiết 7
-        { start: '15:10', end: '15:55' }, // Tiết 8
-        { start: '16:00', end: '16:45' }, // Tiết 9
-        { start: '16:50', end: '17:35' }  // Tiết 10
+        { start: '12:30', end: '13:15' }, // Tiết 6
+        { start: '13:20', end: '14:05' }, // Tiết 7
+        { start: '14:10', end: '14:55' }, // Tiết 8
+        { start: '15:00', end: '15:45' }, // Tiết 9
+        { start: '15:50', end: '16:35' }  // Tiết 10
       ];
       const timeSlot = timeSlots[this.periodNumber - 1];
       if (timeSlot) {

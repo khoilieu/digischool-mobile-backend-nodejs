@@ -94,11 +94,11 @@ timeSlotSchema.statics.createDefaultTimeSlots = async function() {
     { period: 5, startTime: '10:35', endTime: '11:20', type: 'morning', name: 'Tiết 5' },
     
     // Afternoon slots
-    { period: 6, startTime: '13:30', endTime: '14:15', type: 'afternoon', name: 'Tiết 6' },
-    { period: 7, startTime: '14:20', endTime: '15:05', type: 'afternoon', name: 'Tiết 7' },
-    { period: 8, startTime: '15:10', endTime: '15:55', type: 'afternoon', name: 'Tiết 8' },
-    { period: 9, startTime: '16:00', endTime: '16:45', type: 'afternoon', name: 'Tiết 9' },
-    { period: 10, startTime: '16:50', endTime: '17:35', type: 'afternoon', name: 'Tiết 10' }
+    { period: 6, startTime: '12:30', endTime: '13:15', type: 'afternoon', name: 'Tiết 6' },
+    { period: 7, startTime: '13:20', endTime: '14:05', type: 'afternoon', name: 'Tiết 7' },
+    { period: 8, startTime: '14:10', endTime: '14:55', type: 'afternoon', name: 'Tiết 8' },
+    { period: 9, startTime: '15:00', endTime: '15:45', type: 'afternoon', name: 'Tiết 9' },
+    { period: 10, startTime: '15:50', endTime: '16:35', type: 'afternoon', name: 'Tiết 10' }
   ];
 
   try {

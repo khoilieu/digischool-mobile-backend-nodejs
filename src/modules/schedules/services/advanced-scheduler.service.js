@@ -352,8 +352,11 @@ class AdvancedSchedulerService {
       { start: '08:40', end: '09:25', session: 'morning' },
       { start: '09:45', end: '10:30', session: 'morning' },
       { start: '10:35', end: '11:20', session: 'morning' },
-      { start: '13:30', end: '14:15', session: 'afternoon' },
-      { start: '14:20', end: '15:05', session: 'afternoon' }
+      { start: '12:30', end: '13:15', session: 'afternoon' },
+      { start: '13:20', end: '14:05', session: 'afternoon' },
+      { start: '14:10', end: '14:55', session: 'afternoon' },
+      { start: '15:00', end: '15:45', session: 'afternoon' },
+      { start: '15:50', end: '16:35', session: 'afternoon' }
     ];
     return timeSlots[periodNumber - 1] || timeSlots[0];
   }

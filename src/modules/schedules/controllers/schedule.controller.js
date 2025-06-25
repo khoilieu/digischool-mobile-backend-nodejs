@@ -13,15 +13,25 @@ class ScheduleController {
       }
 
       console.log('🚀 Using NEW architecture for schedule initialization...');
+      console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+      // Thêm scheduleType vào request body nếu không có (default MONDAY_TO_SATURDAY)
+      const requestData = {
+        ...req.body,
+        scheduleType: req.body.scheduleType || 'MONDAY_TO_SATURDAY'
+      };
+
+      console.log(`📅 Schedule type: ${requestData.scheduleType}`);
 
       // Sử dụng method mới với Lesson-based architecture
-      const result = await scheduleService.initializeSchedulesWithNewArchitecture(req.body, token);
+      const result = await scheduleService.initializeSchedulesWithNewArchitecture(requestData, token);
       
       res.status(201).json({
         success: true,
         message: 'Schedules initialized successfully with new architecture',
         data: result,
-        architecture: 'lesson-based'
+        architecture: 'lesson-based',
+        scheduleType: requestData.scheduleType
       });
     } catch (error) {
       console.error('❌ Schedule initialization error:', error.message);
@@ -478,12 +488,23 @@ class ScheduleController {
   async getTeacherSchedule(req, res, next) {
     try {
       const { teacherId, academicYear, startOfWeek, endOfWeek } = req.query;
+      const currentUser = req.user; // Từ authMiddleware.protect
       
       if (!teacherId || !academicYear || !startOfWeek || !endOfWeek) {
         return res.status(400).json({
           success: false,
           message: 'teacherId, academicYear, startOfWeek, and endOfWeek are required'
         });
+      }
+
+      // Kiểm tra phân quyền: giáo viên chỉ có thể xem lịch của chính mình
+      if (currentUser.role.includes('teacher') && !currentUser.role.includes('manager')) {
+        if (currentUser._id.toString() !== teacherId) {
+          return res.status(403).json({
+            success: false,
+            message: 'Teachers can only view their own schedule'
+          });
+        }
       }
 
       const result = await scheduleService.getTeacherScheduleByDateRange(
@@ -495,6 +516,7 @@ class ScheduleController {
       
       res.status(200).json({
         success: true,
+        message: `Teacher schedule retrieved successfully for ${startOfWeek} to ${endOfWeek}`,
         data: result
       });
     } catch (error) {
@@ -1465,6 +1487,40 @@ class ScheduleController {
         data: result
       });
     } catch (error) {
+      next(error);
+    }
+  }
+
+  // Lấy chi tiết tiết học
+  async getLessonDetail(req, res, next) {
+    try {
+      const { lessonId } = req.params;
+      const currentUser = req.user; // Từ authMiddleware.protect
+      
+      if (!lessonId) {
+        return res.status(400).json({
+          success: false,
+          message: 'lessonId is required'
+        });
+      }
+
+      // Lấy chi tiết tiết học
+      const lessonDetail = await scheduleService.getLessonDetailById(lessonId, currentUser);
+      
+      if (!lessonDetail) {
+        return res.status(404).json({
+          success: false,
+          message: 'Lesson not found'
+        });
+      }
+
+      console.log(`✅ Retrieved lesson detail for ${lessonId} by user ${currentUser._id}`);
+
+      // Trả về trực tiếp data của lesson
+      res.status(200).json(lessonDetail);
+
+    } catch (error) {
+      console.error('❌ Error in getLessonDetail:', error.message);
       next(error);
     }
   }

@@ -71,7 +71,7 @@ Schema thời khóa biểu đã được thiết kế lại hoàn toàn để h�
 
 ### Khung giờ mặc định:
 - **Buổi sáng**: Tiết 1-5 (07:00-11:20)
-- **Buổi chiều**: Tiết 6-10 (13:30-17:35)
+- **Buổi chiều**: Tiết 6-10 (12:30-16:35)
 
 ### Phân loại tiết:
 - **Tiết 1-7**: Tiết học thường (`periodType: 'regular'`)
