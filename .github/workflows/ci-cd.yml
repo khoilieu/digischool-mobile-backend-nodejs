@@ -37,10 +37,14 @@ jobs:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
-      - name: Enable Cloud Run API and Deploy
+      - name: Enable Required APIs
         run: |
           gcloud config set project digischool-464104
-          gcloud services enable run.googleapis.com cloudresourcemanager.googleapis.com || true
+          gcloud services enable cloudresourcemanager.googleapis.com
+          gcloud services enable run.googleapis.com
+          gcloud services enable containerregistry.googleapis.com
+      - name: Deploy to Cloud Run
+        run: |
           gcloud run deploy digischool-app \
             --image docker.io/${{ secrets.DOCKERHUB_USERNAME }}/digischool-app:${{ github.sha }} \
             --region us-central1 \
@@ -51,5 +55,5 @@ jobs:
             --memory 512Mi \
             --cpu 1 \
             --max-instances 10 \
-            --set-env-vars NODE_ENV=production,PORT=8080 \
+            --set-env-vars NODE_ENV=production \
             --quiet

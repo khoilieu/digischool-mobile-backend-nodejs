@@ -21,7 +21,6 @@ EXPOSE 8080
 
 # Thiết lập biến môi trường
 ENV NODE_ENV=production
-ENV PORT=8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
