@@ -66,3 +66,26 @@ jobs:
             --max-instances 10 \
             --set-env-vars "${{ steps.envvars.outputs.ENV_VARS }}" \
             --quiet
+      - name: Gửi email thông báo khi deploy thành công
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "✅ Deploy thành công DigiSchool lên Cloud"
+          to: ${{ secrets.MAIL_RECEIVER }}
+          from: ${{ secrets.MAIL_USERNAME }}
+          body: |
+            Xin chào,
+
+            CI/CD đã deploy thành công ứng dụng DigiSchool lên Cloud!
+
+            Repo: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            URL Cloud Run: https://console.cloud.google.com/run/detail/asia-southeast1/digischool-app
+
+            Trân trọng,
+            Hệ thống CI/CD
