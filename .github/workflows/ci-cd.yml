@@ -43,16 +43,6 @@ jobs:
           gcloud services enable cloudresourcemanager.googleapis.com
           gcloud services enable run.googleapis.com
           gcloud services enable containerregistry.googleapis.com
-      - name: Tạo file .env từ secret
-        run: |
-          echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
-
-      - name: Convert .env sang chuỗi env-vars
-        id: envvars
-        run: |
-          chmod +x ./env-to-cloudrun-vars.sh
-          ENV_VARS=$(./env-to-cloudrun-vars.sh .env)
-          echo "ENV_VARS=$ENV_VARS" >> $GITHUB_OUTPUT
 
       - name: Deploy to Cloud Run
         run: |
