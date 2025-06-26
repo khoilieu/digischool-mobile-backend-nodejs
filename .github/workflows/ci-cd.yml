@@ -40,10 +40,16 @@ jobs:
       - name: Enable Cloud Run API and Deploy
         run: |
           gcloud config set project digischool-464104
-          gcloud services enable run.googleapis.com || true
+          gcloud services enable run.googleapis.com cloudresourcemanager.googleapis.com || true
           gcloud run deploy digischool-app \
             --image docker.io/${{ secrets.DOCKERHUB_USERNAME }}/digischool-app:${{ github.sha }} \
             --region us-central1 \
             --platform managed \
             --allow-unauthenticated \
+            --port 8080 \
+            --timeout 300 \
+            --memory 512Mi \
+            --cpu 1 \
+            --max-instances 10 \
+            --set-env-vars NODE_ENV=production,PORT=8080 \
             --quiet
