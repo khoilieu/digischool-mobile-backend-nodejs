@@ -12,7 +12,7 @@ RUN npm install
 COPY . .
 
 # Mở cổng ứng dụng
-EXPOSE 3000
+EXPOSE 8080
 
 # Lệnh khởi chạy ứng dụng
 CMD ["npm", "start"]

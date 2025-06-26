@@ -45,6 +45,5 @@ jobs:
             --image docker.io/${{ secrets.DOCKERHUB_USERNAME }}/digischool-app:${{ github.sha }} \
             --region us-central1 \
             --platform managed \
-            --port 3000 \
             --allow-unauthenticated \
             --quiet
