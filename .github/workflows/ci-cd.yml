@@ -39,8 +39,9 @@ jobs:
         uses: google-github-actions/setup-gcloud@v1
       - name: Enable Cloud Run API and Deploy
         run: |
-          gcloud services enable run.googleapis.com
-          gcloud run deploy node-app \
+          gcloud config set project digischool-464104
+          gcloud services enable run.googleapis.com || true  # Thử kích hoạt, bỏ qua nếu lỗi
+          gcloud run deploy digischool-app \
             --image docker.io/${{ secrets.DOCKERHUB_USERNAME }}/digischool-app:${{ github.sha }} \
             --region us-central1 \
             --platform managed \
