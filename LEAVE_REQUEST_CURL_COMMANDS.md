@@ -92,7 +92,7 @@ curl -X GET "${BASE_URL}/pending?startDate=2024-08-12&endDate=2024-08-19" \
 # Replace REQUEST_ID with actual request ID
 REQUEST_ID="675a1b2c3d4e5f6789012347"
 
-curl -X PUT "${BASE_URL}/${REQUEST_ID}/approve" \
+curl -X POST "${BASE_URL}/${REQUEST_ID}/approve" \
   -H "Authorization: Bearer ${TEACHER_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -105,7 +105,7 @@ curl -X PUT "${BASE_URL}/${REQUEST_ID}/approve" \
 # Replace REQUEST_ID with actual request ID
 REQUEST_ID="675a1b2c3d4e5f6789012348"
 
-curl -X PUT "${BASE_URL}/${REQUEST_ID}/reject" \
+curl -X POST "${BASE_URL}/${REQUEST_ID}/reject" \
   -H "Authorization: Bearer ${TEACHER_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -259,7 +259,7 @@ curl -X GET "${BASE_URL}/pending" \
 # Step 2: Approve a request (use actual request ID from step 1)
 echo -e "\n=== Step 2: Approving a request ==="
 REQUEST_ID="675a1b2c3d4e5f6789012347"
-curl -X PUT "${BASE_URL}/${REQUEST_ID}/approve" \
+curl -X POST "${BASE_URL}/${REQUEST_ID}/approve" \
   -H "Authorization: Bearer ${TEACHER_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"comment": "Đồng ý cho phép nghỉ học"}' | jq
@@ -349,7 +349,7 @@ curl -X POST "${BASE_URL}/create" \
   }' | jq
 
 echo -e "\n=== Test: Reject without comment ==="
-curl -X PUT "${BASE_URL}/675a1b2c3d4e5f6789012347/reject" \
+curl -X POST "${BASE_URL}/675a1b2c3d4e5f6789012347/reject" \
   -H "Authorization: Bearer ${TEACHER_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{}' | jq

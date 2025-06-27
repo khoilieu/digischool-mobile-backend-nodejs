@@ -20,8 +20,8 @@ http://localhost:3000/api/leave-requests
 |--------|----------|-------------|------|
 | `GET` | `/pending?page=1&limit=50` | Xem đơn cần duyệt | Teacher |
 | `GET` | `/teacher-requests?status=xxx&page=1&limit=20` | Xem tất cả đơn đã xử lý | Teacher |
-| `PUT` | `/{requestId}/approve` | Duyệt đơn xin vắng | Teacher |
-| `PUT` | `/{requestId}/reject` | Từ chối đơn xin vắng | Teacher |
+| `POST` | `/{requestId}/approve` | Duyệt đơn xin vắng | Teacher |
+| `POST` | `/{requestId}/reject` | Từ chối đơn xin vắng | Teacher |
 | `POST` | `/batch-process` | Xử lý nhiều đơn cùng lúc | Teacher |
 
 ## 🔍 Common Endpoints
@@ -132,10 +132,18 @@ curl -X GET "http://localhost:3000/api/leave-requests/pending" \
 
 ### Approve Request
 ```bash
-curl -X PUT "http://localhost:3000/api/leave-requests/{requestId}/approve" \
+curl -X POST "http://localhost:3000/api/leave-requests/{requestId}/approve" \
   -H "Authorization: Bearer <teacher_token>" \
   -H "Content-Type: application/json" \
   -d '{"comment": "Đồng ý cho phép nghỉ học"}'
+```
+
+### Reject Request
+```bash
+curl -X POST "http://localhost:3000/api/leave-requests/{requestId}/reject" \
+  -H "Authorization: Bearer <teacher_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"comment": "Không thể phê duyệt vì đây là tiết kiểm tra quan trọng"}'
 ```
 
 ### Get Statistics

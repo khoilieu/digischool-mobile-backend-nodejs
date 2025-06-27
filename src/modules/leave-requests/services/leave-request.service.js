@@ -283,19 +283,46 @@ class LeaveRequestService {
   async approveLeaveRequest(requestId, teacherId, comment = '') {
     try {
       const request = await LeaveRequest.findById(requestId)
-        .populate('studentId', 'name email')
+        .populate('studentId', 'name email fullName')
         .populate('lessonId', 'lessonId topic scheduledDate')
-        .populate('subjectId', 'subjectName');
+        .populate('subjectId', 'subjectName')
+        .populate('teacherId', 'name fullName')
+        .populate('classId', 'className');
       
       if (!request) {
-        throw new Error('Leave request not found');
+        const error = new Error('Leave request not found');
+        error.statusCode = 404;
+        throw error;
       }
       
-      if (!request.canBeProcessedBy(teacherId)) {
-        throw new Error('You are not authorized to process this request or it has already been processed');
+      // Check if teacher has permission to process this request
+      if (request.teacherId._id.toString() !== teacherId.toString()) {
+        const error = new Error('You are not authorized to approve this request. Only the lesson teacher can approve.');
+        error.statusCode = 403;
+        throw error;
       }
       
-      await request.approve(teacherId, comment);
+      // Check if request has already been processed
+      if (request.status !== 'pending') {
+        const error = new Error(`Request has already been ${request.status}`);
+        error.statusCode = 400;
+        throw error;
+      }
+      
+      // Update request directly (we already checked permissions above)
+      request.status = 'approved';
+      request.teacherComment = comment;
+      request.approvedAt = new Date();
+      request.approvedBy = teacherId;
+      await request.save();
+      
+      // Send email notification to student
+      try {
+        await this.sendLeaveRequestNotification(request, 'approved', comment);
+      } catch (emailError) {
+        console.error('❌ Failed to send email notification:', emailError.message);
+        // Don't fail the approval if email fails
+      }
       
       console.log(`✅ Leave request approved by teacher ${teacherId} for student ${request.studentId.name}`);
       
@@ -307,6 +334,14 @@ class LeaveRequestService {
       
     } catch (error) {
       console.error('❌ Error approving leave request:', error.message);
+      
+      // Preserve status code if it exists
+      if (error.statusCode) {
+        const customError = new Error(error.message);
+        customError.statusCode = error.statusCode;
+        throw customError;
+      }
+      
       throw new Error(`Failed to approve leave request: ${error.message}`);
     }
   }
@@ -315,23 +350,52 @@ class LeaveRequestService {
   async rejectLeaveRequest(requestId, teacherId, comment) {
     try {
       if (!comment || !comment.trim()) {
-        throw new Error('Comment is required when rejecting a leave request');
+        const error = new Error('Comment is required when rejecting a leave request');
+        error.statusCode = 400;
+        throw error;
       }
       
       const request = await LeaveRequest.findById(requestId)
-        .populate('studentId', 'name email')
+        .populate('studentId', 'name email fullName')
         .populate('lessonId', 'lessonId topic scheduledDate')
-        .populate('subjectId', 'subjectName');
+        .populate('subjectId', 'subjectName')
+        .populate('teacherId', 'name fullName')
+        .populate('classId', 'className');
       
       if (!request) {
-        throw new Error('Leave request not found');
+        const error = new Error('Leave request not found');
+        error.statusCode = 404;
+        throw error;
       }
       
-      if (!request.canBeProcessedBy(teacherId)) {
-        throw new Error('You are not authorized to process this request or it has already been processed');
+      // Check if teacher has permission to process this request
+      if (request.teacherId._id.toString() !== teacherId.toString()) {
+        const error = new Error('You are not authorized to reject this request. Only the lesson teacher can reject.');
+        error.statusCode = 403;
+        throw error;
       }
       
-      await request.reject(teacherId, comment);
+      // Check if request has already been processed
+      if (request.status !== 'pending') {
+        const error = new Error(`Request has already been ${request.status}`);
+        error.statusCode = 400;
+        throw error;
+      }
+      
+      // Update request directly (we already checked permissions above)
+      request.status = 'rejected';
+      request.teacherComment = comment;
+      request.approvedAt = new Date();
+      request.approvedBy = teacherId;
+      await request.save();
+      
+      // Send email notification to student
+      try {
+        await this.sendLeaveRequestNotification(request, 'rejected', comment);
+      } catch (emailError) {
+        console.error('❌ Failed to send email notification:', emailError.message);
+        // Don't fail the rejection if email fails
+      }
       
       console.log(`❌ Leave request rejected by teacher ${teacherId} for student ${request.studentId.name}`);
       
@@ -343,6 +407,14 @@ class LeaveRequestService {
       
     } catch (error) {
       console.error('❌ Error rejecting leave request:', error.message);
+      
+      // Preserve status code if it exists
+      if (error.statusCode) {
+        const customError = new Error(error.message);
+        customError.statusCode = error.statusCode;
+        throw customError;
+      }
+      
       throw new Error(`Failed to reject leave request: ${error.message}`);
     }
   }
@@ -542,6 +614,123 @@ class LeaveRequestService {
       
     } catch (error) {
       throw new Error(`Failed to get available lessons: ${error.message}`);
+    }
+  }
+
+  // Gửi email thông báo kết quả đơn xin vắng
+  async sendLeaveRequestNotification(request, status, comment) {
+    try {
+      const emailService = require('../../auth/services/email.service');
+      
+      const studentEmail = request.studentId.email;
+      const studentName = request.studentId.fullName || request.studentId.name;
+      const teacherName = request.teacherId.fullName || request.teacherId.name;
+      const subjectName = request.subjectId.subjectName;
+      const className = request.classId.className;
+      const lessonDate = new Date(request.date).toLocaleDateString('vi-VN');
+      const period = request.period;
+      
+      const statusText = status === 'approved' ? 'được chấp thuận' : 'bị từ chối';
+      const statusIcon = status === 'approved' ? '✅' : '❌';
+      const statusColor = status === 'approved' ? '#28a745' : '#dc3545';
+      
+      const subject = `${statusIcon} Thông báo kết quả đơn xin vắng - ${subjectName}`;
+      
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px;">🏫 EcoSchool</h1>
+            <p style="margin: 10px 0 0 0; opacity: 0.9;">Hệ thống quản lý học tập</p>
+          </div>
+          
+          <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
+            <div style="background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+              <h2 style="color: ${statusColor}; margin-top: 0; text-align: center;">
+                ${statusIcon} Đơn xin vắng của bạn đã ${statusText}
+              </h2>
+              
+              <div style="background: #f1f3f4; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <h3 style="color: #333; margin-top: 0;">📋 Thông tin đơn xin vắng:</h3>
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 8px 0; color: #666; width: 120px;"><strong>Học sinh:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${studentName}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #666;"><strong>Lớp:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${className}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #666;"><strong>Môn học:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${subjectName}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #666;"><strong>Ngày học:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${lessonDate}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #666;"><strong>Tiết:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">Tiết ${period}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #666;"><strong>Giáo viên:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${teacherName}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #666;"><strong>Lý do xin vắng:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${request.reason}</td>
+                  </tr>
+                </table>
+              </div>
+              
+              ${comment ? `
+                <div style="background: ${status === 'approved' ? '#d4edda' : '#f8d7da'}; 
+                           border: 1px solid ${status === 'approved' ? '#c3e6cb' : '#f5c6cb'}; 
+                           color: ${status === 'approved' ? '#155724' : '#721c24'}; 
+                           padding: 15px; border-radius: 8px; margin: 20px 0;">
+                  <h4 style="margin-top: 0; color: ${status === 'approved' ? '#155724' : '#721c24'};">
+                    💬 Nhận xét của giáo viên:
+                  </h4>
+                  <p style="margin-bottom: 0; font-style: italic;">"${comment}"</p>
+                </div>
+              ` : ''}
+              
+              ${status === 'approved' ? `
+                <div style="background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                  <h4 style="margin-top: 0; color: #0c5460;">📝 Lưu ý quan trọng:</h4>
+                  <ul style="margin-bottom: 0; padding-left: 20px;">
+                    <li>Bạn đã được phép vắng mặt trong tiết học này</li>
+                    <li>Hãy liên hệ với giáo viên để biết về bài học bù</li>
+                    <li>Nếu có tài liệu học tập, hãy xin từ bạn cùng lớp</li>
+                  </ul>
+                </div>
+              ` : `
+                <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                  <h4 style="margin-top: 0; color: #721c24;">📝 Lưu ý quan trọng:</h4>
+                  <ul style="margin-bottom: 0; padding-left: 20px;">
+                    <li>Đơn xin vắng của bạn đã bị từ chối</li>
+                    <li>Bạn cần có mặt đầy đủ trong tiết học này</li>
+                    <li>Nếu có thắc mắc, hãy liên hệ trực tiếp với giáo viên</li>
+                  </ul>
+                </div>
+              `}
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px; color: #6c757d; font-size: 14px;">
+              <p>📧 Email này được gửi tự động từ hệ thống EcoSchool</p>
+              <p>🕒 Thời gian: ${new Date().toLocaleString('vi-VN')}</p>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      await emailService.sendEmail(studentEmail, subject, html);
+      
+      console.log(`📧 Email notification sent to ${studentEmail} for ${status} leave request`);
+      
+    } catch (error) {
+      console.error('❌ Error sending leave request notification:', error.message);
+      throw error;
     }
   }
 }

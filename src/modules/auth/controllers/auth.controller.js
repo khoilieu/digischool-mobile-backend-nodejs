@@ -64,11 +64,21 @@ class AuthController {
             }
           });
         } catch (otpError) {
-          // Nếu cả 2 đều thất bại, trả về lỗi
-          return res.status(401).json({
-            success: false,
-            message: 'Invalid email or password'
-          });
+          // Thử login với reset token (1pwd)
+          try {
+            const resetTokenResult = await authService.loginWithResetToken(email, password);
+            
+            return res.status(200).json({
+              success: true,
+              data: resetTokenResult
+            });
+          } catch (resetTokenError) {
+            // Nếu tất cả đều thất bại, trả về lỗi
+            return res.status(401).json({
+              success: false,
+              message: 'Invalid email or password'
+            });
+          }
         }
       }
     } catch (error) {
@@ -149,6 +159,23 @@ class AuthController {
       next(error);
     }
   }
+
+  // Forgot Password - Gửi mã reset password qua email
+  async forgotPassword(req, res, next) {
+    try {
+      const { email } = req.body;
+      const result = await authService.forgotPassword(email);
+      
+      res.status(200).json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+
 }
 
 module.exports = new AuthController(); 

@@ -45,13 +45,13 @@ router.get('/teacher-requests',
   leaveRequestController.getTeacherRequests
 );
 
-router.put('/:requestId/approve', 
+router.post('/:requestId/approve', 
   authMiddleware.authorize('teacher', 'homeroom_teacher'),
   validation.validateApproveRequest,
   leaveRequestController.approveRequest
 );
 
-router.put('/:requestId/reject', 
+router.post('/:requestId/reject', 
   authMiddleware.authorize('teacher', 'homeroom_teacher'),
   validation.validateRejectRequest,
   leaveRequestController.rejectRequest
