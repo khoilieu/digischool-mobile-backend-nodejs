@@ -314,7 +314,7 @@ class UserService {
 
       // Kiểm tra xem đây là tempToken (có email + role) hay JWT token (có id)
       if (decoded.id) {
-        // Đây là JWT token của user đã tồn tại (student/teacher được tạo bởi manager)
+        // Đây là JWT token của user đã tồn tại (student/teacher được tạo bởi manager hoặc reset password)
         const userId = decoded.id;
         
         // Tìm user
@@ -323,20 +323,25 @@ class UserService {
           throw new Error('User not found');
         }
 
-        // Kiểm tra user có phải là new user không
-        if (!user.isNewUser) {
+        // Kiểm tra user có phải là new user không hoặc đang trong quá trình reset password
+        const isResetPassword = user.resetPasswordToken && user.resetPasswordExpires;
+        if (!user.isNewUser && !isResetPassword) {
           throw new Error('This user has already set up their password');
         }
 
         // Cập nhật user
-        const updatedUser = await User.findByIdAndUpdate(
-          userId,
-          { 
-            passwordHash,
-            isNewUser: false // Đánh dấu user đã setup password
-          },
-          { new: true }
-        );
+        const updateData = { 
+          passwordHash,
+          isNewUser: false // Đánh dấu user đã setup password
+        };
+
+        // Nếu đang reset password, xóa reset token
+        if (isResetPassword) {
+          updateData.resetPasswordToken = undefined;
+          updateData.resetPasswordExpires = undefined;
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(userId, updateData, { new: true });
 
         // Tạo token mới cho user
         const newToken = jwt.sign(
@@ -344,6 +349,8 @@ class UserService {
           process.env.JWT_SECRET,
           { expiresIn: process.env.JWT_EXPIRES_IN }
         );
+
+        console.log(`✅ Password set successfully for user: ${user.email} ${isResetPassword ? '(via reset)' : '(new user)'}`);
 
         return {
           message: 'Password set successfully',

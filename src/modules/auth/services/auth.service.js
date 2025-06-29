@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/user.model');
+const emailService = require('./email.service');
 
 class AuthService {
   // Tạo JWT token
@@ -158,6 +159,93 @@ class AuthService {
       throw error;
     }
   }
+
+  // Forgot Password - Gửi mã reset password qua email
+  async forgotPassword(email) {
+    try {
+      console.log(`🔐 Forgot password request for email: ${email}`);
+      
+      // Theo yêu cầu: không cần kiểm tra email có tồn tại trong database hay không
+      // Cứ gửi mã reset password cho email đó
+      
+      // Tạo user tạm thời nếu không tồn tại (để lưu reset token)
+      let user = await User.findOne({ email });
+      
+      if (!user) {
+        // Tạo user tạm thời với thông tin tối thiểu
+        user = new User({
+          email: email,
+          passwordHash: 'temp_hash', // Sẽ được thay thế khi set password
+          name: email.split('@')[0],
+          role: ['manager'],
+          isNewUser: true
+        });
+      }
+      
+      // Tạo reset token (6 số ngẫu nhiên)
+      const resetToken = user.generateResetPasswordToken();
+      
+      // Lưu user với reset token
+      await user.save();
+      
+      // Gửi email với reset token
+      await emailService.sendResetPasswordEmail(email, resetToken);
+      
+      console.log(`✅ Reset password email sent to: ${email}`);
+      
+      return {
+        success: true,
+        message: 'Reset password email has been sent',
+        email: email
+      };
+      
+    } catch (error) {
+      console.error('❌ Error in forgotPassword:', error.message);
+      throw new Error(`Failed to process forgot password request: ${error.message}`);
+    }
+  }
+
+  // Login với reset password token (1pwd)
+  async loginWithResetToken(email, resetToken) {
+    try {
+      console.log(`🔑 Login attempt with reset token for email: ${email}`);
+      
+      const user = await User.findOne({ email });
+      
+      if (!user) {
+        throw new Error('Invalid email or reset token');
+      }
+      
+      // Verify reset token
+      if (!user.verifyResetPasswordToken(resetToken)) {
+        throw new Error('Invalid or expired reset token');
+      }
+      
+      // Tạo temporary token để sử dụng với API set-password
+      const tempToken = this.generateToken(user._id);
+      
+      console.log(`✅ Login successful with reset token for user: ${user.email}`);
+      
+      return {
+        user: {
+          id: user._id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          isNewUser: true // Luôn redirect đến set-password
+        },
+        tempToken, // Sử dụng tempToken thay vì token
+        loginType: 'reset_token',
+        redirectTo: 'set-password'
+      };
+      
+    } catch (error) {
+      console.error('❌ Error in loginWithResetToken:', error.message);
+      throw new Error(`Failed to login with reset token: ${error.message}`);
+    }
+  }
+
+
 }
 
 module.exports = new AuthService(); 

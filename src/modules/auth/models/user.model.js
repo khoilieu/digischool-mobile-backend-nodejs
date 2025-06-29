@@ -60,6 +60,15 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: false // Mật khẩu tạm thời cho teacher mới import
   },
+  // Forgot password fields
+  resetPasswordToken: {
+    type: String,
+    required: false
+  },
+  resetPasswordExpires: {
+    type: Date,
+    required: false
+  },
   active: { type: Boolean, default: true }
 }, { timestamps: true });
 
@@ -79,6 +88,53 @@ userSchema.set('toObject', { virtuals: true });
 // Method to compare password
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.passwordHash);
+};
+
+// Method to generate reset password token (1pwd như create user)
+userSchema.methods.generateResetPasswordToken = function() {
+  // Tạo 1pwd phức tạp giống create user
+  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+  const numbers = '0123456789';
+  const specialChars = '!@#$%^&*?';
+  
+  // Kết hợp tất cả ký tự
+  const allChars = uppercase + lowercase + numbers + specialChars;
+  
+  let resetToken = '';
+  
+  // Đảm bảo có ít nhất 1 ký tự từ mỗi loại
+  resetToken += uppercase[Math.floor(Math.random() * uppercase.length)];
+  resetToken += lowercase[Math.floor(Math.random() * lowercase.length)];
+  resetToken += numbers[Math.floor(Math.random() * numbers.length)];
+  resetToken += specialChars[Math.floor(Math.random() * specialChars.length)];
+  
+  // Tạo thêm 8 ký tự ngẫu nhiên (tổng cộng 12 ký tự)
+  for (let i = 4; i < 12; i++) {
+    resetToken += allChars[Math.floor(Math.random() * allChars.length)];
+  }
+  
+  // Trộn lại thứ tự các ký tự
+  const finalToken = resetToken.split('').sort(() => Math.random() - 0.5).join('');
+  
+  // Hash token and set to resetPasswordToken field
+  this.resetPasswordToken = bcrypt.hashSync(finalToken, 10);
+  
+  // Set expire time (15 minutes from now)
+  this.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+  
+  return finalToken;
+};
+
+// Method to verify reset password token
+userSchema.methods.verifyResetPasswordToken = function(token) {
+  // Check if token has expired
+  if (this.resetPasswordExpires < Date.now()) {
+    return false;
+  }
+  
+  // Compare token with stored hash
+  return bcrypt.compareSync(token, this.resetPasswordToken);
 };
 
 const User = mongoose.model('User', userSchema);

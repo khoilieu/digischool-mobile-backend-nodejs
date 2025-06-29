@@ -148,12 +148,35 @@ class LeaveRequestController {
       
       res.status(200).json({
         success: true,
-        message: 'Leave request approved successfully',
+        message: 'Leave request approved successfully and notification sent to student',
         data: result.request
       });
       
     } catch (error) {
       console.error('❌ Error in approveRequest:', error.message);
+      
+      // Handle specific error status codes
+      if (error.statusCode === 403) {
+        return res.status(403).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      if (error.statusCode === 404) {
+        return res.status(404).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      if (error.statusCode === 400) {
+        return res.status(400).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
       next(error);
     }
   }
@@ -183,12 +206,35 @@ class LeaveRequestController {
       
       res.status(200).json({
         success: true,
-        message: 'Leave request rejected successfully',
+        message: 'Leave request rejected successfully and notification sent to student',
         data: result.request
       });
       
     } catch (error) {
       console.error('❌ Error in rejectRequest:', error.message);
+      
+      // Handle specific error status codes
+      if (error.statusCode === 403) {
+        return res.status(403).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      if (error.statusCode === 404) {
+        return res.status(404).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
+      if (error.statusCode === 400) {
+        return res.status(400).json({
+          success: false,
+          message: error.message
+        });
+      }
+      
       next(error);
     }
   }
