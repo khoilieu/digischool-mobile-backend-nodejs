@@ -87,7 +87,7 @@ class AuthService {
       // Lấy thông tin user từ token với populate
       const user = await User.findById(decoded.id)
         .populate('class_id', 'className classCode description')
-        .populate('subjects', 'subjectName subjectCode description')
+        .populate('subject', 'subjectName subjectCode description')
         .select('-passwordHash -resetPasswordToken -resetPasswordExpires');
 
       if (!user) {
@@ -122,13 +122,12 @@ class AuthService {
         } : null,
         
         // Subjects information (for teachers)
-        subjects: user.subjects && user.subjects.length > 0 ? 
-          user.subjects.map(subject => ({
-            id: subject._id,
-            subjectName: subject.subjectName,
-            subjectCode: subject.subjectCode,
-            description: subject.description
-          })) : [],
+        subjects: user.subject ? [{
+          id: user.subject._id,
+          subjectName: user.subject.subjectName,
+          subjectCode: user.subject.subjectCode,
+          description: user.subject.description
+        }] : [],
         
         // Role-specific information
         roleInfo: this.getRoleSpecificInfo(user)
@@ -168,7 +167,7 @@ class AuthService {
     if (user.role.includes('teacher')) {
       roleInfo.type = 'teacher';
       roleInfo.teacherId = user.teacherId;
-      roleInfo.subjectIds = user.subjects ? user.subjects.map(s => s._id) : [];
+      roleInfo.subjectIds = user.subject ? [user.subject._id] : [];
       roleInfo.permissions = [
         'manage_lessons',
         'create_reminders',

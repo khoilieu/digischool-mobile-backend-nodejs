@@ -89,23 +89,20 @@ class AuthController {
   // Lấy thông tin user từ token
   async getCurrentUser(req, res, next) {
     try {
-      // Lấy token từ header
+      // User đã được xác thực bởi middleware protect
+      // Lấy thông tin chi tiết từ service
       const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({
-          success: false,
-          message: 'No token provided'
-        });
-      }
-
       const token = authHeader.split(' ')[1];
-      const user = await authService.getCurrentUserFromToken(token);
+      
+      const userDetail = await authService.getCurrentUserFromToken(token);
       
       res.status(200).json({
         success: true,
-        data: user
+        message: 'Lấy thông tin user thành công',
+        data: userDetail
       });
     } catch (error) {
+      console.error('❌ Error in getCurrentUser:', error.message);
       if (error.message === 'Invalid token' || error.message === 'Token expired') {
         return res.status(401).json({
           success: false,
