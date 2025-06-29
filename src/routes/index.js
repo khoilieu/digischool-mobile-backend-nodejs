@@ -6,6 +6,8 @@ const userRoutes = require('../modules/user/routes/user.routes');
 const subjectRoutes = require('../modules/subjects/routes/subject.routes');
 const classRoutes = require('../modules/classes/routes/class.routes');
 const scheduleRoutes = require('../modules/schedules/routes/schedule.routes');
+const studentEvaluationRoutes = require('../modules/schedules/routes/student-evaluation.routes');
+const teacherEvaluationRoutes = require('../modules/schedules/routes/teacher-evaluation.routes');
 const leaveRequestRoutes = require('../modules/leave-requests/routes/leave-request.routes');
 
 // Health check route
@@ -24,6 +26,10 @@ router.use('/subjects', subjectRoutes);
 router.use('/classes', classRoutes);
 // Schedule routes
 router.use('/schedules', scheduleRoutes);
+// Student evaluation routes
+router.use('/student-evaluations', studentEvaluationRoutes);
+// Teacher evaluation routes
+router.use('/teacher-evaluations', teacherEvaluationRoutes);
 // Leave request routes
 router.use('/leave-requests', leaveRequestRoutes);
 

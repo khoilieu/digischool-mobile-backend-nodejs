@@ -85,6 +85,16 @@ router.get('/lesson/:lessonId',
   scheduleController.getLessonDetail
 );
 
+// GET /api/schedules/lesson/:lessonId/students - Lấy danh sách học sinh của lesson
+// Params: lessonId
+// Chỉ giáo viên dạy tiết đó mới được xem
+// Ví dụ: /api/schedules/lesson/675a1b2c3d4e5f6789012345/students
+router.get('/lesson/:lessonId/students',
+  authMiddleware.protect,
+  authMiddleware.authorize('teacher'),
+  scheduleController.getLessonStudents
+);
+
 // GET /api/schedules/available - Xem tất cả schedules có sẵn (debugging)
 router.get('/available',
   authMiddleware.protect,

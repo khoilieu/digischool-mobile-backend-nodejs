@@ -1524,6 +1524,84 @@ class ScheduleController {
       next(error);
     }
   }
+
+  // API để lấy danh sách học sinh của một lesson cụ thể
+  async getLessonStudents(req, res, next) {
+    try {
+      const { lessonId } = req.params;
+      const teacherId = req.user._id;
+      
+      // Import models
+      const Lesson = require('../models/lesson.model');
+      const User = require('../../auth/models/user.model');
+      const Class = require('../../classes/models/class.model');
+      
+      // Tìm lesson và kiểm tra quyền
+      const lesson = await Lesson.findById(lessonId)
+        .populate('class', 'className')
+        .populate('subject', 'subjectName subjectCode')
+        .populate('teacher', 'name');
+      
+      if (!lesson) {
+        return res.status(404).json({
+          success: false,
+          message: 'Lesson not found'
+        });
+      }
+      
+      // Kiểm tra chỉ giáo viên dạy tiết này mới được xem
+      if (lesson.teacher._id.toString() !== teacherId.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'You can only view students of your own lessons'
+        });
+      }
+      
+      // Lấy danh sách học sinh của lớp
+      const students = await User.find({
+        class_id: lesson.class._id,
+        role: 'student'
+      }).select('_id name studentId class_id').sort('name');
+      
+      // Lấy thông tin lớp
+      const classInfo = await Class.findById(lesson.class._id).select('className grade');
+      
+      res.status(200).json({
+        success: true,
+        message: 'Lấy danh sách học sinh thành công',
+        data: {
+          lesson: {
+            lessonId: lesson.lessonId,
+            topic: lesson.topic,
+            scheduledDate: lesson.scheduledDate,
+            status: lesson.status
+          },
+          class: {
+            className: classInfo.className,
+            grade: classInfo.grade
+          },
+          subject: {
+            subjectName: lesson.subject.subjectName,
+            subjectCode: lesson.subject.subjectCode
+          },
+          teacher: {
+            name: lesson.teacher.name
+          },
+          students: students.map(student => ({
+            id: student._id,
+            name: student.name,
+            studentId: student.studentId,
+            className: classInfo.className
+          })),
+          totalStudents: students.length
+        }
+      });
+      
+    } catch (error) {
+      console.error('❌ Error in getLessonStudents:', error.message);
+      next(error);
+    }
+  }
 }
 
 module.exports = new ScheduleController(); 
