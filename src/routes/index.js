@@ -8,6 +8,7 @@ const classRoutes = require('../modules/classes/routes/class.routes');
 const scheduleRoutes = require('../modules/schedules/routes/schedule.routes');
 const studentEvaluationRoutes = require('../modules/schedules/routes/student-evaluation.routes');
 const teacherEvaluationRoutes = require('../modules/schedules/routes/teacher-evaluation.routes');
+const lessonReminderRoutes = require('../modules/schedules/routes/lesson-reminder.routes');
 const leaveRequestRoutes = require('../modules/leave-requests/routes/leave-request.routes');
 
 // Health check route
@@ -30,6 +31,8 @@ router.use('/schedules', scheduleRoutes);
 router.use('/student-evaluations', studentEvaluationRoutes);
 // Teacher evaluation routes
 router.use('/teacher-evaluations', teacherEvaluationRoutes);
+// Lesson reminder routes
+router.use('/lesson-reminders', lessonReminderRoutes);
 // Leave request routes
 router.use('/leave-requests', leaveRequestRoutes);
 

@@ -84,29 +84,57 @@ class AuthService {
       // Verify token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       
-      // Lấy thông tin user từ token
-      const user = await User.findById(decoded.id);
+      // Lấy thông tin user từ token với populate
+      const user = await User.findById(decoded.id)
+        .populate('class_id', 'className classCode description')
+        .populate('subjects', 'subjectName subjectCode description')
+        .select('-passwordHash -resetPasswordToken -resetPasswordExpires');
 
       if (!user) {
         throw new Error('User not found');
       }
 
-      // Chuyển đổi ObjectId thành string nếu có
-      const classId = user.class_id ? user.class_id.toString() : null;
-      const subjects = user.subjects ? user.subjects.map(subject => subject.toString()) : [];
-
-      return {
+      // Chuẩn bị response data
+      const userData = {
         id: user._id,
         email: user.email,
         name: user.name,
         role: user.role,
-        class_id: classId,
-        subjects: subjects,
+        phone: user.phone || null,
+        address: user.address || null,
+        dateOfBirth: user.dateOfBirth || null,
+        gender: user.gender || null,
+        avatar: user.avatar || null,
+        studentId: user.studentId || null,
+        teacherId: user.teacherId || null,
+        managerId: user.managerId || null,
         isNewUser: user.isNewUser,
         active: user.active,
         createdAt: user.createdAt,
-        updatedAt: user.updatedAt
+        updatedAt: user.updatedAt,
+        
+        // Class information (for students)
+        class: user.class_id ? {
+          id: user.class_id._id,
+          className: user.class_id.className,
+          classCode: user.class_id.classCode,
+          description: user.class_id.description
+        } : null,
+        
+        // Subjects information (for teachers)
+        subjects: user.subjects && user.subjects.length > 0 ? 
+          user.subjects.map(subject => ({
+            id: subject._id,
+            subjectName: subject.subjectName,
+            subjectCode: subject.subjectCode,
+            description: subject.description
+          })) : [],
+        
+        // Role-specific information
+        roleInfo: this.getRoleSpecificInfo(user)
       };
+
+      return userData;
     } catch (error) {
       if (error.name === 'JsonWebTokenError') {
         throw new Error('Invalid token');
@@ -116,6 +144,54 @@ class AuthService {
       }
       throw error;
     }
+  }
+
+  // Helper method để lấy thông tin cụ thể theo role
+  getRoleSpecificInfo(user) {
+    const roleInfo = {
+      role: user.role,
+      permissions: []
+    };
+
+    if (user.role.includes('student')) {
+      roleInfo.type = 'student';
+      roleInfo.studentId = user.studentId;
+      roleInfo.classId = user.class_id ? user.class_id._id : null;
+      roleInfo.permissions = [
+        'view_schedule',
+        'view_grades',
+        'submit_assignments',
+        'view_announcements'
+      ];
+    }
+
+    if (user.role.includes('teacher')) {
+      roleInfo.type = 'teacher';
+      roleInfo.teacherId = user.teacherId;
+      roleInfo.subjectIds = user.subjects ? user.subjects.map(s => s._id) : [];
+      roleInfo.permissions = [
+        'manage_lessons',
+        'create_reminders',
+        'grade_students',
+        'view_class_schedule',
+        'create_announcements'
+      ];
+    }
+
+    if (user.role.includes('manager')) {
+      roleInfo.type = 'manager';
+      roleInfo.managerId = user.managerId;
+      roleInfo.permissions = [
+        'manage_users',
+        'manage_classes',
+        'manage_subjects',
+        'manage_schedules',
+        'view_reports',
+        'system_admin'
+      ];
+    }
+
+    return roleInfo;
   }
 
   // Logout - blacklist token
