@@ -42,7 +42,7 @@ class LeaveRequestController {
       res.status(statusCode).json({
         success: result.success,
         message: result.success 
-          ? `Successfully created ${result.created.length} leave requests`
+          ? `Successfully created ${result.created.length} leave requests and notifications sent to teachers`
           : 'Failed to create leave requests',
         data: result
       });

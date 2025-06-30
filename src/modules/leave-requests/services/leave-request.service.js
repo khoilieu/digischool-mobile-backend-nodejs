@@ -109,6 +109,15 @@ class LeaveRequestService {
           
           console.log(`✅ Created leave request for ${lesson.subject.subjectName} - Period ${period}`);
           
+          // Gửi email thông báo cho giáo viên (async, không chờ kết quả)
+          this.sendNewLeaveRequestNotificationToTeacher(leaveRequest)
+            .then(() => {
+              console.log(`📧 Email notification sent to teacher for leave request ${leaveRequest._id}`);
+            })
+            .catch(error => {
+              console.error(`❌ Failed to send email notification to teacher for leave request ${leaveRequest._id}:`, error.message);
+            });
+          
         } catch (lessonError) {
           console.error(`❌ Error processing lesson ${lessonId}:`, lessonError.message);
           errors.push(`Error processing lesson ${lessonId}: ${lessonError.message}`);
@@ -617,7 +626,116 @@ class LeaveRequestService {
     }
   }
 
-  // Gửi email thông báo kết quả đơn xin vắng
+  // Gửi email thông báo cho giáo viên khi có đơn xin vắng mới
+  async sendNewLeaveRequestNotificationToTeacher(request) {
+    try {
+      const emailService = require('../../auth/services/email.service');
+      
+      const teacherEmail = request.teacherId.email;
+      const teacherName = request.teacherId.fullName || request.teacherId.name;
+      const studentName = request.studentId.fullName || request.studentId.name;
+      const subjectName = request.subjectId.subjectName;
+      const className = request.classId.className;
+      const lessonDate = new Date(request.date).toLocaleDateString('vi-VN');
+      const period = request.period;
+      
+      const subject = `📝 Đơn xin vắng mới cần duyệt - ${subjectName}`;
+      
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px;">🏫 EcoSchool</h1>
+            <p style="margin: 10px 0 0 0; opacity: 0.9;">Hệ thống quản lý học tập</p>
+          </div>
+          
+          <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
+            <div style="background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+              <h2 style="color: #fd7e14; margin-top: 0; text-align: center;">
+                📝 Bạn có đơn xin vắng mới cần duyệt
+              </h2>
+              
+              <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <h3 style="color: #856404; margin-top: 0;">👨‍🎓 Thông tin học sinh:</h3>
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 8px 0; color: #856404; width: 120px;"><strong>Học sinh:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${studentName}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #856404;"><strong>Lớp:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${className}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #856404;"><strong>Số điện thoại:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${request.phoneNumber}</td>
+                  </tr>
+                </table>
+              </div>
+              
+              <div style="background: #f1f3f4; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <h3 style="color: #333; margin-top: 0;">📚 Thông tin tiết học:</h3>
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr>
+                    <td style="padding: 8px 0; color: #666; width: 120px;"><strong>Môn học:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${subjectName}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #666;"><strong>Ngày học:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${lessonDate}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #666;"><strong>Tiết:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">Tiết ${period}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; color: #666;"><strong>Giáo viên:</strong></td>
+                    <td style="padding: 8px 0; color: #333;">${teacherName}</td>
+                  </tr>
+                </table>
+              </div>
+              
+              <div style="background: #e7f3ff; border: 1px solid #b3d9ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <h3 style="color: #0056b3; margin-top: 0;">💬 Lý do xin vắng:</h3>
+                <p style="margin-bottom: 0; font-style: italic; color: #333; background: white; padding: 15px; border-radius: 5px; border-left: 4px solid #0056b3;">
+                  "${request.reason}"
+                </p>
+              </div>
+              
+              <div style="background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <h4 style="margin-top: 0; color: #0c5460;">⏰ Hành động cần thực hiện:</h4>
+                <ul style="margin-bottom: 0; padding-left: 20px;">
+                  <li>Vui lòng đăng nhập vào hệ thống để xem chi tiết đơn xin vắng</li>
+                  <li>Chấp thuận hoặc từ chối đơn xin vắng với lý do rõ ràng</li>
+                  <li>Học sinh sẽ nhận được email thông báo kết quả tự động</li>
+                </ul>
+              </div>
+              
+              <div style="text-align: center; margin: 30px 0;">
+                <div style="background: #28a745; color: white; padding: 12px 24px; border-radius: 25px; display: inline-block; font-weight: bold; text-decoration: none;">
+                  🔔 Đơn xin vắng đang chờ duyệt
+                </div>
+              </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px; color: #6c757d; font-size: 14px;">
+              <p>📧 Email này được gửi tự động từ hệ thống EcoSchool</p>
+              <p>🕒 Thời gian: ${new Date().toLocaleString('vi-VN')}</p>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      await emailService.sendEmail(teacherEmail, subject, html);
+      
+      console.log(`📧 New leave request notification sent to teacher ${teacherEmail}`);
+      
+    } catch (error) {
+      console.error('❌ Error sending new leave request notification to teacher:', error.message);
+      // Không throw error để không làm gián đoạn flow tạo đơn xin vắng
+    }
+  }
+
+  // Gửi email thông báo kết quả đơn xin vắng cho học sinh
   async sendLeaveRequestNotification(request, status, comment) {
     try {
       const emailService = require('../../auth/services/email.service');
