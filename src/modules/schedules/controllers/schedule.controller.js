@@ -1,40 +1,44 @@
-const scheduleService = require('../services/schedule.service');
+const scheduleService = require("../services/schedule.service");
 
 class ScheduleController {
   // Khởi tạo thời khóa biểu cho các lớp trong năm học (NEW ARCHITECTURE)
   async initializeSchedulesForAcademicYear(req, res, next) {
     try {
-      const token = req.headers.authorization?.split(' ')[1];
+      const token = req.headers.authorization?.split(" ")[1];
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
-      console.log('🚀 Using NEW architecture for schedule initialization...');
-      console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+      console.log("🚀 Using NEW architecture for schedule initialization...");
+      console.log("📋 Request body:", JSON.stringify(req.body, null, 2));
 
       // Thêm scheduleType vào request body nếu không có (default MONDAY_TO_SATURDAY)
       const requestData = {
         ...req.body,
-        scheduleType: req.body.scheduleType || 'MONDAY_TO_SATURDAY'
+        scheduleType: req.body.scheduleType || "MONDAY_TO_SATURDAY",
       };
 
       console.log(`📅 Schedule type: ${requestData.scheduleType}`);
 
       // Sử dụng method mới với Lesson-based architecture
-      const result = await scheduleService.initializeSchedulesWithNewArchitecture(requestData, token);
-      
+      const result =
+        await scheduleService.initializeSchedulesWithNewArchitecture(
+          requestData,
+          token
+        );
+
       res.status(201).json({
         success: true,
-        message: 'Schedules initialized successfully with new architecture',
+        message: "Schedules initialized successfully with new architecture",
         data: result,
-        architecture: 'lesson-based',
-        scheduleType: requestData.scheduleType
+        architecture: "lesson-based",
+        scheduleType: requestData.scheduleType,
       });
     } catch (error) {
-      console.error('❌ Schedule initialization error:', error.message);
+      console.error("❌ Schedule initialization error:", error.message);
       next(error);
     }
   }
@@ -42,39 +46,51 @@ class ScheduleController {
   // Khởi tạo thời khóa biểu tối ưu với thuật toán Heuristic/Greedy
   async initializeOptimizedSchedules(req, res, next) {
     try {
-      const token = req.headers.authorization?.split(' ')[1];
+      const token = req.headers.authorization?.split(" ")[1];
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
-      console.log('🚀 Starting optimized schedule generation with advanced constraints...');
-      
-      const result = await scheduleService.initializeSchedulesForAcademicYear(req.body, token);
-      
+      console.log(
+        "🚀 Starting optimized schedule generation with advanced constraints..."
+      );
+
+      const result = await scheduleService.initializeSchedulesForAcademicYear(
+        req.body,
+        token
+      );
+
       // Tính toán thống kê tối ưu hóa
       const optimizationStats = {
         totalClasses: result.totalClasses,
-        successfullyOptimized: result.results.filter(r => r.status === 'created').length,
-        averageOptimizationScore: result.results
-          .filter(r => r.status === 'created')
-          .reduce((sum, r) => sum + (r.optimizationScore || 0), 0) / 
-          Math.max(result.results.filter(r => r.status === 'created').length, 1),
+        successfullyOptimized: result.results.filter(
+          (r) => r.status === "created"
+        ).length,
+        averageOptimizationScore:
+          result.results
+            .filter((r) => r.status === "created")
+            .reduce((sum, r) => sum + (r.optimizationScore || 0), 0) /
+          Math.max(
+            result.results.filter((r) => r.status === "created").length,
+            1
+          ),
         constraints: {
-          teacherClustering: '✅ Giáo viên dạy theo cụm',
-          subjectBalance: '✅ Cân bằng môn học trong ngày',
-          noConflicts: '✅ Không xung đột giáo viên/phòng học',
-          practicalBalance: '✅ Tránh ngày chỉ có lý thuyết'
-        }
+          teacherClustering: "✅ Giáo viên dạy theo cụm",
+          subjectBalance: "✅ Cân bằng môn học trong ngày",
+          noConflicts: "✅ Không xung đột giáo viên/phòng học",
+          practicalBalance: "✅ Tránh ngày chỉ có lý thuyết",
+        },
       };
 
       res.status(201).json({
         success: true,
-        message: 'Optimized schedules created successfully with advanced constraints',
+        message:
+          "Optimized schedules created successfully with advanced constraints",
         data: result,
-        optimization: optimizationStats
+        optimization: optimizationStats,
       });
     } catch (error) {
       next(error);
@@ -84,22 +100,25 @@ class ScheduleController {
   // Tạo thời khóa biểu cho một lớp cụ thể
   async initializeScheduleForClass(req, res, next) {
     try {
-      const token = req.headers.authorization?.split(' ')[1];
+      const token = req.headers.authorization?.split(" ")[1];
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
-      console.log('🚀 Creating schedule for specific class...');
-      
-      const result = await scheduleService.initializeScheduleForClass(req.body, token);
-      
+      console.log("🚀 Creating schedule for specific class...");
+
+      const result = await scheduleService.initializeScheduleForClass(
+        req.body,
+        token
+      );
+
       res.status(201).json({
         success: true,
-        message: 'Schedule created successfully for class',
-        data: result
+        message: "Schedule created successfully for class",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -109,37 +128,38 @@ class ScheduleController {
   // Xem thời khóa biểu của một lớp cụ thể - Version mới với date range
   async getClassSchedule(req, res, next) {
     try {
-      const { className, academicYear, weekNumber, startOfWeek, endOfWeek } = req.query;
-      
+      const { className, academicYear, weekNumber, startOfWeek, endOfWeek } =
+        req.query;
+
       if (!className || !academicYear) {
         return res.status(400).json({
           success: false,
-          message: 'Class name and academic year are required'
+          message: "Class name and academic year are required",
         });
       }
 
       let result;
-      
+
       // Nếu có startOfWeek và endOfWeek, dùng NEW detailed lesson-based method
       if (startOfWeek && endOfWeek) {
         result = await scheduleService.getDetailedLessonScheduleByDateRange(
-          className, 
-          academicYear, 
+          className,
+          academicYear,
           startOfWeek,
           endOfWeek
         );
       } else {
         // Fallback to weekNumber approach (legacy)
         result = await scheduleService.getClassSchedule(
-          className, 
-          academicYear, 
+          className,
+          academicYear,
           weekNumber ? parseInt(weekNumber) : 1
         );
       }
-      
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -150,12 +170,15 @@ class ScheduleController {
   async getAvailableSchedules(req, res, next) {
     try {
       const { academicYear, className } = req.query;
-      
-      const result = await scheduleService.getAvailableSchedules(academicYear, className);
-      
+
+      const result = await scheduleService.getAvailableSchedules(
+        academicYear,
+        className
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -166,19 +189,22 @@ class ScheduleController {
   async checkClassExists(req, res, next) {
     try {
       const { className, academicYear } = req.query;
-      
+
       if (!className || !academicYear) {
         return res.status(400).json({
           success: false,
-          message: 'Class name and academic year are required'
+          message: "Class name and academic year are required",
         });
       }
 
-      const result = await scheduleService.checkClassExists(className, academicYear);
-      
+      const result = await scheduleService.checkClassExists(
+        className,
+        academicYear
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -188,20 +214,23 @@ class ScheduleController {
   // Tạo thời khóa biểu cho khối lớp (legacy - giữ lại để tương thích)
   async createScheduleForGrade(req, res, next) {
     try {
-      const token = req.headers.authorization?.split(' ')[1];
+      const token = req.headers.authorization?.split(" ")[1];
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
-      const result = await scheduleService.createScheduleForGrade(req.body, token);
-      
+      const result = await scheduleService.createScheduleForGrade(
+        req.body,
+        token
+      );
+
       res.status(201).json({
         success: true,
-        message: 'Schedules created successfully',
-        data: result
+        message: "Schedules created successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -212,33 +241,89 @@ class ScheduleController {
   async getSchedules(req, res, next) {
     try {
       const { page, limit, academicYear, gradeLevel, status } = req.query;
-      
+
       const result = await scheduleService.getSchedules({
         page: parseInt(page) || 1,
         limit: parseInt(limit) || 10,
         academicYear,
         gradeLevel: gradeLevel ? parseInt(gradeLevel) : undefined,
-        status
+        status,
       });
-      
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
     }
   }
 
-  // Lấy chi tiết thời khóa biểu
+  // Lấy chi tiết thời khóa biểu với filter options
   async getScheduleById(req, res, next) {
     try {
       const { id } = req.params;
-      const result = await scheduleService.getScheduleById(id);
-      
+      const {
+        academicYear,
+        startOfWeek,
+        endOfWeek,
+        weekNumber,
+        includeDetails = "false",
+        includeLessons = "true",
+      } = req.query;
+
+      // Validate required parameters
+      if (!academicYear) {
+        return res.status(400).json({
+          success: false,
+          message: "academicYear parameter is required",
+        });
+      }
+
+      // Validate week parameters
+      if (startOfWeek && endOfWeek) {
+        const startDate = new Date(startOfWeek);
+        const endDate = new Date(endOfWeek);
+
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "startOfWeek and endOfWeek must be valid dates (YYYY-MM-DD format)",
+          });
+        }
+
+        if (startDate > endDate) {
+          return res.status(400).json({
+            success: false,
+            message: "startOfWeek must be before or equal to endOfWeek",
+          });
+        }
+      }
+
+      if (weekNumber) {
+        const week = parseInt(weekNumber);
+        if (isNaN(week) || week < 1 || week > 38) {
+          return res.status(400).json({
+            success: false,
+            message: "weekNumber must be a number between 1 and 38",
+          });
+        }
+      }
+
+      const result = await scheduleService.getScheduleById(id, {
+        academicYear,
+        startOfWeek,
+        endOfWeek,
+        weekNumber,
+        includeDetails: includeDetails === "true",
+        includeLessons: includeLessons === "true",
+      });
+
       res.status(200).json({
         success: true,
-        data: result
+        message: "Schedule details retrieved successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -249,21 +334,21 @@ class ScheduleController {
   async updateSchedule(req, res, next) {
     try {
       const { id } = req.params;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       const result = await scheduleService.updateSchedule(id, req.body, token);
-      
+
       res.status(200).json({
         success: true,
-        message: 'Schedule updated successfully',
-        data: result
+        message: "Schedule updated successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -275,21 +360,25 @@ class ScheduleController {
     try {
       const { id } = req.params;
       const { status } = req.body;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
-      const result = await scheduleService.updateScheduleStatus(id, status, token);
-      
+      const result = await scheduleService.updateScheduleStatus(
+        id,
+        status,
+        token
+      );
+
       res.status(200).json({
         success: true,
         message: result.message,
-        data: result.schedule
+        data: result.schedule,
       });
     } catch (error) {
       next(error);
@@ -300,20 +389,20 @@ class ScheduleController {
   async deleteSchedule(req, res, next) {
     try {
       const { id } = req.params;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       const result = await scheduleService.deleteSchedule(id, token);
-      
+
       res.status(200).json({
         success: true,
-        message: result.message
+        message: result.message,
       });
     } catch (error) {
       next(error);
@@ -324,19 +413,19 @@ class ScheduleController {
   async getScheduleStats(req, res, next) {
     try {
       const { academicYear } = req.query;
-      
+
       if (!academicYear) {
         return res.status(400).json({
           success: false,
-          message: 'Academic year is required'
+          message: "Academic year is required",
         });
       }
 
       const result = await scheduleService.getScheduleStats(academicYear);
-      
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -347,32 +436,35 @@ class ScheduleController {
   async getClassesByGrade(req, res, next) {
     try {
       const { academicYear, gradeLevel } = req.query;
-      
+
       if (!academicYear || !gradeLevel) {
         return res.status(400).json({
           success: false,
-          message: 'Academic year and grade level are required'
+          message: "Academic year and grade level are required",
         });
       }
 
-      const result = await scheduleService.getClassesByGradeAndYear(academicYear, parseInt(gradeLevel));
-      
+      const result = await scheduleService.getClassesByGradeAndYear(
+        academicYear,
+        parseInt(gradeLevel)
+      );
+
       res.status(200).json({
         success: true,
         data: {
           academicYear,
           gradeLevel: parseInt(gradeLevel),
           totalClasses: result.length,
-          classes: result.map(cls => ({
+          classes: result.map((cls) => ({
             id: cls._id,
             className: cls.className,
             homeroomTeacher: {
               id: cls.homeroomTeacher?._id,
               name: cls.homeroomTeacher?.name,
-              email: cls.homeroomTeacher?.email
-            }
-          }))
-        }
+              email: cls.homeroomTeacher?.email,
+            },
+          })),
+        },
       });
     } catch (error) {
       next(error);
@@ -383,44 +475,49 @@ class ScheduleController {
   async previewScheduleCreation(req, res, next) {
     try {
       const { academicYear, gradeLevel } = req.body;
-      
+
       if (!academicYear || !gradeLevel) {
         return res.status(400).json({
           success: false,
-          message: 'Academic year and grade level are required'
+          message: "Academic year and grade level are required",
         });
       }
 
       // Lấy danh sách lớp
-      const classes = await scheduleService.getClassesByGradeAndYear(academicYear, gradeLevel);
-      
+      const classes = await scheduleService.getClassesByGradeAndYear(
+        academicYear,
+        gradeLevel
+      );
+
       // Kiểm tra lớp nào đã có thời khóa biểu
       const existingSchedules = await scheduleService.getSchedules({
         academicYear,
         gradeLevel,
-        status: 'active',
-        limit: 100
+        status: "active",
+        limit: 100,
       });
 
-      const existingClassIds = existingSchedules.schedules.map(s => s.className);
-      
+      const existingClassIds = existingSchedules.schedules.map(
+        (s) => s.className
+      );
+
       const preview = {
         academicYear,
         gradeLevel,
         totalClasses: classes.length,
         classesWithSchedule: existingClassIds.length,
         classesWithoutSchedule: classes.length - existingClassIds.length,
-        classesList: classes.map(cls => ({
+        classesList: classes.map((cls) => ({
           id: cls._id,
           className: cls.className,
           homeroomTeacher: cls.homeroomTeacher?.name,
-          hasSchedule: existingClassIds.includes(cls.className)
-        }))
+          hasSchedule: existingClassIds.includes(cls.className),
+        })),
       };
-      
+
       res.status(200).json({
         success: true,
-        data: preview
+        data: preview,
       });
     } catch (error) {
       next(error);
@@ -431,19 +528,22 @@ class ScheduleController {
   async getStudentSchedule(req, res, next) {
     try {
       const { academicYear, className } = req.query;
-      
+
       if (!className) {
         return res.status(400).json({
           success: false,
-          message: 'Class name is required (e.g., 12A1)'
+          message: "Class name is required (e.g., 12A1)",
         });
       }
 
-      const result = await scheduleService.getStudentScheduleByClassName(className, academicYear);
-      
+      const result = await scheduleService.getStudentScheduleByClassName(
+        className,
+        academicYear
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -453,31 +553,35 @@ class ScheduleController {
   // Lấy thời khóa biểu của học sinh theo ngày
   async getStudentScheduleByDay(req, res, next) {
     try {
-      const token = req.headers.authorization?.split(' ')[1];
+      const token = req.headers.authorization?.split(" ")[1];
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       const { dayOfWeek } = req.params;
       const { academicYear } = req.query;
-      
+
       // Validate dayOfWeek
       const day = parseInt(dayOfWeek);
       if (!day || day < 1 || day > 6) {
         return res.status(400).json({
           success: false,
-          message: 'Day of week must be between 1 (Monday) and 6 (Saturday)'
+          message: "Day of week must be between 1 (Monday) and 6 (Saturday)",
         });
       }
 
-      const result = await scheduleService.getStudentScheduleByDay(token, day, academicYear);
-      
+      const result = await scheduleService.getStudentScheduleByDay(
+        token,
+        day,
+        academicYear
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -489,35 +593,39 @@ class ScheduleController {
     try {
       const { teacherId, academicYear, startOfWeek, endOfWeek } = req.query;
       const currentUser = req.user; // Từ authMiddleware.protect
-      
+
       if (!teacherId || !academicYear || !startOfWeek || !endOfWeek) {
         return res.status(400).json({
           success: false,
-          message: 'teacherId, academicYear, startOfWeek, and endOfWeek are required'
+          message:
+            "teacherId, academicYear, startOfWeek, and endOfWeek are required",
         });
       }
 
       // Kiểm tra phân quyền: giáo viên chỉ có thể xem lịch của chính mình
-      if (currentUser.role.includes('teacher') && !currentUser.role.includes('manager')) {
+      if (
+        currentUser.role.includes("teacher") &&
+        !currentUser.role.includes("manager")
+      ) {
         if (currentUser._id.toString() !== teacherId) {
           return res.status(403).json({
             success: false,
-            message: 'Teachers can only view their own schedule'
+            message: "Teachers can only view their own schedule",
           });
         }
       }
 
       const result = await scheduleService.getTeacherScheduleByDateRange(
-        teacherId, 
-        academicYear, 
-        startOfWeek, 
+        teacherId,
+        academicYear,
+        startOfWeek,
         endOfWeek
       );
-      
+
       res.status(200).json({
         success: true,
         message: `Teacher schedule retrieved successfully for ${startOfWeek} to ${endOfWeek}`,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -528,10 +636,10 @@ class ScheduleController {
   async getAcademicYearOptions(req, res, next) {
     try {
       const result = await scheduleService.getAcademicYearOptions();
-      
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -542,10 +650,10 @@ class ScheduleController {
   async getClassesList(req, res, next) {
     try {
       const result = await scheduleService.getAllClasses();
-      
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -556,19 +664,19 @@ class ScheduleController {
   async getWeekOptions(req, res, next) {
     try {
       const { academicYear } = req.query;
-      
+
       if (!academicYear) {
         return res.status(400).json({
           success: false,
-          message: 'Academic year is required'
+          message: "Academic year is required",
         });
       }
 
       const result = await scheduleService.getWeekOptions(academicYear);
-      
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -579,13 +687,13 @@ class ScheduleController {
   async getTimeSlots(req, res, next) {
     try {
       const result = scheduleService.getTimeSlots();
-      
+
       res.status(200).json({
         success: true,
         data: {
           timeSlots: result,
-          totalSlots: result.length
-        }
+          totalSlots: result.length,
+        },
       });
     } catch (error) {
       next(error);
@@ -596,26 +704,32 @@ class ScheduleController {
   async getScheduleByWeek(req, res, next) {
     try {
       const { academicYear, weekStartDate, weekEndDate, className } = req.query;
-      
+
       if (!academicYear || !weekStartDate || !weekEndDate) {
         return res.status(400).json({
           success: false,
-          message: 'Academic year, week start date, and week end date are required'
+          message:
+            "Academic year, week start date, and week end date are required",
         });
       }
 
       if (!className) {
         return res.status(400).json({
           success: false,
-          message: 'Class name is required (e.g., 12A1)'
+          message: "Class name is required (e.g., 12A1)",
         });
       }
 
-      const result = await scheduleService.getScheduleByWeekAndClass(className, academicYear, weekStartDate, weekEndDate);
-      
+      const result = await scheduleService.getScheduleByWeekAndClass(
+        className,
+        academicYear,
+        weekStartDate,
+        weekEndDate
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -627,35 +741,35 @@ class ScheduleController {
     try {
       const { scheduleId } = req.params;
       const { dayOfWeek, periodNumber, status, options = {} } = req.body;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       if (!dayOfWeek || !periodNumber || !status) {
         return res.status(400).json({
           success: false,
-          message: 'dayOfWeek, periodNumber, and status are required'
+          message: "dayOfWeek, periodNumber, and status are required",
         });
       }
 
       const result = await scheduleService.updatePeriodStatus(
-        scheduleId, 
-        dayOfWeek, 
-        periodNumber, 
-        status, 
-        options, 
+        scheduleId,
+        dayOfWeek,
+        periodNumber,
+        status,
+        options,
         token
       );
-      
+
       res.status(200).json({
         success: true,
         message: result.message,
-        data: result.updatedPeriod
+        data: result.updatedPeriod,
       });
     } catch (error) {
       next(error);
@@ -667,23 +781,27 @@ class ScheduleController {
     try {
       const { className, academicYear } = req.query;
       const { includeDetails } = req.query;
-      
+
       if (!className || !academicYear) {
         return res.status(400).json({
           success: false,
-          message: 'Class name and academic year are required'
+          message: "Class name and academic year are required",
         });
       }
 
       const options = {
-        includeDetails: includeDetails === 'true'
+        includeDetails: includeDetails === "true",
       };
 
-      const result = await scheduleService.getLearningProgress(className, academicYear, options);
-      
+      const result = await scheduleService.getLearningProgress(
+        className,
+        academicYear,
+        options
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -694,19 +812,22 @@ class ScheduleController {
   async getAttendanceReport(req, res, next) {
     try {
       const { className, academicYear } = req.query;
-      
+
       if (!className || !academicYear) {
         return res.status(400).json({
           success: false,
-          message: 'Class name and academic year are required'
+          message: "Class name and academic year are required",
         });
       }
 
-      const result = await scheduleService.getAttendanceReport(className, academicYear);
-      
+      const result = await scheduleService.getAttendanceReport(
+        className,
+        academicYear
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -718,28 +839,32 @@ class ScheduleController {
     try {
       const { scheduleId } = req.params;
       const { updates } = req.body;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       if (!updates || !Array.isArray(updates)) {
         return res.status(400).json({
           success: false,
-          message: 'Updates array is required'
+          message: "Updates array is required",
         });
       }
 
-      const result = await scheduleService.bulkUpdatePeriodStatus(scheduleId, updates, token);
-      
+      const result = await scheduleService.bulkUpdatePeriodStatus(
+        scheduleId,
+        updates,
+        token
+      );
+
       res.status(200).json({
         success: true,
         message: result.message,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -751,34 +876,34 @@ class ScheduleController {
     try {
       const { scheduleId } = req.params;
       const { dayOfWeek, periodNumber, attendance, notes } = req.body;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       const options = {
         actualDate: new Date(),
         attendance,
-        notes
+        notes,
       };
 
       const result = await scheduleService.updatePeriodStatus(
-        scheduleId, 
-        dayOfWeek, 
-        periodNumber, 
-        'completed', 
-        options, 
+        scheduleId,
+        dayOfWeek,
+        periodNumber,
+        "completed",
+        options,
         token
       );
-      
+
       res.status(200).json({
         success: true,
-        message: 'Period marked as completed',
-        data: result.updatedPeriod
+        message: "Period marked as completed",
+        data: result.updatedPeriod,
       });
     } catch (error) {
       next(error);
@@ -790,33 +915,33 @@ class ScheduleController {
     try {
       const { scheduleId } = req.params;
       const { dayOfWeek, periodNumber, notes } = req.body;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       const options = {
         actualDate: new Date(),
-        notes
+        notes,
       };
 
       const result = await scheduleService.updatePeriodStatus(
-        scheduleId, 
-        dayOfWeek, 
-        periodNumber, 
-        'absent', 
-        options, 
+        scheduleId,
+        dayOfWeek,
+        periodNumber,
+        "absent",
+        options,
         token
       );
-      
+
       res.status(200).json({
         success: true,
-        message: 'Period marked as absent',
-        data: result.updatedPeriod
+        message: "Period marked as absent",
+        data: result.updatedPeriod,
       });
     } catch (error) {
       next(error);
@@ -827,19 +952,22 @@ class ScheduleController {
   async getPeriodTypeStatistics(req, res, next) {
     try {
       const { className, academicYear } = req.query;
-      
+
       if (!className || !academicYear) {
         return res.status(400).json({
           success: false,
-          message: 'Class name and academic year are required'
+          message: "Class name and academic year are required",
         });
       }
 
-      const result = await scheduleService.getPeriodTypeStatistics(className, academicYear);
-      
+      const result = await scheduleService.getPeriodTypeStatistics(
+        className,
+        academicYear
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -850,27 +978,38 @@ class ScheduleController {
   async getPeriodsByType(req, res, next) {
     try {
       const { className, academicYear, periodType } = req.query;
-      
+
       if (!className || !academicYear || !periodType) {
         return res.status(400).json({
           success: false,
-          message: 'Class name, academic year, and period type are required'
+          message: "Class name, academic year, and period type are required",
         });
       }
 
-      const validPeriodTypes = ['regular', 'makeup', 'extracurricular', 'fixed'];
+      const validPeriodTypes = [
+        "regular",
+        "makeup",
+        "extracurricular",
+        "fixed",
+      ];
       if (!validPeriodTypes.includes(periodType)) {
         return res.status(400).json({
           success: false,
-          message: `Invalid period type. Must be one of: ${validPeriodTypes.join(', ')}`
+          message: `Invalid period type. Must be one of: ${validPeriodTypes.join(
+            ", "
+          )}`,
         });
       }
 
-      const result = await scheduleService.getPeriodsByType(className, academicYear, periodType);
-      
+      const result = await scheduleService.getPeriodsByType(
+        className,
+        academicYear,
+        periodType
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -881,24 +1020,25 @@ class ScheduleController {
   async identifyPeriodType(req, res, next) {
     try {
       const { className, academicYear, dayOfWeek, periodNumber } = req.query;
-      
+
       if (!className || !academicYear || !dayOfWeek || !periodNumber) {
         return res.status(400).json({
           success: false,
-          message: 'Class name, academic year, day of week, and period number are required'
+          message:
+            "Class name, academic year, day of week, and period number are required",
         });
       }
 
       const result = await scheduleService.identifyPeriodType(
-        className, 
-        academicYear, 
-        parseInt(dayOfWeek), 
+        className,
+        academicYear,
+        parseInt(dayOfWeek),
         parseInt(periodNumber)
       );
-      
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -909,27 +1049,34 @@ class ScheduleController {
   async addMakeupPeriod(req, res, next) {
     try {
       const { scheduleId } = req.params;
-      const { 
-        dayOfWeek, 
-        periodNumber, 
-        teacherId, 
-        subjectId, 
+      const {
+        dayOfWeek,
+        periodNumber,
+        teacherId,
+        subjectId,
         makeupInfo,
-        timeSlot 
+        timeSlot,
       } = req.body;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
-      if (!dayOfWeek || !periodNumber || !teacherId || !subjectId || !makeupInfo) {
+      if (
+        !dayOfWeek ||
+        !periodNumber ||
+        !teacherId ||
+        !subjectId ||
+        !makeupInfo
+      ) {
         return res.status(400).json({
           success: false,
-          message: 'dayOfWeek, periodNumber, teacherId, subjectId, and makeupInfo are required'
+          message:
+            "dayOfWeek, periodNumber, teacherId, subjectId, and makeupInfo are required",
         });
       }
 
@@ -943,11 +1090,11 @@ class ScheduleController {
         timeSlot,
         token
       );
-      
+
       res.status(201).json({
         success: true,
-        message: 'Makeup period added successfully',
-        data: result
+        message: "Makeup period added successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -958,26 +1105,27 @@ class ScheduleController {
   async addExtracurricularPeriod(req, res, next) {
     try {
       const { scheduleId } = req.params;
-      const { 
-        dayOfWeek, 
-        periodNumber, 
-        teacherId, 
+      const {
+        dayOfWeek,
+        periodNumber,
+        teacherId,
         extracurricularInfo,
-        timeSlot 
+        timeSlot,
       } = req.body;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       if (!dayOfWeek || !periodNumber || !teacherId || !extracurricularInfo) {
         return res.status(400).json({
           success: false,
-          message: 'dayOfWeek, periodNumber, teacherId, and extracurricularInfo are required'
+          message:
+            "dayOfWeek, periodNumber, teacherId, and extracurricularInfo are required",
         });
       }
 
@@ -990,11 +1138,11 @@ class ScheduleController {
         timeSlot,
         token
       );
-      
+
       res.status(201).json({
         success: true,
-        message: 'Extracurricular period added successfully',
-        data: result
+        message: "Extracurricular period added successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1005,19 +1153,22 @@ class ScheduleController {
   async checkAvailableSlots(req, res, next) {
     try {
       const { className, academicYear } = req.query;
-      
+
       if (!className || !academicYear) {
         return res.status(400).json({
           success: false,
-          message: 'Class name and academic year are required'
+          message: "Class name and academic year are required",
         });
       }
 
-      const result = await scheduleService.getAvailableSlots(className, academicYear);
-      
+      const result = await scheduleService.getAvailableSlots(
+        className,
+        academicYear
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1028,42 +1179,43 @@ class ScheduleController {
   async getPeriodDetails(req, res, next) {
     try {
       const { className, academicYear, dayOfWeek, periodNumber } = req.query;
-      
+
       if (!className || !academicYear || !dayOfWeek || !periodNumber) {
         return res.status(400).json({
           success: false,
-          message: 'Class name, academic year, day of week, and period number are required'
+          message:
+            "Class name, academic year, day of week, and period number are required",
         });
       }
 
       // Validate dayOfWeek và periodNumber
       const day = parseInt(dayOfWeek);
       const period = parseInt(periodNumber);
-      
+
       if (isNaN(day) || day < 2 || day > 7) {
         return res.status(400).json({
           success: false,
-          message: 'Day of week must be between 2 (Monday) and 7 (Saturday)'
+          message: "Day of week must be between 2 (Monday) and 7 (Saturday)",
         });
       }
 
       if (isNaN(period) || period < 1 || period > 7) {
         return res.status(400).json({
           success: false,
-          message: 'Period number must be between 1 and 7'
+          message: "Period number must be between 1 and 7",
         });
       }
 
       const result = await scheduleService.getPeriodDetails(
-        className, 
-        academicYear, 
-        day, 
+        className,
+        academicYear,
+        day,
         period
       );
-      
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1075,37 +1227,41 @@ class ScheduleController {
     try {
       const { scheduleId } = req.params;
       const { dayOfWeek, periodNumber, evaluation } = req.body;
-      
+
       if (!scheduleId || !dayOfWeek || !periodNumber || !evaluation) {
         return res.status(400).json({
           success: false,
-          message: 'Schedule ID, day of week, period number, and evaluation data are required'
+          message:
+            "Schedule ID, day of week, period number, and evaluation data are required",
         });
       }
 
       // Validate dayOfWeek và periodNumber
       const day = parseInt(dayOfWeek);
       const period = parseInt(periodNumber);
-      
+
       if (isNaN(day) || day < 2 || day > 7) {
         return res.status(400).json({
           success: false,
-          message: 'Day of week must be between 2 (Monday) and 7 (Saturday)'
+          message: "Day of week must be between 2 (Monday) and 7 (Saturday)",
         });
       }
 
       if (isNaN(period) || period < 1 || period > 7) {
         return res.status(400).json({
           success: false,
-          message: 'Period number must be between 1 and 7'
+          message: "Period number must be between 1 and 7",
         });
       }
 
       // Validate evaluation data
-      if (evaluation.overallRating && (evaluation.overallRating < 1 || evaluation.overallRating > 5)) {
+      if (
+        evaluation.overallRating &&
+        (evaluation.overallRating < 1 || evaluation.overallRating > 5)
+      ) {
         return res.status(400).json({
           success: false,
-          message: 'Overall rating must be between 1 and 5'
+          message: "Overall rating must be between 1 and 5",
         });
       }
 
@@ -1117,11 +1273,11 @@ class ScheduleController {
         req.user._id,
         req.user.role[0] // Lấy role đầu tiên
       );
-      
+
       res.status(200).json({
         success: true,
         data: result,
-        message: 'Period evaluated successfully'
+        message: "Period evaluated successfully",
       });
     } catch (error) {
       next(error);
@@ -1133,37 +1289,41 @@ class ScheduleController {
     try {
       const { scheduleId } = req.params;
       const { dayOfWeek, periodNumber } = req.query;
-      
+
       if (!scheduleId || !dayOfWeek || !periodNumber) {
         return res.status(400).json({
           success: false,
-          message: 'Schedule ID, day of week, and period number are required'
+          message: "Schedule ID, day of week, and period number are required",
         });
       }
 
       // Validate dayOfWeek và periodNumber
       const day = parseInt(dayOfWeek);
       const period = parseInt(periodNumber);
-      
+
       if (isNaN(day) || day < 2 || day > 7) {
         return res.status(400).json({
           success: false,
-          message: 'Day of week must be between 2 (Monday) and 7 (Saturday)'
+          message: "Day of week must be between 2 (Monday) and 7 (Saturday)",
         });
       }
 
       if (isNaN(period) || period < 1 || period > 7) {
         return res.status(400).json({
           success: false,
-          message: 'Period number must be between 1 and 7'
+          message: "Period number must be between 1 and 7",
         });
       }
 
-      const result = await scheduleService.getPeriodEvaluation(scheduleId, day, period);
-      
+      const result = await scheduleService.getPeriodEvaluation(
+        scheduleId,
+        day,
+        period
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1174,19 +1334,19 @@ class ScheduleController {
   async getPeriodById(req, res, next) {
     try {
       const { scheduleId, periodId } = req.params;
-      
+
       if (!scheduleId || !periodId) {
         return res.status(400).json({
           success: false,
-          message: 'Schedule ID and Period ID are required'
+          message: "Schedule ID and Period ID are required",
         });
       }
 
       const result = await scheduleService.getPeriodById(scheduleId, periodId);
-      
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1198,19 +1358,22 @@ class ScheduleController {
     try {
       const { scheduleId } = req.params;
       const { weekNumber } = req.query;
-      
+
       if (!scheduleId) {
         return res.status(400).json({
           success: false,
-          message: 'Schedule ID is required'
+          message: "Schedule ID is required",
         });
       }
 
-      const result = await scheduleService.getEmptySlots(scheduleId, weekNumber ? parseInt(weekNumber) : null);
-      
+      const result = await scheduleService.getEmptySlots(
+        scheduleId,
+        weekNumber ? parseInt(weekNumber) : null
+      );
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1222,34 +1385,34 @@ class ScheduleController {
     try {
       const { scheduleId, periodId } = req.params;
       const { status, options = {} } = req.body;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       if (!periodId || !status) {
         return res.status(400).json({
           success: false,
-          message: 'Period ID and status are required'
+          message: "Period ID and status are required",
         });
       }
 
       const result = await scheduleService.updatePeriodStatusById(
-        scheduleId, 
-        periodId, 
-        status, 
-        options, 
+        scheduleId,
+        periodId,
+        status,
+        options,
         token
       );
-      
+
       res.status(200).json({
         success: true,
         message: result.message,
-        data: result.updatedPeriod
+        data: result.updatedPeriod,
       });
     } catch (error) {
       next(error);
@@ -1261,19 +1424,20 @@ class ScheduleController {
     try {
       const { scheduleId, periodId } = req.params;
       const { teacherId, subjectId, makeupInfo } = req.body;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       if (!periodId || !teacherId || !subjectId || !makeupInfo) {
         return res.status(400).json({
           success: false,
-          message: 'Period ID, teacher ID, subject ID, and makeup info are required'
+          message:
+            "Period ID, teacher ID, subject ID, and makeup info are required",
         });
       }
 
@@ -1285,11 +1449,11 @@ class ScheduleController {
         makeupInfo,
         token
       );
-      
+
       res.status(201).json({
         success: true,
-        message: 'Makeup period added successfully',
-        data: result
+        message: "Makeup period added successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1301,19 +1465,20 @@ class ScheduleController {
     try {
       const { scheduleId, periodId } = req.params;
       const { teacherId, extracurricularInfo } = req.body;
-      const token = req.headers.authorization?.split(' ')[1];
-      
+      const token = req.headers.authorization?.split(" ")[1];
+
       if (!token) {
         return res.status(401).json({
           success: false,
-          message: 'No token provided'
+          message: "No token provided",
         });
       }
 
       if (!periodId || !teacherId || !extracurricularInfo) {
         return res.status(400).json({
           success: false,
-          message: 'Period ID, teacher ID, and extracurricular info are required'
+          message:
+            "Period ID, teacher ID, and extracurricular info are required",
         });
       }
 
@@ -1324,11 +1489,11 @@ class ScheduleController {
         extracurricularInfo,
         token
       );
-      
+
       res.status(201).json({
         success: true,
-        message: 'Extracurricular activity added successfully',
-        data: result
+        message: "Extracurricular activity added successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1340,11 +1505,11 @@ class ScheduleController {
     try {
       const { scheduleId } = req.params;
       const { weekNumber } = req.query;
-      
+
       if (!scheduleId || !weekNumber) {
         return res.status(400).json({
           success: false,
-          message: 'Schedule ID and week number are required'
+          message: "Schedule ID and week number are required",
         });
       }
 
@@ -1352,15 +1517,15 @@ class ScheduleController {
       if (isNaN(week) || week < 1 || week > 38) {
         return res.status(400).json({
           success: false,
-          message: 'Week number must be between 1 and 38'
+          message: "Week number must be between 1 and 38",
         });
       }
 
       const result = await scheduleService.getScheduleByWeek(scheduleId, week);
-      
+
       res.status(200).json({
         success: true,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1371,20 +1536,24 @@ class ScheduleController {
   async getDaySchedule(req, res, next) {
     try {
       const { className, academicYear, date } = req.query;
-      
+
       if (!className || !academicYear || !date) {
         return res.status(400).json({
           success: false,
-          message: 'Class name, academic year, and date are required'
+          message: "Class name, academic year, and date are required",
         });
       }
 
-      const result = await scheduleService.getDaySchedule(className, academicYear, date);
-      
+      const result = await scheduleService.getDaySchedule(
+        className,
+        academicYear,
+        date
+      );
+
       res.status(200).json({
         success: true,
-        message: 'Day schedule retrieved successfully',
-        data: result
+        message: "Day schedule retrieved successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1395,27 +1564,27 @@ class ScheduleController {
   async getDetailedPeriodInfo(req, res, next) {
     try {
       const { periodId } = req.params;
-      
+
       if (!periodId) {
         return res.status(400).json({
           success: false,
-          message: 'Period ID is required'
+          message: "Period ID is required",
         });
       }
 
       const result = await scheduleService.getDetailedPeriodInfo(periodId);
-      
+
       if (!result) {
         return res.status(404).json({
           success: false,
-          message: 'Period not found'
+          message: "Period not found",
         });
       }
-      
+
       res.status(200).json({
         success: true,
-        message: 'Period details retrieved successfully',
-        data: result
+        message: "Period details retrieved successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1427,20 +1596,20 @@ class ScheduleController {
     try {
       const { periods } = req.body;
       const userId = req.user._id;
-      
+
       if (!periods || !Array.isArray(periods) || periods.length === 0) {
         return res.status(400).json({
           success: false,
-          message: 'Periods array is required and cannot be empty'
+          message: "Periods array is required and cannot be empty",
         });
       }
 
       const result = await scheduleService.bulkUpdatePeriods(periods, userId);
-      
+
       res.status(200).json({
         success: true,
         message: `Updated ${result.updated} periods successfully`,
-        data: result
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1451,24 +1620,24 @@ class ScheduleController {
   async getTeacherWeeklySchedule(req, res, next) {
     try {
       const { teacherId, weekNumber, academicYear } = req.query;
-      
+
       if (!teacherId || !weekNumber || !academicYear) {
         return res.status(400).json({
           success: false,
-          message: 'Teacher ID, week number, and academic year are required'
+          message: "Teacher ID, week number, and academic year are required",
         });
       }
 
       const result = await scheduleService.getTeacherWeeklySchedule(
-        teacherId, 
-        parseInt(weekNumber), 
+        teacherId,
+        parseInt(weekNumber),
         academicYear
       );
-      
+
       res.status(200).json({
         success: true,
-        message: 'Teacher weekly schedule retrieved successfully',
-        data: result
+        message: "Teacher weekly schedule retrieved successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1480,11 +1649,11 @@ class ScheduleController {
     try {
       const filters = req.query;
       const result = await scheduleService.searchPeriods(filters);
-      
+
       res.status(200).json({
         success: true,
-        message: 'Periods search completed successfully',
-        data: result
+        message: "Periods search completed successfully",
+        data: result,
       });
     } catch (error) {
       next(error);
@@ -1496,31 +1665,35 @@ class ScheduleController {
     try {
       const { lessonId } = req.params;
       const currentUser = req.user; // Từ authMiddleware.protect
-      
+
       if (!lessonId) {
         return res.status(400).json({
           success: false,
-          message: 'lessonId is required'
+          message: "lessonId is required",
         });
       }
 
       // Lấy chi tiết tiết học
-      const lessonDetail = await scheduleService.getLessonDetailById(lessonId, currentUser);
-      
+      const lessonDetail = await scheduleService.getLessonDetailById(
+        lessonId,
+        currentUser
+      );
+
       if (!lessonDetail) {
         return res.status(404).json({
           success: false,
-          message: 'Lesson not found'
+          message: "Lesson not found",
         });
       }
 
-      console.log(`✅ Retrieved lesson detail for ${lessonId} by user ${currentUser._id}`);
+      console.log(
+        `✅ Retrieved lesson detail for ${lessonId} by user ${currentUser._id}`
+      );
 
       // Trả về trực tiếp data của lesson
       res.status(200).json(lessonDetail);
-
     } catch (error) {
-      console.error('❌ Error in getLessonDetail:', error.message);
+      console.error("❌ Error in getLessonDetail:", error.message);
       next(error);
     }
   }
@@ -1530,78 +1703,81 @@ class ScheduleController {
     try {
       const { lessonId } = req.params;
       const teacherId = req.user._id;
-      
+
       // Import models
-      const Lesson = require('../models/lesson.model');
-      const User = require('../../auth/models/user.model');
-      const Class = require('../../classes/models/class.model');
-      
+      const Lesson = require("../models/lesson.model");
+      const User = require("../../auth/models/user.model");
+      const Class = require("../../classes/models/class.model");
+
       // Tìm lesson và kiểm tra quyền
       const lesson = await Lesson.findById(lessonId)
-        .populate('class', 'className')
-        .populate('subject', 'subjectName subjectCode')
-        .populate('teacher', 'name');
-      
+        .populate("class", "className")
+        .populate("subject", "subjectName subjectCode")
+        .populate("teacher", "name");
+
       if (!lesson) {
         return res.status(404).json({
           success: false,
-          message: 'Lesson not found'
+          message: "Lesson not found",
         });
       }
-      
+
       // Kiểm tra chỉ giáo viên dạy tiết này mới được xem
       if (lesson.teacher._id.toString() !== teacherId.toString()) {
         return res.status(403).json({
           success: false,
-          message: 'You can only view students of your own lessons'
+          message: "You can only view students of your own lessons",
         });
       }
-      
+
       // Lấy danh sách học sinh của lớp
       const students = await User.find({
         class_id: lesson.class._id,
-        role: 'student'
-      }).select('_id name studentId class_id').sort('name');
-      
+        role: "student",
+      })
+        .select("_id name studentId class_id")
+        .sort("name");
+
       // Lấy thông tin lớp
-      const classInfo = await Class.findById(lesson.class._id).select('className grade');
-      
+      const classInfo = await Class.findById(lesson.class._id).select(
+        "className grade"
+      );
+
       res.status(200).json({
         success: true,
-        message: 'Lấy danh sách học sinh thành công',
+        message: "Lấy danh sách học sinh thành công",
         data: {
           lesson: {
             lessonId: lesson.lessonId,
             topic: lesson.topic,
             scheduledDate: lesson.scheduledDate,
-            status: lesson.status
+            status: lesson.status,
           },
           class: {
             className: classInfo.className,
-            grade: classInfo.grade
+            grade: classInfo.grade,
           },
           subject: {
             subjectName: lesson.subject.subjectName,
-            subjectCode: lesson.subject.subjectCode
+            subjectCode: lesson.subject.subjectCode,
           },
           teacher: {
-            name: lesson.teacher.name
+            name: lesson.teacher.name,
           },
-          students: students.map(student => ({
+          students: students.map((student) => ({
             id: student._id,
             name: student.name,
             studentId: student.studentId,
-            className: classInfo.className
+            className: classInfo.className,
           })),
-          totalStudents: students.length
-        }
+          totalStudents: students.length,
+        },
       });
-      
     } catch (error) {
-      console.error('❌ Error in getLessonStudents:', error.message);
+      console.error("❌ Error in getLessonStudents:", error.message);
       next(error);
     }
   }
 }
 
-module.exports = new ScheduleController(); 
+module.exports = new ScheduleController();

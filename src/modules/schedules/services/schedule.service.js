@@ -1763,12 +1763,29 @@ class ScheduleService {
   }
 
   // Lấy thông tin schedule theo ID
-  async getScheduleById(scheduleId) {
+  async getScheduleById(scheduleId, filterOptions = {}) {
     try {
+      const {
+        academicYear,
+        startOfWeek,
+        endOfWeek,
+        weekNumber,
+        includeDetails = false,
+        includeLessons = true,
+      } = filterOptions;
+
+      console.log(
+        `🔍 Getting schedule ${scheduleId} with filters:`,
+        filterOptions
+      );
+
+      if (!academicYear) {
+        throw new Error("academicYear is required");
+      }
+
+      // Get basic schedule info
       const schedule = await Schedule.findById(scheduleId)
         .populate("class", "className academicYear gradeLevel")
-        .populate("academicYear", "name startDate endDate")
-        .populate("weeklySchedules")
         .populate("createdBy", "name email")
         .populate("lastModifiedBy", "name email")
         .lean();
@@ -1777,27 +1794,202 @@ class ScheduleService {
         throw new Error("Schedule not found");
       }
 
-      // Populate thêm thông tin chi tiết cho weeklySchedules nếu cần
-      if (schedule.weeklySchedules && schedule.weeklySchedules.length > 0) {
-        const WeeklySchedule = mongoose.model("WeeklySchedule");
-        const populatedWeeklySchedules = await WeeklySchedule.find({
-          _id: { $in: schedule.weeklySchedules.map((ws) => ws._id) },
-        })
-          .populate({
-            path: "lessons",
-            populate: [
-              { path: "subject", select: "subjectName subjectCode" },
-              { path: "teacher", select: "name email" },
-              { path: "timeSlot", select: "period startTime endTime type" },
-            ],
-          })
-          .lean();
+      // Lấy academicYearId từ tên
+      const academicYearDoc = await AcademicYear.findOne({
+        name: academicYear,
+      }).lean();
+      if (!academicYearDoc) throw new Error("Academic year not found");
 
-        schedule.weeklySchedules = populatedWeeklySchedules;
+      // Lấy classId từ schedule
+      const classId = schedule.class._id || schedule.class;
+
+      // Filter by academic year (so sánh ObjectId)
+      if (String(schedule.academicYear) !== String(academicYearDoc._id)) {
+        throw new Error(
+          `Schedule does not match academic year ${academicYear}`
+        );
       }
 
-      return schedule;
+      // Base response structure
+      const response = {
+        _id: schedule._id,
+        class: schedule.class,
+        academicYear: academicYearDoc.name,
+        status: schedule.status,
+        totalWeeks: schedule.totalWeeks,
+        createdAt: schedule.createdAt,
+        updatedAt: schedule.updatedAt,
+        createdBy: schedule.createdBy,
+        lastModifiedBy: schedule.lastModifiedBy,
+        metadata: {
+          filterApplied: {
+            academicYear,
+            startOfWeek,
+            endOfWeek,
+            weekNumber,
+            includeDetails,
+            includeLessons,
+          },
+        },
+      };
+
+      // Add detailed info if requested
+      if (includeDetails) {
+        response.academicYearDetails = academicYearDoc;
+      }
+
+      // Handle weekly schedules filtering
+      if (includeLessons) {
+        const WeeklySchedule = mongoose.model("WeeklySchedule");
+        let weeklySchedules = [];
+
+        // Nếu có startOfWeek và endOfWeek thì lọc theo khoảng ngày
+        if (startOfWeek && endOfWeek) {
+          const startDate = new Date(startOfWeek);
+          const endDate = new Date(endOfWeek);
+          weeklySchedules = await WeeklySchedule.find({
+            class: classId,
+            academicYear: academicYearDoc._id,
+            $or: [
+              { startDate: { $gte: startDate, $lte: endDate } },
+              { endDate: { $gte: startDate, $lte: endDate } },
+              { startDate: { $lte: startDate }, endDate: { $gte: endDate } },
+            ],
+          })
+            .select("_id weekNumber startDate endDate status lessons")
+            .populate({
+              path: "lessons",
+              select:
+                "lessonId type status scheduledDate subject teacher timeSlot topic notes",
+              populate: [
+                { path: "subject", select: "subjectName subjectCode" },
+                { path: "teacher", select: "name email" },
+                { path: "timeSlot", select: "period startTime endTime" },
+              ],
+            })
+            .sort({ weekNumber: 1 });
+        } else if (weekNumber) {
+          weeklySchedules = await WeeklySchedule.find({
+            class: classId,
+            academicYear: academicYearDoc._id,
+            weekNumber: parseInt(weekNumber),
+          })
+            .select("_id weekNumber startDate endDate status lessons")
+            .populate({
+              path: "lessons",
+              select:
+                "lessonId type status scheduledDate subject teacher timeSlot topic notes",
+              populate: [
+                { path: "subject", select: "subjectName subjectCode" },
+                { path: "teacher", select: "name email" },
+                { path: "timeSlot", select: "period startTime endTime" },
+              ],
+            })
+            .sort({ weekNumber: 1 });
+        } else {
+          weeklySchedules = await WeeklySchedule.find({
+            class: classId,
+            academicYear: academicYearDoc._id,
+          })
+            .select("_id weekNumber startDate endDate status lessons")
+            .populate({
+              path: "lessons",
+              select:
+                "lessonId type status scheduledDate subject teacher timeSlot topic notes",
+              populate: [
+                { path: "subject", select: "subjectName subjectCode" },
+                { path: "teacher", select: "name email" },
+                { path: "timeSlot", select: "period startTime endTime" },
+              ],
+            })
+            .sort({ weekNumber: 1 });
+        }
+
+        // Lấy lessons cho từng tuần nếu có tuần cụ thể hoặc khoảng ngày
+        if (weekNumber || (startOfWeek && endOfWeek)) {
+          const detailedWeeklySchedules = [];
+          for (const weeklySchedule of weeklySchedules) {
+            const lessons = weeklySchedule.lessons || [];
+            // Group lessons by day
+            const lessonsByDay = {};
+            lessons.forEach((lesson) => {
+              const dateKey = lesson.scheduledDate.toISOString().split("T")[0];
+              if (!lessonsByDay[dateKey]) {
+                lessonsByDay[dateKey] = [];
+              }
+              lessonsByDay[dateKey].push({
+                _id: lesson._id,
+                lessonId: lesson.lessonId,
+                type: lesson.type,
+                status: lesson.status,
+                period: lesson.timeSlot?.period || 0,
+                timeSlot: {
+                  period: lesson.timeSlot?.period || 0,
+                  startTime: lesson.timeSlot?.startTime || "",
+                  endTime: lesson.timeSlot?.endTime || "",
+                },
+                subject: lesson.subject
+                  ? {
+                      _id: lesson.subject._id,
+                      name: lesson.subject.subjectName,
+                      code: lesson.subject.subjectCode,
+                    }
+                  : null,
+                teacher: lesson.teacher
+                  ? {
+                      _id: lesson.teacher._id,
+                      name: lesson.teacher.name,
+                      email: lesson.teacher.email,
+                    }
+                  : null,
+                topic: lesson.topic || "",
+                notes: lesson.notes || "",
+              });
+            });
+
+            // Sort lessons by period within each day
+            Object.keys(lessonsByDay).forEach((dateKey) => {
+              lessonsByDay[dateKey].sort((a, b) => a.period - b.period);
+            });
+
+            detailedWeeklySchedules.push({
+              _id: weeklySchedule._id,
+              weekNumber: weeklySchedule.weekNumber,
+              startDate: weeklySchedule.startDate,
+              endDate: weeklySchedule.endDate,
+              status: weeklySchedule.status,
+              lessonsByDay: lessonsByDay,
+              totalLessons: lessons.length,
+            });
+          }
+          response.weeklySchedules = detailedWeeklySchedules;
+        } else {
+          response.weeklySchedules = weeklySchedules.map((ws) => ({
+            _id: ws._id,
+            weekNumber: ws.weekNumber,
+            startDate: ws.startDate,
+            endDate: ws.endDate,
+            status: ws.status,
+          }));
+        }
+
+        // Add statistics
+        response.statistics = {
+          totalWeeklySchedules: weeklySchedules.length,
+          totalLessons: weeklySchedules.reduce(
+            (sum, ws) => sum + (ws.totalLessons || 0),
+            0
+          ),
+          dateRange:
+            startOfWeek && endOfWeek ? { startOfWeek, endOfWeek } : null,
+          weekNumber: weekNumber ? parseInt(weekNumber) : null,
+        };
+      }
+
+      console.log(`✅ Successfully retrieved filtered schedule data`);
+      return response;
     } catch (error) {
+      console.error("❌ Error in getScheduleById:", error.message);
       throw new Error(`Failed to get schedule: ${error.message}`);
     }
   }
