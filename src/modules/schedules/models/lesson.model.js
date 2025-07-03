@@ -80,17 +80,6 @@ const lessonSchema = new mongoose.Schema(
       maxlength: 500,
     },
 
-    // Thông tin kiểm tra
-    testInfo: {
-      type: {
-        type: String,
-        enum: ["15p", "1tiet"],
-      },
-      title: String, // tên bài kiểm tra
-      description: String,
-      reminder: String, // nhắc nhở kiểm tra
-    },
-
     // Đánh giá lesson
     evaluation: {
       quality: {

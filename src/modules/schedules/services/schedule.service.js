@@ -1211,7 +1211,9 @@ class ScheduleService {
       // Check for valid periodId format
       const validPeriodIds = await Period.countDocuments({
         schedule: schedule._id,
-        periodId: { $regex: /^[a-f0-9]{6}_week\d{2}_day\d_period\d{2}$/ },
+        periodId: {
+          $regex: /^[a-f0-9]{6}_week\d{2}_day\d_period\d{2}$/,
+        },
       });
 
       const totalPeriods = await Period.countDocuments({
@@ -3316,10 +3318,7 @@ class ScheduleService {
         context: additionalInfo,
 
         // User permissions for this lesson
-        permissions: this.getLessonPermissions(lesson, currentUser),
-
-        // Thông tin kiểm tra (testInfo)
-        testInfo: lesson.testInfo || null,
+        permissions: this.getLessonPermissions(lesson, currentUser)
       };
 
       console.log(`✅ Successfully retrieved lesson detail for ${lessonId}`);
