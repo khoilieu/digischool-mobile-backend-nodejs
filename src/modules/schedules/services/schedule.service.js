@@ -3317,6 +3317,9 @@ class ScheduleService {
 
         // User permissions for this lesson
         permissions: this.getLessonPermissions(lesson, currentUser),
+
+        // Thông tin kiểm tra (testInfo)
+        testInfo: lesson.testInfo || null,
       };
 
       console.log(`✅ Successfully retrieved lesson detail for ${lessonId}`);

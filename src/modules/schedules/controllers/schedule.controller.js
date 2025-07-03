@@ -1,4 +1,5 @@
 const scheduleService = require("../services/schedule.service");
+const Lesson = require("../models/lesson.model");
 
 class ScheduleController {
   // Khởi tạo thời khóa biểu cho các lớp trong năm học (NEW ARCHITECTURE)
@@ -1775,6 +1776,56 @@ class ScheduleController {
       });
     } catch (error) {
       console.error("❌ Error in getLessonStudents:", error.message);
+      next(error);
+    }
+  }
+
+  // API: Cập nhật mô tả thêm cho lesson
+  async updateLessonNotes(req, res, next) {
+    try {
+      const { lessonId } = req.params;
+      const { notes } = req.body;
+      if (!notes) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Notes is required" });
+      }
+      const lesson = await Lesson.findByIdAndUpdate(
+        lessonId,
+        { notes, lastModifiedBy: req.user?._id },
+        { new: true }
+      );
+      if (!lesson)
+        return res
+          .status(404)
+          .json({ success: false, message: "Lesson not found" });
+      res.json({ success: true, data: lesson });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // API: Thêm/cập nhật thông tin kiểm tra cho lesson
+  async updateLessonTestInfo(req, res, next) {
+    try {
+      const { lessonId } = req.params;
+      const { testInfo } = req.body;
+      if (!testInfo) {
+        return res
+          .status(400)
+          .json({ success: false, message: "testInfo is required" });
+      }
+      const lesson = await Lesson.findByIdAndUpdate(
+        lessonId,
+        { testInfo, lastModifiedBy: req.user?._id },
+        { new: true }
+      );
+      if (!lesson)
+        return res
+          .status(404)
+          .json({ success: false, message: "Lesson not found" });
+      res.json({ success: true, data: lesson });
+    } catch (error) {
       next(error);
     }
   }

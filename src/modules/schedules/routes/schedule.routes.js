@@ -400,4 +400,14 @@ router.put(
   scheduleController.bulkUpdatePeriods
 );
 
+// Cập nhật mô tả thêm cho lesson
+router.patch("/lessons/:lessonId/notes", scheduleController.updateLessonNotes);
+// Thêm/cập nhật thông tin kiểm tra cho lesson
+router.patch(
+  "/lessons/:lessonId/test-info",
+  scheduleController.updateLessonTestInfo
+);
+// Lấy chi tiết tiết học (bao gồm testInfo)
+router.get("/lessons/:lessonId", scheduleController.getLessonDetail);
+
 module.exports = router;
