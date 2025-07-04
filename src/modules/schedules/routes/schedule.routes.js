@@ -401,6 +401,9 @@ router.put(
 );
 
 // Cập nhật mô tả thêm cho lesson
-router.patch("/lessons/:lessonId/notes", scheduleController.updateLessonNotes);
+router.patch(
+  "/lessons/:lessonId/description",
+  scheduleController.updateLessonDescription
+);
 
 module.exports = router;

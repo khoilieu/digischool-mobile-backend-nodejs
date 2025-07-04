@@ -1781,24 +1781,25 @@ class ScheduleController {
   }
 
   // API: Cập nhật mô tả thêm cho lesson
-  async updateLessonNotes(req, res, next) {
+  async updateLessonDescription(req, res, next) {
     try {
       const { lessonId } = req.params;
-      const { notes } = req.body;
-      if (!notes) {
+      const { description } = req.body;
+      if (!description) {
         return res
           .status(400)
-          .json({ success: false, message: "Notes is required" });
+          .json({ success: false, message: "Description is required" });
       }
-      const lesson = await Lesson.findByIdAndUpdate(
-        lessonId,
-        { notes, lastModifiedBy: req.user?._id },
-        { new: true }
-      );
-      if (!lesson)
+      const lesson = await Lesson.findById(lessonId);
+      if (!lesson) {
         return res
           .status(404)
           .json({ success: false, message: "Lesson not found" });
+      }
+      // Kiểm tra và cập nhật hoặc tạo trường description
+      lesson.description = description;
+      lesson.lastModifiedBy = req.user?._id;
+      await lesson.save();
       res.json({ success: true, data: lesson });
     } catch (error) {
       next(error);
