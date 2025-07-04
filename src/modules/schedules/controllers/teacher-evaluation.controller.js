@@ -112,6 +112,13 @@ class TeacherEvaluationController {
       lesson.status = 'completed';
       await lesson.save();
       
+      // Xử lý đặc biệt cho makeup lesson
+      if (lesson.type === 'makeup') {
+        const LessonRequestService = require('../services/lesson-request.service');
+        const lessonRequestService = new LessonRequestService();
+        await lessonRequestService.handleMakeupLessonCompleted(lesson._id);
+      }
+      
       // Populate để trả về
       await evaluation.populate([
         { path: 'lesson', select: 'lessonId scheduledDate actualDate topic' },
@@ -482,6 +489,20 @@ class TeacherEvaluationController {
       
       await evaluation.complete();
       
+      // Cập nhật lesson status và xử lý makeup lesson
+      const lesson = await Lesson.findById(evaluation.lesson);
+      if (lesson) {
+        lesson.status = 'completed';
+        await lesson.save();
+        
+        // Xử lý đặc biệt cho makeup lesson
+        if (lesson.type === 'makeup') {
+          const LessonRequestService = require('../services/lesson-request.service');
+          const lessonRequestService = new LessonRequestService();
+          await lessonRequestService.handleMakeupLessonCompleted(lesson._id);
+        }
+      }
+      
       res.status(200).json({
         success: true,
         message: 'Hoàn thành đánh giá thành công',
@@ -529,6 +550,20 @@ class TeacherEvaluationController {
       }
       
       await evaluation.submit();
+      
+      // Cập nhật lesson status và xử lý makeup lesson
+      const lesson = await Lesson.findById(evaluation.lesson);
+      if (lesson) {
+        lesson.status = 'completed';
+        await lesson.save();
+        
+        // Xử lý đặc biệt cho makeup lesson
+        if (lesson.type === 'makeup') {
+          const LessonRequestService = require('../services/lesson-request.service');
+          const lessonRequestService = new LessonRequestService();
+          await lessonRequestService.handleMakeupLessonCompleted(lesson._id);
+        }
+      }
       
       res.status(200).json({
         success: true,

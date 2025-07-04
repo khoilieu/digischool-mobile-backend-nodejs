@@ -1,10 +1,10 @@
 const { body, param, query } = require('express-validator');
 const mongoose = require('mongoose');
 
-class LessonSwapValidation {
+class LessonRequestValidation {
   
-  // Validation cho việc tạo yêu cầu đổi tiết
-  static createLessonSwapRequest() {
+  // Validation cho việc tạo yêu cầu đổi tiết/dạy bù
+  static createLessonRequest() {
     return [
       body('originalLessonId')
         .notEmpty()
@@ -26,17 +26,29 @@ class LessonSwapValidation {
           return true;
         }),
       
+      body('requestType')
+        .notEmpty()
+        .withMessage('Request type is required')
+        .isIn(['swap', 'makeup'])
+        .withMessage('Request type must be either swap or makeup'),
+      
       body('reason')
         .notEmpty()
         .withMessage('Reason is required')
         .isLength({ min: 10, max: 500 })
         .withMessage('Reason must be between 10 and 500 characters')
+        .trim(),
+      
+      body('absentReason')
+        .optional()
+        .isLength({ max: 500 })
+        .withMessage('Absent reason cannot exceed 500 characters')
         .trim()
     ];
   }
   
   // Validation cho việc approve/reject yêu cầu
-  static processSwapRequest() {
+  static processRequest() {
     return [
       param('requestId')
         .notEmpty()
@@ -56,7 +68,7 @@ class LessonSwapValidation {
     ];
   }
   
-  // Validation cho query parameters
+  // Validation cho query parameters của teacher lessons
   static validateTeacherLessonsQuery() {
     return [
       query('teacherId')
@@ -78,6 +90,11 @@ class LessonSwapValidation {
           }
           return true;
         }),
+      
+      query('requestType')
+        .optional()
+        .isIn(['swap', 'makeup'])
+        .withMessage('Request type must be either swap or makeup'),
       
       query('startOfWeek')
         .notEmpty()
@@ -175,8 +192,8 @@ class LessonSwapValidation {
     ];
   }
   
-  // Validation cho teacher swap requests query
-  static validateTeacherSwapRequestsQuery() {
+  // Validation cho teacher requests query
+  static validateTeacherRequestsQuery() {
     return [
       query('teacherId')
         .optional()
@@ -191,6 +208,11 @@ class LessonSwapValidation {
         .optional()
         .isIn(['pending', 'approved', 'rejected'])
         .withMessage('Status must be one of: pending, approved, rejected'),
+      
+      query('requestType')
+        .optional()
+        .isIn(['swap', 'makeup'])
+        .withMessage('Request type must be either swap or makeup'),
       
       query('startDate')
         .optional()
@@ -210,13 +232,14 @@ class LessonSwapValidation {
               throw new Error('End date must be after start date');
             }
           }
+          
           return true;
         })
     ];
   }
   
-  // Validation cho pending swap requests query
-  static validatePendingSwapRequestsQuery() {
+  // Validation cho pending requests query
+  static validatePendingRequestsQuery() {
     return [
       query('academicYear')
         .optional()
@@ -234,9 +257,14 @@ class LessonSwapValidation {
             throw new Error('Invalid class ID format');
           }
           return true;
-        })
+        }),
+      
+      query('requestType')
+        .optional()
+        .isIn(['swap', 'makeup'])
+        .withMessage('Request type must be either swap or makeup')
     ];
   }
 }
 
-module.exports = LessonSwapValidation; 
+module.exports = LessonRequestValidation; 

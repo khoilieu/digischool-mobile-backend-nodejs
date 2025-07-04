@@ -4,7 +4,13 @@ const scheduleController = require("../controllers/schedule.controller");
 const authMiddleware = require("../../auth/middleware/auth.middleware");
 const scheduleValidation = require("../middleware/schedule.validation");
 
+// Import lesson request routes
+const lessonRequestRoutes = require('./lesson-request.routes');
+
 // Routes cho quản lý thời khóa biểu
+
+// Mount lesson request routes
+router.use('/lesson-request', lessonRequestRoutes);
 
 // POST /api/schedules/initialize - Khởi tạo thời khóa biểu cho tất cả lớp trong năm học
 router.post(
@@ -382,7 +388,6 @@ router.patch(
   scheduleController.updateLessonDescription
 );
 
-// Include lesson swap routes
-router.use('/lesson-swap', require('./lesson-swap.routes'));
+
 
 module.exports = router;

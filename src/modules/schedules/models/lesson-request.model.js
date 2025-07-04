@@ -1,36 +1,45 @@
 const mongoose = require('mongoose');
 
-const lessonSwapSchema = new mongoose.Schema({
-  // Unique identifier cho lesson swap request
-  swapId: {
+const lessonRequestSchema = new mongoose.Schema({
+  // Unique identifier cho lesson request
+  requestId: {
     type: String,
     required: false,
     unique: true,
     sparse: true
   },
 
-  // Thông tin giáo viên yêu cầu đổi tiết
+  // Loại yêu cầu
+  requestType: {
+    type: String,
+    enum: ['swap', 'makeup'],
+    required: true
+  },
+
+  // Thông tin giáo viên yêu cầu
   requestingTeacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
 
-  // Thông tin tiết học cần đổi (tiết hiện tại)
+  // Thông tin tiết học gốc (tiết cần đổi hoặc tiết absent cần dạy bù)
   originalLesson: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Lesson',
     required: true
   },
 
-  // Thông tin tiết học thay thế (tiết trống)
+  // Thông tin tiết học thay thế 
+  // - Với swap: tiết trống sẽ được đổi
+  // - Với makeup: tiết trống sẽ được tạo thành tiết makeup
   replacementLesson: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Lesson',
     required: true
   },
 
-  // Lý do đổi tiết
+  // Lý do yêu cầu
   reason: {
     type: String,
     required: true,
@@ -88,6 +97,19 @@ const lessonSwapSchema = new mongoose.Schema({
     }
   },
 
+  // Thông tin đặc biệt cho makeup
+  makeupInfo: {
+    // Ngày gốc của tiết absent
+    originalDate: Date,
+    // Lý do absent
+    absentReason: String,
+    // Tiết makeup đã được tạo (sau khi approve)
+    createdMakeupLesson: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Lesson'
+    }
+  },
+
   // Metadata
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -104,77 +126,111 @@ const lessonSwapSchema = new mongoose.Schema({
 });
 
 // Indexes
-lessonSwapSchema.index({ swapId: 1 }, { unique: true });
-lessonSwapSchema.index({ requestingTeacher: 1, status: 1 });
-lessonSwapSchema.index({ originalLesson: 1 });
-lessonSwapSchema.index({ replacementLesson: 1 });
-lessonSwapSchema.index({ status: 1, createdAt: -1 });
-lessonSwapSchema.index({ 'additionalInfo.classInfo': 1 });
-lessonSwapSchema.index({ 'additionalInfo.academicYear': 1 });
+lessonRequestSchema.index({ requestId: 1 }, { unique: true });
+lessonRequestSchema.index({ requestingTeacher: 1, status: 1 });
+lessonRequestSchema.index({ originalLesson: 1 });
+lessonRequestSchema.index({ replacementLesson: 1 });
+lessonRequestSchema.index({ status: 1, createdAt: -1 });
+lessonRequestSchema.index({ requestType: 1, status: 1 });
+lessonRequestSchema.index({ 'additionalInfo.classInfo': 1 });
+lessonRequestSchema.index({ 'additionalInfo.academicYear': 1 });
 
 // Virtual để lấy thông tin chi tiết
-lessonSwapSchema.virtual('originalLessonDetails', {
+lessonRequestSchema.virtual('originalLessonDetails', {
   ref: 'Lesson',
   localField: 'originalLesson',
   foreignField: '_id',
   justOne: true
 });
 
-lessonSwapSchema.virtual('replacementLessonDetails', {
+lessonRequestSchema.virtual('replacementLessonDetails', {
   ref: 'Lesson',
   localField: 'replacementLesson',
   foreignField: '_id',
   justOne: true
 });
 
-// Method để generate swapId nếu chưa có
-lessonSwapSchema.pre('save', function(next) {
-  if (!this.swapId) {
+// Method để generate requestId nếu chưa có
+lessonRequestSchema.pre('save', function(next) {
+  if (!this.requestId) {
     const timestamp = Date.now().toString(36);
     const random = Math.random().toString(36).substr(2, 5);
-    this.swapId = `SWAP_${timestamp}_${random}`.toUpperCase();
+    const prefix = this.requestType === 'swap' ? 'SWAP' : 'MAKEUP';
+    this.requestId = `${prefix}_${timestamp}_${random}`.toUpperCase();
   }
   next();
 });
 
-// Static method để tìm swap requests theo teacher
-lessonSwapSchema.statics.findByTeacher = function(teacherId, options = {}) {
+// Static method để tìm requests theo teacher
+lessonRequestSchema.statics.findByTeacher = function(teacherId, options = {}) {
   const query = { requestingTeacher: teacherId };
   
   if (options.status) query.status = options.status;
+  if (options.requestType) query.requestType = options.requestType;
   if (options.startDate) query.createdAt = { $gte: options.startDate };
   if (options.endDate) {
     query.createdAt = { ...query.createdAt, $lte: options.endDate };
   }
   
   return this.find(query)
-    .populate('originalLesson', 'lessonId scheduledDate timeSlot topic status')
-    .populate('replacementLesson', 'lessonId scheduledDate timeSlot topic status')
+    .populate({
+      path: 'originalLesson',
+      select: 'lessonId scheduledDate timeSlot topic status type',
+      populate: {
+        path: 'timeSlot',
+        select: 'period name startTime endTime'
+      }
+    })
+    .populate({
+      path: 'replacementLesson',
+      select: 'lessonId scheduledDate timeSlot topic status type',
+      populate: {
+        path: 'timeSlot',
+        select: 'period name startTime endTime'
+      }
+    })
     .populate('requestingTeacher', 'name email fullName')
     .populate('processedBy', 'name email fullName')
     .populate('additionalInfo.classInfo', 'className gradeLevel')
     .populate('additionalInfo.subjectInfo', 'subjectName subjectCode')
     .populate('additionalInfo.academicYear', 'name startDate endDate')
+    .populate('makeupInfo.createdMakeupLesson', 'lessonId scheduledDate timeSlot status')
     .sort({ createdAt: -1 });
 };
 
 // Static method để tìm pending requests
-lessonSwapSchema.statics.findPendingRequests = function(options = {}) {
+lessonRequestSchema.statics.findPendingRequests = function(options = {}) {
   const query = { status: 'pending' };
   
+  if (options.requestType) query.requestType = options.requestType;
   if (options.academicYear) query['additionalInfo.academicYear'] = options.academicYear;
   if (options.classId) query['additionalInfo.classInfo'] = options.classId;
   
   return this.find(query)
-    .populate('originalLesson', 'lessonId scheduledDate timeSlot topic status')
-    .populate('replacementLesson', 'lessonId scheduledDate timeSlot topic status')
+    .populate({
+      path: 'originalLesson',
+      select: 'lessonId scheduledDate timeSlot topic status type',
+      populate: {
+        path: 'timeSlot',
+        select: 'period name startTime endTime'
+      }
+    })
+    .populate({
+      path: 'replacementLesson',
+      select: 'lessonId scheduledDate timeSlot topic status type',
+      populate: {
+        path: 'timeSlot',
+        select: 'period name startTime endTime'
+      }
+    })
     .populate('requestingTeacher', 'name email fullName')
     .populate('additionalInfo.classInfo', 'className gradeLevel')
     .populate('additionalInfo.subjectInfo', 'subjectName subjectCode')
     .populate('additionalInfo.academicYear', 'name startDate endDate')
+    .populate('makeupInfo.createdMakeupLesson', 'lessonId scheduledDate timeSlot status')
     .sort({ createdAt: -1 });
 };
 
-const LessonSwap = mongoose.model('LessonSwap', lessonSwapSchema);
+const LessonRequest = mongoose.model('LessonRequest', lessonRequestSchema);
 
-module.exports = LessonSwap; 
+module.exports = LessonRequest; 

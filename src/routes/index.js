@@ -11,6 +11,7 @@ const teacherEvaluationRoutes = require('../modules/schedules/routes/teacher-eva
 const lessonReminderRoutes = require('../modules/schedules/routes/lesson-reminder.routes');
 const leaveRequestRoutes = require('../modules/leave-requests/routes/leave-request.routes');
 const teacherLeaveRequestRoutes = require('../modules/leave-requests/routes/teacher-leave-request.routes');
+const lessonRequestRoutes = require('../modules/schedules/routes/lesson-request.routes');
 
 // Health check route
 router.get('/health', (req, res) => {
@@ -38,6 +39,8 @@ router.use('/lesson-reminders', lessonReminderRoutes);
 router.use('/leave-requests', leaveRequestRoutes);
 // Teacher leave request routes
 router.use('/teacher-leave-requests', teacherLeaveRequestRoutes);
+// Lesson request routes (swap/makeup)
+router.use('/lesson-requests', lessonRequestRoutes);
 
 // Import and use other route modules here
 // Example: router.use('/users', require('./userRoutes'));

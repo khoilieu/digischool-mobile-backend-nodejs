@@ -1,21 +1,29 @@
-const LessonSwapService = require('../services/lesson-swap.service');
+const LessonRequestService = require('../services/lesson-request.service');
 const { validationResult } = require('express-validator');
 
-class LessonSwapController {
+class LessonRequestController {
   constructor() {
-    this.lessonSwapService = new LessonSwapService();
+    this.lessonRequestService = new LessonRequestService();
   }
   
-  // Lấy các tiết học của giáo viên để đổi
-  async getTeacherLessonsForSwap(req, res) {
+  // Lấy các tiết học của giáo viên để tạo request (swap/makeup)
+  async getTeacherLessonsForRequest(req, res) {
     try {
-      const { teacherId, academicYear, startOfWeek, endOfWeek } = req.query;
+      const { teacherId, academicYear, startOfWeek, endOfWeek, requestType = 'swap' } = req.query;
       
       // Validate required parameters
       if (!teacherId || !academicYear || !startOfWeek || !endOfWeek) {
         return res.status(400).json({
           success: false,
           message: 'Missing required parameters: teacherId, academicYear, startOfWeek, endOfWeek'
+        });
+      }
+      
+      // Validate requestType
+      if (!['swap', 'makeup'].includes(requestType)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid requestType. Must be swap or makeup'
         });
       }
       
@@ -27,17 +35,18 @@ class LessonSwapController {
         });
       }
       
-      const result = await this.lessonSwapService.getTeacherLessonsForWeek(
+      const result = await this.lessonRequestService.getTeacherLessonsForWeek(
         teacherId,
         academicYear,
         startOfWeek,
-        endOfWeek
+        endOfWeek,
+        requestType
       );
       
       res.json(result);
       
     } catch (error) {
-      console.error('❌ Error in getTeacherLessonsForSwap:', error.message);
+      console.error('❌ Error in getTeacherLessonsForRequest:', error.message);
       res.status(500).json({
         success: false,
         message: error.message
@@ -45,8 +54,8 @@ class LessonSwapController {
     }
   }
   
-  // Lấy các tiết trống có thể đổi
-  async getAvailableLessonsForSwap(req, res) {
+  // Lấy các tiết trống có thể dùng cho request
+  async getAvailableLessonsForRequest(req, res) {
     try {
       const { classId, academicYear, startOfWeek, endOfWeek, subjectId } = req.query;
       
@@ -58,7 +67,7 @@ class LessonSwapController {
         });
       }
       
-      const result = await this.lessonSwapService.getAvailableLessonsForSwap(
+      const result = await this.lessonRequestService.getAvailableLessonsForRequest(
         classId,
         academicYear,
         startOfWeek,
@@ -69,7 +78,7 @@ class LessonSwapController {
       res.json(result);
       
     } catch (error) {
-      console.error('❌ Error in getAvailableLessonsForSwap:', error.message);
+      console.error('❌ Error in getAvailableLessonsForRequest:', error.message);
       res.status(500).json({
         success: false,
         message: error.message
@@ -77,8 +86,8 @@ class LessonSwapController {
     }
   }
   
-  // Tạo yêu cầu đổi tiết
-  async createLessonSwapRequest(req, res) {
+  // Tạo yêu cầu đổi tiết hoặc dạy bù
+  async createLessonRequest(req, res) {
     try {
       // Check validation errors
       const errors = validationResult(req);
@@ -90,21 +99,23 @@ class LessonSwapController {
         });
       }
       
-      const { originalLessonId, replacementLessonId, reason } = req.body;
+      const { originalLessonId, replacementLessonId, reason, requestType, absentReason } = req.body;
       
-      const swapData = {
+      const requestData = {
         teacherId: req.user.id,
         originalLessonId,
         replacementLessonId,
-        reason
+        reason,
+        requestType,
+        absentReason // Chỉ dùng cho makeup request
       };
       
-      const result = await this.lessonSwapService.createLessonSwapRequest(swapData);
+      const result = await this.lessonRequestService.createLessonRequest(requestData);
       
       res.status(201).json(result);
       
     } catch (error) {
-      console.error('❌ Error in createLessonSwapRequest:', error.message);
+      console.error('❌ Error in createLessonRequest:', error.message);
       res.status(500).json({
         success: false,
         message: error.message
@@ -112,8 +123,8 @@ class LessonSwapController {
     }
   }
   
-  // Lấy danh sách yêu cầu đổi tiết của giáo viên
-  async getTeacherSwapRequests(req, res) {
+  // Lấy danh sách yêu cầu của giáo viên
+  async getTeacherRequests(req, res) {
     try {
       const teacherId = req.user.role === 'teacher' ? req.user.id : req.query.teacherId;
       
@@ -128,27 +139,28 @@ class LessonSwapController {
       if (req.user.role === 'teacher' && req.user.id !== teacherId) {
         return res.status(403).json({
           success: false,
-          message: 'You can only view your own swap requests'
+          message: 'You can only view your own requests'
         });
       }
       
       const options = {};
       if (req.query.status) options.status = req.query.status;
+      if (req.query.requestType) options.requestType = req.query.requestType;
       if (req.query.startDate) options.startDate = new Date(req.query.startDate);
       if (req.query.endDate) options.endDate = new Date(req.query.endDate);
       
       // Use static method from model
-      const LessonSwap = require('../models/lesson-swap.model');
-      const swapRequests = await LessonSwap.findByTeacher(teacherId, options);
+      const LessonRequest = require('../models/lesson-request.model');
+      const requests = await LessonRequest.findByTeacher(teacherId, options);
       
       res.json({
         success: true,
-        swapRequests: swapRequests,
-        count: swapRequests.length
+        requests: requests,
+        count: requests.length
       });
       
     } catch (error) {
-      console.error('❌ Error in getTeacherSwapRequests:', error.message);
+      console.error('❌ Error in getTeacherRequests:', error.message);
       res.status(500).json({
         success: false,
         message: error.message
@@ -156,16 +168,17 @@ class LessonSwapController {
     }
   }
   
-  // Lấy danh sách yêu cầu đổi tiết đang chờ duyệt (cho manager)
-  async getPendingSwapRequests(req, res) {
+  // Lấy danh sách yêu cầu đang chờ duyệt (cho manager)
+  async getPendingRequests(req, res) {
     try {
       const options = {};
       if (req.query.academicYear) options.academicYear = req.query.academicYear;
       if (req.query.classId) options.classId = req.query.classId;
+      if (req.query.requestType) options.requestType = req.query.requestType;
       
       // Use static method from model
-      const LessonSwap = require('../models/lesson-swap.model');
-      const pendingRequests = await LessonSwap.findPendingRequests(options);
+      const LessonRequest = require('../models/lesson-request.model');
+      const pendingRequests = await LessonRequest.findPendingRequests(options);
       
       res.json({
         success: true,
@@ -174,7 +187,7 @@ class LessonSwapController {
       });
       
     } catch (error) {
-      console.error('❌ Error in getPendingSwapRequests:', error.message);
+      console.error('❌ Error in getPendingRequests:', error.message);
       res.status(500).json({
         success: false,
         message: error.message
@@ -182,8 +195,8 @@ class LessonSwapController {
     }
   }
   
-  // Duyệt yêu cầu đổi tiết
-  async approveSwapRequest(req, res) {
+  // Duyệt yêu cầu
+  async approveRequest(req, res) {
     try {
       // Check validation errors
       const errors = validationResult(req);
@@ -198,7 +211,7 @@ class LessonSwapController {
       const { requestId } = req.params;
       const { comment = '' } = req.body;
       
-      const result = await this.lessonSwapService.approveSwapRequest(
+      const result = await this.lessonRequestService.approveRequest(
         requestId,
         req.user.id,
         comment
@@ -207,7 +220,7 @@ class LessonSwapController {
       res.json(result);
       
     } catch (error) {
-      console.error('❌ Error in approveSwapRequest:', error.message);
+      console.error('❌ Error in approveRequest:', error.message);
       res.status(500).json({
         success: false,
         message: error.message
@@ -215,8 +228,8 @@ class LessonSwapController {
     }
   }
   
-  // Từ chối yêu cầu đổi tiết
-  async rejectSwapRequest(req, res) {
+  // Từ chối yêu cầu
+  async rejectRequest(req, res) {
     try {
       // Check validation errors
       const errors = validationResult(req);
@@ -231,7 +244,7 @@ class LessonSwapController {
       const { requestId } = req.params;
       const { comment = '' } = req.body;
       
-      const result = await this.lessonSwapService.rejectSwapRequest(
+      const result = await this.lessonRequestService.rejectRequest(
         requestId,
         req.user.id,
         comment
@@ -240,7 +253,7 @@ class LessonSwapController {
       res.json(result);
       
     } catch (error) {
-      console.error('❌ Error in rejectSwapRequest:', error.message);
+      console.error('❌ Error in rejectRequest:', error.message);
       res.status(500).json({
         success: false,
         message: error.message
@@ -248,46 +261,58 @@ class LessonSwapController {
     }
   }
   
-  // Lấy chi tiết yêu cầu đổi tiết
-  async getSwapRequestDetails(req, res) {
+  // Lấy chi tiết yêu cầu
+  async getRequestDetails(req, res) {
     try {
       const { requestId } = req.params;
       
-      const LessonSwap = require('../models/lesson-swap.model');
-      const swapRequest = await LessonSwap.findById(requestId)
+      const LessonRequest = require('../models/lesson-request.model');
+      const request = await LessonRequest.findById(requestId)
+        .populate({
+          path: 'originalLesson',
+          select: 'lessonId scheduledDate timeSlot topic status type',
+          populate: {
+            path: 'timeSlot',
+            select: 'period name startTime endTime'
+          }
+        })
+                  .populate({
+            path: 'replacementLesson',
+            select: 'lessonId scheduledDate timeSlot topic status type',
+            populate: {
+              path: 'timeSlot',
+              select: 'period name startTime endTime'
+            }
+          })
         .populate('requestingTeacher', 'name email fullName')
-        .populate('originalLesson', 'lessonId scheduledDate timeSlot topic status')
-        .populate('replacementLesson', 'lessonId scheduledDate timeSlot status')
         .populate('processedBy', 'name email fullName')
         .populate('additionalInfo.classInfo', 'className gradeLevel')
         .populate('additionalInfo.subjectInfo', 'subjectName subjectCode')
-        .populate('additionalInfo.academicYear', 'name startDate endDate');
+        .populate('additionalInfo.academicYear', 'name startDate endDate')
+        .populate('makeupInfo.createdMakeupLesson', 'lessonId scheduledDate timeSlot status');
       
-      if (!swapRequest) {
+      if (!request) {
         return res.status(404).json({
           success: false,
-          message: 'Swap request not found'
+          message: 'Request not found'
         });
       }
       
-      // Validate authorization
-      const isTeacher = req.user.role === 'teacher' && req.user.id === swapRequest.requestingTeacher._id.toString();
-      const isManager = ['manager', 'admin'].includes(req.user.role);
-      
-      if (!isTeacher && !isManager) {
+      // Check authorization
+      if (req.user.role === 'teacher' && req.user.id !== request.requestingTeacher._id.toString()) {
         return res.status(403).json({
           success: false,
-          message: 'You are not authorized to view this swap request'
+          message: 'You can only view your own requests'
         });
       }
       
       res.json({
         success: true,
-        swapRequest: swapRequest
+        request: request
       });
       
     } catch (error) {
-      console.error('❌ Error in getSwapRequestDetails:', error.message);
+      console.error('❌ Error in getRequestDetails:', error.message);
       res.status(500).json({
         success: false,
         message: error.message
@@ -296,4 +321,4 @@ class LessonSwapController {
   }
 }
 
-module.exports = LessonSwapController; 
+module.exports = LessonRequestController; 
