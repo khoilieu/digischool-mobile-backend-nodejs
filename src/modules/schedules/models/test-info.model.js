@@ -1,20 +1,18 @@
 const mongoose = require("mongoose");
 
-// Schema cho nhắc nhở kiểm tra tiết học
-const lessonReminderSchema = new mongoose.Schema({
+// Schema cho thông tin kiểm tra tiết học
+const testInfoSchema = new mongoose.Schema({
   // Liên kết với tiết học
   lesson: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Lesson",
-    required: true,
     index: true,
   },
 
-  // Giáo viên tạo nhắc nhở
+  // Giáo viên tạo thông tin kiểm tra
   teacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    required: true,
     index: true,
   },
 
@@ -22,14 +20,12 @@ const lessonReminderSchema = new mongoose.Schema({
   class: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Class",
-    required: true,
   },
 
   // Môn học
   subject: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Subject",
-    required: true,
   },
 
   // Loại kiểm tra
@@ -47,10 +43,9 @@ const lessonReminderSchema = new mongoose.Schema({
     default: "kiemtra15",
   },
 
-  // Tiêu đề nhắc nhở
+  // Tiêu đề
   title: {
     type: String,
-    required: true,
     trim: true,
     maxlength: 200,
   },
@@ -112,13 +107,11 @@ const lessonReminderSchema = new mongoose.Schema({
   // Thời gian kiểm tra dự kiến
   expectedTestDate: {
     type: Date,
-    required: true,
   },
 
-  // Thời gian nhắc nhở
-  reminderDate: {
+  // Thời gian tạo thông tin kiểm tra
+  testInfoDate: {
     type: Date,
-    required: true,
     default: Date.now,
   },
 
@@ -137,7 +130,7 @@ const lessonReminderSchema = new mongoose.Schema({
   },
 
   // Ghi chú thêm
-  notes: {
+  reminder: {
     type: String,
     trim: true,
     maxlength: 500,
@@ -162,22 +155,23 @@ const lessonReminderSchema = new mongoose.Schema({
 });
 
 // Indexes
-lessonReminderSchema.index({ lesson: 1, teacher: 1 });
-lessonReminderSchema.index({ teacher: 1, status: 1 });
-lessonReminderSchema.index({ expectedTestDate: 1, status: 1 });
-lessonReminderSchema.index({ reminderDate: 1, status: 1 });
+testInfoSchema.index({ lesson: 1, teacher: 1 });
+testInfoSchema.index({ teacher: 1, status: 1 });
+testInfoSchema.index({ expectedTestDate: 1, status: 1 });
+testInfoSchema.index({ testInfoDate: 1, status: 1 });
 
-// Unique constraint: Một lesson chỉ có một reminder
-lessonReminderSchema.index({ lesson: 1 }, { unique: true });
+// Unique constraint: Một lesson chỉ có một test info
+// (nếu muốn cho phép nhiều test info/lesson thì bỏ dòng này)
+testInfoSchema.index({ lesson: 1 }, { unique: true });
 
 // Middleware để update updatedAt
-lessonReminderSchema.pre("save", function (next) {
+testInfoSchema.pre("save", function (next) {
   this.updatedAt = new Date();
   next();
 });
 
 // Pre-save validation
-lessonReminderSchema.pre("save", async function (next) {
+testInfoSchema.pre("save", async function (next) {
   try {
     const Lesson = mongoose.model("Lesson");
     const User = mongoose.model("User");
@@ -190,13 +184,13 @@ lessonReminderSchema.pre("save", async function (next) {
 
     // Kiểm tra lesson có status 'scheduled'
     if (lesson.status !== "scheduled") {
-      throw new Error("Can only create reminders for scheduled lessons");
+      throw new Error("Can only create test info for scheduled lessons");
     }
 
-    // Kiểm tra giáo viên có quyền tạo reminder cho lesson này
+    // Kiểm tra giáo viên có quyền tạo test info cho lesson này
     if (lesson.teacher.toString() !== this.teacher.toString()) {
       throw new Error(
-        "Teacher can only create reminders for their own lessons"
+        "Teacher can only create test info for their own lessons"
       );
     }
 
@@ -212,7 +206,7 @@ lessonReminderSchema.pre("save", async function (next) {
     // Kiểm tra teacher có role 'teacher'
     const teacher = await User.findById(this.teacher);
     if (!teacher || !teacher.role.includes("teacher")) {
-      throw new Error("Only teachers can create lesson reminders");
+      throw new Error("Only teachers can create test info");
     }
 
     next();
@@ -222,7 +216,9 @@ lessonReminderSchema.pre("save", async function (next) {
 });
 
 // Static methods
-lessonReminderSchema.statics.getTeacherReminders = function (
+// Lấy danh sách test info của giáo viên
+// options: {status, priority, testType, startDate, endDate, isVisible}
+testInfoSchema.statics.getTeacherTestInfos = function (
   teacherId,
   options = {}
 ) {
@@ -248,11 +244,11 @@ lessonReminderSchema.statics.getTeacherReminders = function (
     .sort({ expectedTestDate: 1, priority: -1 });
 };
 
-// Static method để lấy reminders sắp đến hạn
-lessonReminderSchema.statics.getUpcomingReminders = function (
-  teacherId,
-  days = 7
-) {
+// Lấy test info sắp đến hạn
+// days: số ngày tới
+// Trả về các test info active, isVisible, expectedTestDate trong khoảng
+// (dùng cho dashboard giáo viên)
+testInfoSchema.statics.getUpcomingTestInfos = function (teacherId, days = 7) {
   const today = new Date();
   const futureDate = new Date();
   futureDate.setDate(today.getDate() + days);
@@ -272,8 +268,9 @@ lessonReminderSchema.statics.getUpcomingReminders = function (
     .sort({ expectedTestDate: 1, priority: -1 });
 };
 
-// Static method để lấy thống kê reminders
-lessonReminderSchema.statics.getReminderStats = async function (
+// Lấy thống kê test info
+// options: {startDate, endDate}
+testInfoSchema.statics.getTestInfoStats = async function (
   teacherId,
   options = {}
 ) {
@@ -289,17 +286,17 @@ lessonReminderSchema.statics.getReminderStats = async function (
     {
       $group: {
         _id: null,
-        totalReminders: { $sum: 1 },
-        activeReminders: {
+        totalTestInfos: { $sum: 1 },
+        activeTestInfos: {
           $sum: { $cond: [{ $eq: ["$status", "active"] }, 1, 0] },
         },
-        completedReminders: {
+        completedTestInfos: {
           $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] },
         },
-        highPriorityReminders: {
+        highPriorityTestInfos: {
           $sum: { $cond: [{ $eq: ["$priority", "high"] }, 1, 0] },
         },
-        urgentReminders: {
+        urgentTestInfos: {
           $sum: { $cond: [{ $eq: ["$priority", "urgent"] }, 1, 0] },
         },
         testTypeDistribution: {
@@ -311,11 +308,11 @@ lessonReminderSchema.statics.getReminderStats = async function (
 
   if (stats.length === 0) {
     return {
-      totalReminders: 0,
-      activeReminders: 0,
-      completedReminders: 0,
-      highPriorityReminders: 0,
-      urgentReminders: 0,
+      totalTestInfos: 0,
+      activeTestInfos: 0,
+      completedTestInfos: 0,
+      highPriorityTestInfos: 0,
+      urgentTestInfos: 0,
       testTypeDistribution: {},
     };
   }
@@ -329,35 +326,39 @@ lessonReminderSchema.statics.getReminderStats = async function (
   }, {});
 
   return {
-    totalReminders: result.totalReminders,
-    activeReminders: result.activeReminders,
-    completedReminders: result.completedReminders,
-    highPriorityReminders: result.highPriorityReminders,
-    urgentReminders: result.urgentReminders,
+    totalTestInfos: result.totalTestInfos,
+    activeTestInfos: result.activeTestInfos,
+    completedTestInfos: result.completedTestInfos,
+    highPriorityTestInfos: result.highPriorityTestInfos,
+    urgentTestInfos: result.urgentTestInfos,
     testTypeDistribution: testTypeCounts,
   };
 };
 
 // Instance methods
-lessonReminderSchema.methods.markCompleted = function () {
+// Đánh dấu hoàn thành
+testInfoSchema.methods.markCompleted = function () {
   this.status = "completed";
   return this.save();
 };
 
-lessonReminderSchema.methods.markCancelled = function () {
+// Đánh dấu hủy
+testInfoSchema.methods.markCancelled = function () {
   this.status = "cancelled";
   return this.save();
 };
 
-lessonReminderSchema.methods.hide = function () {
+// Ẩn/hiện test info
+testInfoSchema.methods.hide = function () {
   this.isVisible = false;
   return this.save();
 };
 
-lessonReminderSchema.methods.show = function () {
+testInfoSchema.methods.show = function () {
   this.isVisible = true;
   return this.save();
 };
 
-const LessonReminder = mongoose.model("LessonReminder", lessonReminderSchema);
-module.exports = LessonReminder;
+const TestInfo = mongoose.model("TestInfo", testInfoSchema);
+
+module.exports = TestInfo;

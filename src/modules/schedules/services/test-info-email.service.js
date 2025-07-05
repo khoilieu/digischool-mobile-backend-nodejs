@@ -1,8 +1,8 @@
 const emailService = require("../../auth/services/email.service");
 
-class LessonReminderEmailService {
-  // Tạo template HTML cho email nhắc nhở kiểm tra
-  createReminderEmailTemplate(reminderData, studentName) {
+class TestInfoEmailService {
+  // Tạo template HTML cho email thông tin kiểm tra
+  createTestInfoEmailTemplate(testInfoData, studentName) {
     const {
       lesson,
       class: classInfo,
@@ -14,7 +14,7 @@ class LessonReminderEmailService {
       priority,
       chapters,
       references,
-    } = reminderData;
+    } = testInfoData;
 
     // Format ngày giờ tiết học
     const lessonDate = new Date(lesson.scheduledDate);
@@ -223,31 +223,27 @@ class LessonReminderEmailService {
     `;
   }
 
-  // Gửi email nhắc nhở cho tất cả học sinh trong lớp
-  async sendReminderToStudents(reminderData, students) {
+  // Gửi email thông tin kiểm tra cho tất cả học sinh trong lớp
+  async sendTestInfoToStudents(testInfoData, students) {
     try {
       console.log(
-        `📧 Sending reminder emails to ${students.length} students...`
+        `📧 Sending test info emails to ${students.length} students...`
       );
-
       const emailPromises = students.map(async (student) => {
         try {
-          const subject = `🔔 Thông báo kiểm tra: ${reminderData.subject.name} - Lớp ${reminderData.class.className}`;
-          const htmlContent = this.createReminderEmailTemplate(
-            reminderData,
+          const subject = `🔔 Thông báo kiểm tra: ${testInfoData.subject.name} - Lớp ${testInfoData.class.className}`;
+          const htmlContent = this.createTestInfoEmailTemplate(
+            testInfoData,
             student.name
           );
-
           const result = await emailService.sendEmail(
             student.email,
             subject,
             htmlContent
           );
-
           console.log(
             `✅ Email sent to ${student.name} (${student.email}): ${result.messageId}`
           );
-
           return {
             studentId: student._id,
             studentName: student.name,
@@ -261,7 +257,6 @@ class LessonReminderEmailService {
             `❌ Failed to send email to ${student.name} (${student.email}):`,
             error.message
           );
-
           return {
             studentId: student._id,
             studentName: student.name,
@@ -271,9 +266,7 @@ class LessonReminderEmailService {
           };
         }
       });
-
       const results = await Promise.allSettled(emailPromises);
-
       const emailResults = results.map((result) => {
         if (result.status === "fulfilled") {
           return result.value;
@@ -284,14 +277,11 @@ class LessonReminderEmailService {
           };
         }
       });
-
       const successCount = emailResults.filter((r) => r.success).length;
       const failCount = emailResults.filter((r) => !r.success).length;
-
       console.log(
         `📊 Email sending completed: ${successCount} success, ${failCount} failed`
       );
-
       return {
         totalStudents: students.length,
         successCount,
@@ -299,30 +289,27 @@ class LessonReminderEmailService {
         results: emailResults,
       };
     } catch (error) {
-      console.error("❌ Error in sendReminderToStudents:", error);
+      console.error("❌ Error in sendTestInfoToStudents:", error);
       throw error;
     }
   }
 
-  // Gửi email nhắc nhở cho một học sinh cụ thể
-  async sendReminderToStudent(reminderData, student) {
+  // Gửi email thông tin kiểm tra cho một học sinh cụ thể
+  async sendTestInfoToStudent(testInfoData, student) {
     try {
-      const subject = `🔔 Thông báo kiểm tra: ${reminderData.subject.name} - Lớp ${reminderData.class.className}`;
-      const htmlContent = this.createReminderEmailTemplate(
-        reminderData,
+      const subject = `🔔 Thông báo kiểm tra: ${testInfoData.subject.name} - Lớp ${testInfoData.class.className}`;
+      const htmlContent = this.createTestInfoEmailTemplate(
+        testInfoData,
         student.name
       );
-
       const result = await emailService.sendEmail(
         student.email,
         subject,
         htmlContent
       );
-
       console.log(
-        `✅ Reminder email sent to ${student.name} (${student.email}): ${result.messageId}`
+        `✅ Test info email sent to ${student.name} (${student.email}): ${result.messageId}`
       );
-
       return {
         studentId: student._id,
         studentName: student.name,
@@ -333,7 +320,7 @@ class LessonReminderEmailService {
       };
     } catch (error) {
       console.error(
-        `❌ Failed to send reminder email to ${student.name}:`,
+        `❌ Failed to send test info email to ${student.name}:`,
         error
       );
       throw error;
@@ -341,37 +328,34 @@ class LessonReminderEmailService {
   }
 
   // Test email template
-  async sendTestReminderEmail(testEmail, reminderData) {
+  async sendTestInfoTestEmail(testEmail, testInfoData) {
     try {
-      const subject = `🧪 [TEST] Thông báo kiểm tra: ${reminderData.subject.name} - Lớp ${reminderData.class.className}`;
-      const htmlContent = this.createReminderEmailTemplate(
-        reminderData,
+      const subject = `🧪 [TEST] Thông báo kiểm tra: ${testInfoData.subject.name} - Lớp ${testInfoData.class.className}`;
+      const htmlContent = this.createTestInfoEmailTemplate(
+        testInfoData,
         "Test Student"
       );
-
       const result = await emailService.sendEmail(
         testEmail,
         subject,
         htmlContent
       );
-
       console.log(
-        `✅ Test reminder email sent to ${testEmail}: ${result.messageId}`
+        `✅ Test info email sent to ${testEmail}: ${result.messageId}`
       );
-
       return {
         success: true,
         messageId: result.messageId,
         message: result.message || "Test email sent successfully",
       };
     } catch (error) {
-      console.error(`❌ Failed to send test reminder email:`, error);
+      console.error(`❌ Failed to send test info test email:`, error);
       throw error;
     }
   }
 
-  // Tạo template HTML cho email thông báo hủy nhắc nhở
-  createCancelReminderEmailTemplate(reminderData, studentName) {
+  // Tạo template HTML cho email thông báo hủy thông tin kiểm tra
+  createCancelTestInfoEmailTemplate(testInfoData, studentName) {
     const {
       lesson,
       class: classInfo,
@@ -380,7 +364,7 @@ class LessonReminderEmailService {
       title,
       content,
       expectedTestDate,
-    } = reminderData;
+    } = testInfoData;
 
     // Format ngày giờ tiết học
     const lessonDate = new Date(lesson.scheduledDate);
@@ -501,30 +485,26 @@ class LessonReminderEmailService {
   }
 
   // Gửi email thông báo hủy cho tất cả học sinh trong lớp
-  async sendCancelReminderToStudents(reminderData, students) {
+  async sendCancelTestInfoToStudents(testInfoData, students) {
     try {
       console.log(
         `📧 Sending cancellation emails to ${students.length} students...`
       );
-
       const emailPromises = students.map(async (student) => {
         try {
-          const subject = `❌ THÔNG BÁO HỦY: ${reminderData.subject.name} - Lớp ${reminderData.class.className}`;
-          const htmlContent = this.createCancelReminderEmailTemplate(
-            reminderData,
+          const subject = `❌ THÔNG BÁO HỦY: ${testInfoData.subject.name} - Lớp ${testInfoData.class.className}`;
+          const htmlContent = this.createCancelTestInfoEmailTemplate(
+            testInfoData,
             student.name
           );
-
           const result = await emailService.sendEmail(
             student.email,
             subject,
             htmlContent
           );
-
           console.log(
             `✅ Cancellation email sent to ${student.name} (${student.email}): ${result.messageId}`
           );
-
           return {
             studentId: student._id,
             studentName: student.name,
@@ -538,7 +518,6 @@ class LessonReminderEmailService {
             `❌ Failed to send cancellation email to ${student.name} (${student.email}):`,
             error.message
           );
-
           return {
             studentId: student._id,
             studentName: student.name,
@@ -548,23 +527,19 @@ class LessonReminderEmailService {
           };
         }
       });
-
       const results = await Promise.allSettled(emailPromises);
       const emailResults = results.map((result) =>
         result.status === "fulfilled" ? result.value : result.reason
       );
-
       const successCount = emailResults.filter(
         (result) => result.success
       ).length;
       const failureCount = emailResults.filter(
         (result) => !result.success
       ).length;
-
       console.log(
         `📊 Cancellation email summary: ${successCount} successful, ${failureCount} failed out of ${students.length} total`
       );
-
       return {
         totalStudents: students.length,
         successCount,
@@ -572,10 +547,10 @@ class LessonReminderEmailService {
         results: emailResults,
       };
     } catch (error) {
-      console.error("❌ Error in sendCancelReminderToStudents:", error.message);
+      console.error("❌ Error in sendCancelTestInfoToStudents:", error.message);
       throw error;
     }
   }
 }
 
-module.exports = new LessonReminderEmailService();
+module.exports = new TestInfoEmailService();
