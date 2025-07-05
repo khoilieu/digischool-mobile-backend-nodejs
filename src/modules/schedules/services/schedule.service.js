@@ -1332,6 +1332,7 @@ class ScheduleService {
       })
         .populate("subject", "subjectName subjectCode")
         .populate("teacher", "name email")
+        .populate("substituteTeacher", "name email")
         .lean();
 
       // Create period lookup map
@@ -2679,6 +2680,7 @@ class ScheduleService {
       })
         .populate("subject", "subjectName subjectCode department weeklyHours")
         .populate("teacher", "name email phoneNumber role")
+        .populate("substituteTeacher", "name email phoneNumber role")
         .populate("timeSlot", "period startTime endTime")
         .populate("academicYear", "name startDate endDate isActive")
         .sort({ scheduledDate: 1, "timeSlot.period": 1 })
@@ -2740,6 +2742,15 @@ class ScheduleService {
                 email: lesson.teacher.email,
                 phoneNumber: lesson.teacher.phoneNumber,
                 role: lesson.teacher.role,
+              }
+            : null,
+          substituteTeacher: lesson.substituteTeacher
+            ? {
+                _id: lesson.substituteTeacher._id,
+                name: lesson.substituteTeacher.name,
+                email: lesson.substituteTeacher.email,
+                phoneNumber: lesson.substituteTeacher.phoneNumber,
+                role: lesson.substituteTeacher.role,
               }
             : null,
           topic: lesson.topic || "",
@@ -2891,9 +2902,12 @@ class ScheduleService {
       const endDate = new Date(endOfWeek);
       endDate.setHours(23, 59, 59, 999); // End of day
 
-      // Find all lessons for this teacher in the date range
+      // Find all lessons for this teacher in the date range (both main and substitute)
       const lessons = await Lesson.find({
-        teacher: teacherId,
+        $or: [
+          { teacher: teacherId },
+          { substituteTeacher: teacherId }
+        ],
         scheduledDate: {
           $gte: startDate,
           $lte: endDate,
@@ -2901,6 +2915,8 @@ class ScheduleService {
       })
         .populate("class", "className gradeLevel")
         .populate("subject", "subjectName subjectCode department weeklyHours")
+        .populate("teacher", "name email phoneNumber role")
+        .populate("substituteTeacher", "name email phoneNumber role")
         .populate("timeSlot", "period startTime endTime")
         .populate("academicYear", "name startDate endDate isActive")
         .sort({ scheduledDate: 1, "timeSlot.period": 1 })
@@ -2963,6 +2979,10 @@ class ScheduleService {
 
           if (lesson) {
             // Has lesson - populate with lesson data
+            // Determine teacher role
+            const isMainTeacher = lesson.teacher && lesson.teacher._id.toString() === teacherId.toString();
+            const isSubstituteTeacher = lesson.substituteTeacher && lesson.substituteTeacher._id.toString() === teacherId.toString();
+            
             const lessonInfo = {
               period: period,
               hasLesson: true,
@@ -2991,6 +3011,25 @@ class ScheduleService {
                     weeklyHours: lesson.subject.weeklyHours,
                   }
                 : null,
+              teacher: lesson.teacher
+                ? {
+                    _id: lesson.teacher._id,
+                    name: lesson.teacher.name,
+                    email: lesson.teacher.email,
+                    phoneNumber: lesson.teacher.phoneNumber,
+                    role: lesson.teacher.role,
+                  }
+                : null,
+              substituteTeacher: lesson.substituteTeacher
+                ? {
+                    _id: lesson.substituteTeacher._id,
+                    name: lesson.substituteTeacher.name,
+                    email: lesson.substituteTeacher.email,
+                    phoneNumber: lesson.substituteTeacher.phoneNumber,
+                    role: lesson.substituteTeacher.role,
+                  }
+                : null,
+              teacherRole: isMainTeacher ? 'main_teacher' : (isSubstituteTeacher ? 'substitute_teacher' : 'unknown'),
               topic: lesson.topic || "",
               notes: lesson.notes || "",
               actualDate: lesson.actualDate,
@@ -3195,6 +3234,7 @@ class ScheduleService {
           "subjectName subjectCode department weeklyHours description"
         )
         .populate("teacher", "name email phoneNumber role department")
+        .populate("substituteTeacher", "name email phoneNumber role department")
         .populate("timeSlot", "period startTime endTime type")
         .populate("academicYear", "name startDate endDate isActive")
         .populate("createdBy", "name email role")
@@ -3265,6 +3305,18 @@ class ScheduleService {
               phoneNumber: lesson.teacher.phoneNumber, // Số điện thoại giáo viên, để liên lạc
               role: lesson.teacher.role, // Vai trò của giáo viên, để xác định trách nhiệm
               department: lesson.teacher.department, // Khoa của giáo viên, để phân loại
+            }
+          : null,
+
+        // Thông tin giáo viên dạy bù
+        substituteTeacher: lesson.substituteTeacher
+          ? {
+              _id: lesson.substituteTeacher._id, // ID của giáo viên dạy bù, để liên kết với tiết học
+              name: lesson.substituteTeacher.name, // Tên giáo viên dạy bù, để nhận diện
+              email: lesson.substituteTeacher.email, // Email giáo viên dạy bù, để liên lạc
+              phoneNumber: lesson.substituteTeacher.phoneNumber, // Số điện thoại giáo viên dạy bù, để liên lạc
+              role: lesson.substituteTeacher.role, // Vai trò của giáo viên dạy bù, để xác định trách nhiệm
+              department: lesson.substituteTeacher.department, // Khoa của giáo viên dạy bù, để phân loại
             }
           : null,
 
@@ -3344,6 +3396,14 @@ class ScheduleService {
         lesson.teacher._id.toString() === currentUser._id.toString()
       ) {
         return { allowed: true, reason: "Teacher owns this lesson" };
+      }
+
+      // Substitute teacher can access lessons they substitute
+      if (
+        lesson.substituteTeacher &&
+        lesson.substituteTeacher._id.toString() === currentUser._id.toString()
+      ) {
+        return { allowed: true, reason: "Substitute teacher for this lesson" };
       }
 
       // Homeroom teacher can access lessons of their class

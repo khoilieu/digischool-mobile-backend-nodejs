@@ -6,11 +6,15 @@ const scheduleValidation = require("../middleware/schedule.validation");
 
 // Import lesson request routes
 const lessonRequestRoutes = require('./lesson-request.routes');
+const substituteRequestRoutes = require('./substitute-request.routes');
 
 // Routes cho quản lý thời khóa biểu
 
 // Mount lesson request routes
 router.use('/lesson-request', lessonRequestRoutes);
+
+// Mount substitute request routes
+router.use('/substitute-request', substituteRequestRoutes);
 
 // POST /api/schedules/initialize - Khởi tạo thời khóa biểu cho tất cả lớp trong năm học
 router.post(
@@ -191,6 +195,16 @@ router.post(
   authMiddleware.protect,
   authMiddleware.authorize("admin", "manager"),
   scheduleController.createScheduleForGrade
+);
+
+// PATCH /api/schedules/lesson/:lessonId/complete - Complete lesson
+// Params: lessonId
+// Chỉ giáo viên đảm nhiệm hoặc giáo viên dạy thay mới có thể complete
+router.patch(
+  "/lesson/:lessonId/complete",
+  authMiddleware.protect,
+  authMiddleware.authorize("teacher"),
+  scheduleController.completeLessonById
 );
 
 // Routes cho quản lý trạng thái tiết học

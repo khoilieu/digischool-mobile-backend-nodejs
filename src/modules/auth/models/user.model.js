@@ -48,6 +48,10 @@ const userSchema = new mongoose.Schema({
       return this.role.includes('teacher') && !this.isNewUser;
     }
   },
+  subjects: [{ 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Subject'
+  }],
   isNewUser: {
     type: Boolean,
     default: true

@@ -51,18 +51,22 @@ class TeacherEvaluationController {
       }
       
       // Kiểm tra giáo viên có quyền đánh giá lesson này không
-      if (lesson.teacher.toString() !== teacherId.toString()) {
+      // Cho phép cả giáo viên đảm nhiệm và giáo viên dạy thay đánh giá
+      const isMainTeacher = lesson.teacher && lesson.teacher._id.toString() === teacherId.toString();
+      const isSubstituteTeacher = lesson.substituteTeacher && lesson.substituteTeacher._id.toString() === teacherId.toString();
+      
+      if (!isMainTeacher && !isSubstituteTeacher) {
         return res.status(403).json({
           success: false,
-          message: 'You can only evaluate your own lessons'
+          message: 'Only the assigned teacher or substitute teacher can evaluate this lesson'
         });
       }
       
-      // Kiểm tra lesson có thể đánh giá không (chỉ đánh giá lesson scheduled)
-      if (lesson.status !== 'scheduled') {
+      // Kiểm tra lesson có thể đánh giá không (chỉ đánh giá lesson completed)
+      if (lesson.status !== 'completed') {
         return res.status(400).json({
           success: false,
-          message: 'Can only evaluate scheduled lessons'
+          message: 'Can only evaluate completed lessons'
         });
       }
       
@@ -108,16 +112,15 @@ class TeacherEvaluationController {
       
       await evaluation.save();
       
-      // Chuyển lesson sang completed sau khi đánh giá thành công
-      lesson.status = 'completed';
-      await lesson.save();
+      // Xóa bỏ phần tự động chuyển lesson sang completed
+      // Lesson phải được complete trước khi đánh giá
       
-      // Xử lý đặc biệt cho makeup lesson
-      if (lesson.type === 'makeup') {
-        const LessonRequestService = require('../services/lesson-request.service');
-        const lessonRequestService = new LessonRequestService();
-        await lessonRequestService.handleMakeupLessonCompleted(lesson._id);
-      }
+      // Xử lý đặc biệt cho makeup lesson - không cần thiết nữa vì lesson đã completed
+      // if (lesson.type === 'makeup') {
+      //   const LessonRequestService = require('../services/lesson-request.service');
+      //   const lessonRequestService = new LessonRequestService();
+      //   await lessonRequestService.handleMakeupLessonCompleted(lesson._id);
+      // }
       
       // Populate để trả về
       await evaluation.populate([
