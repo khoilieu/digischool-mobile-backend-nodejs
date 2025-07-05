@@ -24,8 +24,8 @@ const createTestInfoValidation = [
 
   body("content")
     .notEmpty()
-    .isLength({ min: 10, max: 1000 })
-    .withMessage("Content must be between 10 and 1000 characters")
+    .isLength({ min: 1, max: 200 })
+    .withMessage("Content must be between 1 and 200 characters")
     .trim(),
 
   body("expectedTestDate")
@@ -136,8 +136,8 @@ const updateTestInfoValidation = [
 
   body("content")
     .optional()
-    .isLength({ min: 10, max: 1000 })
-    .withMessage("Content must be between 10 and 1000 characters")
+    .isLength({ min: 1, max: 200 })
+    .withMessage("Content must be between 1 and 200 characters")
     .trim(),
 
   body("chapters")

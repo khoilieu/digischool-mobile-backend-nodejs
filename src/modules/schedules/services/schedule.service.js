@@ -7,6 +7,7 @@ const TimeSlot = require("../models/time-slot.model");
 const Lesson = require("../models/lesson.model");
 const WeeklySchedule = require("../models/weekly-schedule.model");
 const LessonTemplate = require("../models/lesson-template.model");
+const TestInfo = require("../models/test-info.model");
 const Class = require("../../classes/models/class.model");
 const Subject = require("../../subjects/models/subject.model");
 const User = require("../../auth/models/user.model");
@@ -3214,6 +3215,11 @@ class ScheduleService {
       // Get additional context information
       const additionalInfo = await this.getLessonAdditionalInfo(lesson);
 
+      // Get test info for this lesson
+      const testInfo = await TestInfo.findOne({ lesson: lessonId })
+        .populate("teacher", "name email")
+        .lean();
+
       // Format response with comprehensive information
       const lessonDetail = {
         // Basic lesson information
@@ -3288,9 +3294,36 @@ class ScheduleService {
         attendance: lesson.attendance || null, // Điểm danh học sinh, để theo dõi sự tham gia
 
         // Các loại tiết học đặc biệt
-        makeupInfo: lesson.makeupInfo || null, // Thông tin về tiết học bù, để quản lý lịch học
+        makeupInfo: lesson.makeupInfo || null, // Thông tin về tiết học bù, để quản lý lịch trình
         extracurricularInfo: lesson.extracurricularInfo || null, // Thông tin về hoạt động ngoại khóa, để quản lý
         fixedInfo: lesson.fixedInfo || null, // Thông tin về tiết học cố định, để quản lý lịch trình
+
+        // Thông tin kiểm tra (test info)
+        testInfo: testInfo
+          ? {
+              _id: testInfo._id, // ID của thông tin kiểm tra
+              testType: testInfo.testType, // Loại kiểm tra (kiemtra15, kiemtra1tiet, etc.)
+              title: testInfo.title, // Tiêu đề kiểm tra
+              content: testInfo.content, // Nội dung chi tiết kiểm tra
+              chapters: testInfo.chapters || [], // Chương/bài cần ôn tập
+              references: testInfo.references || [], // Tài liệu tham khảo
+              expectedTestDate: testInfo.expectedTestDate, // Ngày kiểm tra dự kiến
+              testInfoDate: testInfo.testInfoDate, // Ngày tạo thông tin kiểm tra
+              priority: testInfo.priority, // Độ ưu tiên (low, medium, high, urgent)
+              status: testInfo.status, // Trạng thái (active, completed, cancelled)
+              reminder: testInfo.reminder, // Ghi chú thêm
+              isVisible: testInfo.isVisible, // Trạng thái hiển thị
+              createdAt: testInfo.createdAt, // Ngày tạo
+              updatedAt: testInfo.updatedAt, // Ngày cập nhật cuối
+              teacher: testInfo.teacher
+                ? {
+                    _id: testInfo.teacher._id,
+                    name: testInfo.teacher.name,
+                    email: testInfo.teacher.email,
+                  }
+                : null,
+            }
+          : null,
 
         // Thông tin kiểm toán
         createdBy: lesson.createdBy
@@ -3316,7 +3349,7 @@ class ScheduleService {
         context: additionalInfo, // Thông tin ngữ cảnh bổ sung, để cung cấp cái nhìn toàn diện
 
         // Quyền của người dùng đối với tiết học này
-        permissions: this.getLessonPermissions(lesson, currentUser) // Quyền truy cập của người dùng, để bảo mật
+        permissions: this.getLessonPermissions(lesson, currentUser), // Quyền truy cập của người dùng, để bảo mật
       };
 
       console.log(`✅ Successfully retrieved lesson detail for ${lessonId}`);
