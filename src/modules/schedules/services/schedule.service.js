@@ -3195,7 +3195,7 @@ class ScheduleService {
           "subject",
           "subjectName subjectCode department weeklyHours description"
         )
-        .populate("teacher", "name email phoneNumber role department")
+        .populate("teacher", "name email phoneNumber role department gender")
         .populate("timeSlot", "period startTime endTime type")
         .populate("academicYear", "name startDate endDate isActive")
         .populate("createdBy", "name email role")
@@ -3270,6 +3270,7 @@ class ScheduleService {
               email: lesson.teacher.email, // Email giáo viên, để liên lạc
               phoneNumber: lesson.teacher.phoneNumber, // Số điện thoại giáo viên, để liên lạc
               role: lesson.teacher.role, // Vai trò của giáo viên, để xác định trách nhiệm
+              gender: lesson.teacher.gender, // Giới tính của giáo viên, để phân loại
               department: lesson.teacher.department, // Khoa của giáo viên, để phân loại
             }
           : null,

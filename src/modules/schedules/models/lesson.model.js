@@ -75,6 +75,12 @@ const lessonSchema = new mongoose.Schema(
       maxlength: 200,
     },
 
+    description: {
+      type: String,
+      maxlength: 1000,
+      trim: true,
+    },
+
     notes: {
       type: String,
       maxlength: 500,
@@ -210,6 +216,7 @@ lessonSchema.virtual("fullInfo").get(function () {
     scheduledDate: this.scheduledDate,
     actualDate: this.actualDate,
     topic: this.topic,
+    description: this.description,
     notes: this.notes,
   };
 });

@@ -403,7 +403,17 @@ router.put(
 // Cập nhật mô tả thêm cho lesson
 router.patch(
   "/lessons/:lessonId/description",
+  authMiddleware.protect,
+  authMiddleware.authorize("teacher", "manager", "admin"),
   scheduleController.updateLessonDescription
+);
+
+// Xóa mô tả thêm cho lesson
+router.delete(
+  "/lessons/:lessonId/description",
+  authMiddleware.protect,
+  authMiddleware.authorize("teacher", "manager", "admin"),
+  scheduleController.deleteLessonDescription
 );
 
 module.exports = router;

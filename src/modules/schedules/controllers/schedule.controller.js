@@ -1780,28 +1780,182 @@ class ScheduleController {
     }
   }
 
-  // API: Cập nhật mô tả thêm cho lesson
+  // API: Cập nhật mô tả thêm cho lesson (thêm hoặc update)
   async updateLessonDescription(req, res, next) {
     try {
       const { lessonId } = req.params;
       const { description } = req.body;
-      if (!description) {
-        return res
-          .status(400)
-          .json({ success: false, message: "Description is required" });
+      const currentUser = req.user;
+
+      if (!description || description.trim() === "") {
+        return res.status(400).json({
+          success: false,
+          message: "Description is required and cannot be empty",
+        });
       }
-      const lesson = await Lesson.findById(lessonId);
+
+      // Tìm lesson và populate thông tin cần thiết
+      const lesson = await Lesson.findById(lessonId)
+        .populate("teacher", "name email")
+        .populate("class", "className")
+        .populate("subject", "subjectName subjectCode");
+
       if (!lesson) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Lesson not found" });
+        return res.status(404).json({
+          success: false,
+          message: "Lesson not found",
+        });
       }
-      // Kiểm tra và cập nhật hoặc tạo trường description
-      lesson.description = description;
-      lesson.lastModifiedBy = req.user?._id;
+
+      // Kiểm tra quyền: chỉ giáo viên dạy tiết này hoặc admin/manager mới được cập nhật
+      const isTeacherOfLesson =
+        lesson.teacher &&
+        lesson.teacher._id.toString() === currentUser._id.toString();
+      const isAdminOrManager =
+        currentUser.role.includes("admin") ||
+        currentUser.role.includes("manager");
+
+      if (!isTeacherOfLesson && !isAdminOrManager) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only update description for your own lessons",
+        });
+      }
+
+      // Cập nhật description
+      const oldDescription = lesson.description;
+      lesson.description = description.trim();
+      lesson.lastModifiedBy = currentUser._id;
+      lesson.updatedAt = new Date();
+
       await lesson.save();
-      res.json({ success: true, data: lesson });
+
+      console.log(
+        `✅ Description ${
+          oldDescription ? "updated" : "added"
+        } for lesson ${lessonId} by user ${currentUser._id}`
+      );
+
+      res.status(200).json({
+        success: true,
+        message: oldDescription
+          ? "Mô tả đã được cập nhật thành công"
+          : "Mô tả đã được thêm thành công",
+        data: {
+          lessonId: lesson.lessonId,
+          description: lesson.description,
+          updatedAt: lesson.updatedAt,
+          lastModifiedBy: {
+            id: currentUser._id,
+            name: currentUser.name,
+            email: currentUser.email,
+          },
+          lesson: {
+            lessonId: lesson.lessonId,
+            topic: lesson.topic,
+            scheduledDate: lesson.scheduledDate,
+            status: lesson.status,
+          },
+          class: {
+            className: lesson.class?.className,
+          },
+          subject: {
+            subjectName: lesson.subject?.subjectName,
+            subjectCode: lesson.subject?.subjectCode,
+          },
+        },
+      });
     } catch (error) {
+      console.error("❌ Error in updateLessonDescription:", error.message);
+      next(error);
+    }
+  }
+
+  // API: Xóa mô tả thêm cho lesson
+  async deleteLessonDescription(req, res, next) {
+    try {
+      const { lessonId } = req.params;
+      const currentUser = req.user;
+
+      // Tìm lesson và populate thông tin cần thiết
+      const lesson = await Lesson.findById(lessonId)
+        .populate("teacher", "name email")
+        .populate("class", "className")
+        .populate("subject", "subjectName subjectCode");
+
+      if (!lesson) {
+        return res.status(404).json({
+          success: false,
+          message: "Lesson not found",
+        });
+      }
+
+      // Kiểm tra quyền: chỉ giáo viên dạy tiết này hoặc admin/manager mới được xóa
+      const isTeacherOfLesson =
+        lesson.teacher &&
+        lesson.teacher._id.toString() === currentUser._id.toString();
+      const isAdminOrManager =
+        currentUser.role.includes("admin") ||
+        currentUser.role.includes("manager");
+
+      if (!isTeacherOfLesson && !isAdminOrManager) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete description for your own lessons",
+        });
+      }
+
+      // Kiểm tra xem lesson có description không
+      if (!lesson.description || lesson.description.trim() === "") {
+        return res.status(400).json({
+          success: false,
+          message: "Lesson does not have a description to delete",
+        });
+      }
+
+      // Lưu description cũ để trả về
+      const deletedDescription = lesson.description;
+
+      // Xóa description
+      lesson.description = undefined; // hoặc null
+      lesson.lastModifiedBy = currentUser._id;
+      lesson.updatedAt = new Date();
+
+      await lesson.save();
+
+      console.log(
+        `🗑️ Description deleted for lesson ${lessonId} by user ${currentUser._id}`
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Mô tả đã được xóa thành công",
+        data: {
+          lessonId: lesson.lessonId,
+          deletedDescription: deletedDescription,
+          updatedAt: lesson.updatedAt,
+          lastModifiedBy: {
+            id: currentUser._id,
+            name: currentUser.name,
+            email: currentUser.email,
+          },
+          lesson: {
+            lessonId: lesson.lessonId,
+            topic: lesson.topic,
+            scheduledDate: lesson.scheduledDate,
+            status: lesson.status,
+          },
+          class: {
+            className: lesson.class?.className,
+          },
+          subject: {
+            subjectName: lesson.subject?.subjectName,
+            subjectCode: lesson.subject?.subjectCode,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("❌ Error in deleteLessonDescription:", error.message);
       next(error);
     }
   }
