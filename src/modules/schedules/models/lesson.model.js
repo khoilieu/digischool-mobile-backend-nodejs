@@ -32,6 +32,13 @@ const lessonSchema = new mongoose.Schema(
       },
     },
 
+    // Giáo viên dạy bù (không thay thế giáo viên gốc)
+    substituteTeacher: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
     academicYear: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "AcademicYear",
@@ -285,12 +292,17 @@ lessonSchema.statics.getTeacherLessons = function (
   endDate
 ) {
   return this.find({
-    teacher: teacherId,
+    $or: [
+      { teacher: teacherId },
+      { substituteTeacher: teacherId }
+    ],
     scheduledDate: { $gte: startDate, $lte: endDate },
     status: { $ne: "cancelled" },
   })
     .populate("class", "className")
     .populate("subject", "subjectName subjectCode")
+    .populate("teacher", "name email")
+    .populate("substituteTeacher", "name email")
     .populate("timeSlot", "period startTime endTime type")
     .sort({ scheduledDate: 1, "timeSlot.period": 1 });
 };
@@ -303,6 +315,7 @@ lessonSchema.statics.getClassLessons = function (classId, startDate, endDate) {
   })
     .populate("subject", "subjectName subjectCode")
     .populate("teacher", "name email")
+    .populate("substituteTeacher", "name email")
     .populate("timeSlot", "period startTime endTime type")
     .sort({ scheduledDate: 1, "timeSlot.period": 1 });
 };

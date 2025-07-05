@@ -40,7 +40,8 @@ class TeacherLeaveRequestService {
           const lesson = await Lesson.findById(lessonId)
             .populate('class', 'className')
             .populate('subject', 'subjectName subjectCode')
-            .populate('teacher', 'name email');
+            .populate('teacher', 'name email')
+            .populate('timeSlot', 'period startTime endTime');
           
           if (!lesson) {
             errors.push(`Lesson ${lessonId} not found`);
@@ -81,8 +82,8 @@ class TeacherLeaveRequestService {
             continue;
           }
           
-          // Get period from timeSlot
-          const period = lesson.timeSlot?.period || 1;
+          // Get period from timeSlot (populated) or lesson directly
+          const period = lesson.timeSlot?.period || lesson.period || 1;
           
           // Count students in the class
           const studentsCount = await User.countDocuments({

@@ -4,7 +4,17 @@ const scheduleController = require("../controllers/schedule.controller");
 const authMiddleware = require("../../auth/middleware/auth.middleware");
 const scheduleValidation = require("../middleware/schedule.validation");
 
+// Import lesson request routes
+const lessonRequestRoutes = require('./lesson-request.routes');
+const substituteRequestRoutes = require('./substitute-request.routes');
+
 // Routes cho quản lý thời khóa biểu
+
+// Mount lesson request routes
+router.use('/lesson-request', lessonRequestRoutes);
+
+// Mount substitute request routes
+router.use('/substitute-request', substituteRequestRoutes);
 
 // POST /api/schedules/initialize - Khởi tạo thời khóa biểu cho tất cả lớp trong năm học
 router.post(
@@ -19,31 +29,7 @@ router.post(
   scheduleController.initializeSchedulesForAcademicYear
 );
 
-// POST /api/schedules/initialize-class - Khởi tạo thời khóa biểu cho một lớp cụ thể
-router.post(
-  "/initialize-class",
-  authMiddleware.protect,
-  (req, res, next) => {
-    console.log("🔍 Initialize class route - User:", req.user.role);
-    next();
-  },
-  authMiddleware.authorize("admin", "manager"),
-  scheduleValidation.validateInitializeClassSchedule,
-  scheduleController.initializeScheduleForClass
-);
 
-// POST /api/schedules/initialize-optimized - Khởi tạo thời khóa biểu tối ưu với thuật toán Heuristic/Greedy
-router.post(
-  "/initialize-optimized",
-  authMiddleware.protect,
-  (req, res, next) => {
-    console.log("🚀 Initialize optimized route - User:", req.user.role);
-    next();
-  },
-  authMiddleware.authorize("admin", "manager"),
-  scheduleValidation.validateInitializeSchedule,
-  scheduleController.initializeOptimizedSchedules
-);
 
 // Test route để kiểm tra auth
 router.get("/test-auth", authMiddleware.protect, (req, res) => {
@@ -209,6 +195,16 @@ router.post(
   authMiddleware.protect,
   authMiddleware.authorize("admin", "manager"),
   scheduleController.createScheduleForGrade
+);
+
+// PATCH /api/schedules/lesson/:lessonId/complete - Complete lesson
+// Params: lessonId
+// Chỉ giáo viên đảm nhiệm hoặc giáo viên dạy thay mới có thể complete
+router.patch(
+  "/lesson/:lessonId/complete",
+  authMiddleware.protect,
+  authMiddleware.authorize("teacher"),
+  scheduleController.completeLessonById
 );
 
 // Routes cho quản lý trạng thái tiết học
@@ -415,5 +411,6 @@ router.delete(
   authMiddleware.authorize("teacher", "manager", "admin"),
   scheduleController.deleteLessonDescription
 );
+
 
 module.exports = router;

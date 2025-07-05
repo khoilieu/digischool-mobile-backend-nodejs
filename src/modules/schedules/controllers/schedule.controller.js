@@ -1959,6 +1959,141 @@ class ScheduleController {
       next(error);
     }
   }
+
+  // API mới: Complete lesson
+  async completeLessonById(req, res, next) {
+    try {
+      const { lessonId } = req.params;
+      const teacherId = req.user._id;
+
+      // Tìm lesson
+      const lesson = await Lesson.findById(lessonId)
+        .populate('class', 'className')
+        .populate('subject', 'subjectName subjectCode')
+        .populate('teacher', 'name email')
+        .populate('substituteTeacher', 'name email');
+
+      if (!lesson) {
+        return res.status(404).json({
+          success: false,
+          message: 'Lesson not found'
+        });
+      }
+
+      // Kiểm tra quyền: chỉ giáo viên đảm nhiệm hoặc giáo viên dạy thay mới được complete
+      const isMainTeacher = lesson.teacher && lesson.teacher._id.toString() === teacherId.toString();
+      const isSubstituteTeacher = lesson.substituteTeacher && lesson.substituteTeacher._id.toString() === teacherId.toString();
+
+      if (!isMainTeacher && !isSubstituteTeacher) {
+        return res.status(403).json({
+          success: false,
+          message: 'Only the assigned teacher or substitute teacher can complete this lesson'
+        });
+      }
+
+      // Kiểm tra trạng thái lesson
+      if (lesson.status !== 'scheduled') {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot complete lesson with status: ${lesson.status}. Only scheduled lessons can be completed.`
+        });
+      }
+
+      // Complete lesson
+      lesson.status = 'completed';
+      lesson.actualDate = new Date();
+      lesson.lastModifiedBy = teacherId;
+
+      await lesson.save();
+
+      // Xử lý đặc biệt cho makeup lesson
+      let originalLessonUpdated = false;
+      let originalLessonInfo = null;
+      
+      if (lesson.type === 'makeup' && lesson.makeupInfo && lesson.makeupInfo.originalLesson) {
+        try {
+          console.log(`🔄 Processing makeup lesson completion for lesson: ${lesson.lessonId}`);
+          console.log(`📝 Original lesson ID: ${lesson.makeupInfo.originalLesson}`);
+          
+          const originalLesson = await Lesson.findById(lesson.makeupInfo.originalLesson);
+          
+          if (!originalLesson) {
+            console.log(`❌ Original lesson not found: ${lesson.makeupInfo.originalLesson}`);
+          } else {
+            console.log(`📋 Original lesson found - Status: ${originalLesson.status}, Type: ${originalLesson.type}`);
+            
+            originalLessonInfo = {
+              id: originalLesson._id,
+              lessonId: originalLesson.lessonId,
+              previousStatus: originalLesson.status,
+              currentStatus: originalLesson.status
+            };
+            
+            // Chuyển original lesson sang completed nếu đang cancelled, postponed, hoặc absent
+            if (originalLesson.status === 'cancelled' || originalLesson.status === 'postponed' || originalLesson.status === 'absent') {
+              console.log(`✅ Updating original lesson status from ${originalLesson.status} to completed`);
+              
+              originalLesson.status = 'completed';
+              originalLesson.actualDate = lesson.actualDate;
+              originalLesson.notes = `Completed through makeup lesson: ${lesson.lessonId}`;
+              originalLesson.lastModifiedBy = teacherId;
+              
+              await originalLesson.save();
+              console.log(`✅ Original lesson updated successfully`);
+              
+              originalLessonUpdated = true;
+              originalLessonInfo.currentStatus = 'completed';
+            } else {
+              console.log(`⚠️ Original lesson status is ${originalLesson.status}, not updating`);
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error updating original lesson status:', error);
+          // Không throw error để không ảnh hưởng đến việc complete makeup lesson
+        }
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Lesson completed successfully',
+        data: {
+          lessonId: lesson._id,
+          lessonCode: lesson.lessonId,
+          type: lesson.type,
+          status: lesson.status,
+          scheduledDate: lesson.scheduledDate,
+          actualDate: lesson.actualDate,
+          class: lesson.class ? lesson.class.className : null,
+          subject: lesson.subject ? {
+            name: lesson.subject.subjectName,
+            code: lesson.subject.subjectCode
+          } : null,
+          teacher: lesson.teacher ? {
+            name: lesson.teacher.name,
+            email: lesson.teacher.email
+          } : null,
+          substituteTeacher: lesson.substituteTeacher ? {
+            name: lesson.substituteTeacher.name,
+            email: lesson.substituteTeacher.email
+          } : null,
+          notes: lesson.notes,
+          completedBy: isMainTeacher ? 'main_teacher' : 'substitute_teacher',
+          makeupInfo: lesson.makeupInfo,
+          originalLessonUpdate: originalLessonUpdated ? {
+            updated: true,
+            originalLesson: originalLessonInfo
+          } : {
+            updated: false,
+            reason: originalLessonInfo ? `Original lesson status was ${originalLessonInfo.previousStatus}` : 'No original lesson found'
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Error in completeLessonById:', error.message);
+      next(error);
+    }
+  }
 }
 
 module.exports = new ScheduleController();
