@@ -183,6 +183,12 @@ const lessonSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+
+    // Trạng thái đánh giá giáo viên
+    isEvaluatedByTeacher: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -292,10 +298,7 @@ lessonSchema.statics.getTeacherLessons = function (
   endDate
 ) {
   return this.find({
-    $or: [
-      { teacher: teacherId },
-      { substituteTeacher: teacherId }
-    ],
+    $or: [{ teacher: teacherId }, { substituteTeacher: teacherId }],
     scheduledDate: { $gte: startDate, $lte: endDate },
     status: { $ne: "cancelled" },
   })

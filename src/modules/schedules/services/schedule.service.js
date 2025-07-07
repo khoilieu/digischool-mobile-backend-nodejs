@@ -3235,7 +3235,7 @@ class ScheduleService {
           "subjectName subjectCode department weeklyHours description"
         )
 
-        .populate("teacher", "name email phoneNumber role gender   department")
+        .populate("teacher", "name email phoneNumber role gender department")
         .populate("substituteTeacher", "name email phoneNumber role department")
 
         .populate("timeSlot", "period startTime endTime type")
@@ -3347,6 +3347,7 @@ class ScheduleService {
         // Đánh giá và điểm danh
         evaluation: lesson.evaluation || null, // Đánh giá tiết học, để theo dõi chất lượng giảng dạy
         attendance: lesson.attendance || null, // Điểm danh học sinh, để theo dõi sự tham gia
+        isEvaluatedByTeacher: lesson.isEvaluatedByTeacher || false, // Trạng thái đánh giá giáo viên, để theo dõi việc đánh giá
 
         // Các loại tiết học đặc biệt
         makeupInfo: lesson.makeupInfo || null, // Thông tin về tiết học bù, để quản lý lịch trình

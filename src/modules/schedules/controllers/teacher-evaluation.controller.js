@@ -111,6 +111,9 @@ class TeacherEvaluationController {
       }
       
       await evaluation.save();
+
+      lesson.isEvaluatedByTeacher = true;
+      await lesson.save();
       
       // Xóa bỏ phần tự động chuyển lesson sang completed
       // Lesson phải được complete trước khi đánh giá
