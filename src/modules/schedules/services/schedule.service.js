@@ -12,6 +12,7 @@ const Class = require("../../classes/models/class.model");
 const Subject = require("../../subjects/models/subject.model");
 const User = require("../../auth/models/user.model");
 const AdvancedSchedulerService = require("./advanced-scheduler.service");
+const TeacherLessonEvaluation = require("../models/teacher-lesson-evaluation.model");
 const mongoose = require("mongoose");
 
 class ScheduleService {
@@ -2905,10 +2906,7 @@ class ScheduleService {
 
       // Find all lessons for this teacher in the date range (both main and substitute)
       const lessons = await Lesson.find({
-        $or: [
-          { teacher: teacherId },
-          { substituteTeacher: teacherId }
-        ],
+        $or: [{ teacher: teacherId }, { substituteTeacher: teacherId }],
         scheduledDate: {
           $gte: startDate,
           $lte: endDate,
@@ -2981,9 +2979,13 @@ class ScheduleService {
           if (lesson) {
             // Has lesson - populate with lesson data
             // Determine teacher role
-            const isMainTeacher = lesson.teacher && lesson.teacher._id.toString() === teacherId.toString();
-            const isSubstituteTeacher = lesson.substituteTeacher && lesson.substituteTeacher._id.toString() === teacherId.toString();
-            
+            const isMainTeacher =
+              lesson.teacher &&
+              lesson.teacher._id.toString() === teacherId.toString();
+            const isSubstituteTeacher =
+              lesson.substituteTeacher &&
+              lesson.substituteTeacher._id.toString() === teacherId.toString();
+
             const lessonInfo = {
               period: period,
               hasLesson: true,
@@ -3030,7 +3032,11 @@ class ScheduleService {
                     role: lesson.substituteTeacher.role,
                   }
                 : null,
-              teacherRole: isMainTeacher ? 'main_teacher' : (isSubstituteTeacher ? 'substitute_teacher' : 'unknown'),
+              teacherRole: isMainTeacher
+                ? "main_teacher"
+                : isSubstituteTeacher
+                ? "substitute_teacher"
+                : "unknown",
               topic: lesson.topic || "",
               notes: lesson.notes || "",
               actualDate: lesson.actualDate,
@@ -3234,10 +3240,8 @@ class ScheduleService {
           "subject",
           "subjectName subjectCode department weeklyHours description"
         )
-
         .populate("teacher", "name email phoneNumber role gender department")
         .populate("substituteTeacher", "name email phoneNumber role department")
-
         .populate("timeSlot", "period startTime endTime type")
         .populate("academicYear", "name startDate endDate isActive")
         .populate("createdBy", "name email role")
@@ -3262,115 +3266,187 @@ class ScheduleService {
         .populate("teacher", "name email")
         .lean();
 
+      // Get teacher evaluation for this lesson
+      const teacherEvaluation = await TeacherLessonEvaluation.findOne({
+        lesson: lessonId,
+      })
+        .populate("teacher", "name email")
+        .populate("absentStudents.student", "name studentId email")
+        .populate("oralTests.student", "name studentId email")
+        .populate("violations.student", "name studentId email")
+        .lean();
+
       // Format response with comprehensive information
       const lessonDetail = {
         // Basic lesson information
-        // Thông tin cơ bản của tiết học
-        lessonId: lesson.lessonId, // ID duy nhất của tiết học, cần thiết để xác định tiết học cụ thể
-        _id: lesson._id, // ID của đối tượng lesson trong cơ sở dữ liệu, dùng để truy xuất và thao tác
-        type: lesson.type, // Loại tiết học, ví dụ: lý thuyết, thực hành, cần thiết để phân loại tiết học
-        status: lesson.status, // Trạng thái của tiết học, ví dụ: đã hoàn thành, đang diễn ra, để theo dõi tiến độ
+        lessonId: lesson.lessonId,
+        _id: lesson._id,
+        type: lesson.type,
+        status: lesson.status,
 
         // Thông tin thời gian và lịch trình
-        scheduledDate: lesson.scheduledDate, // Ngày dự kiến diễn ra tiết học, quan trọng để lập kế hoạch
-        actualDate: lesson.actualDate, // Ngày thực tế diễn ra tiết học, dùng để so sánh với ngày dự kiến
+        scheduledDate: lesson.scheduledDate,
+        actualDate: lesson.actualDate,
         timeSlot: {
-          period: lesson.timeSlot?.period || 0, // Số tiết trong ngày, cần thiết để xác định thời gian cụ thể
-          startTime: lesson.timeSlot?.startTime || "", // Giờ bắt đầu của tiết học, để biết thời gian chính xác
-          endTime: lesson.timeSlot?.endTime || "", // Giờ kết thúc của tiết học, để biết thời gian chính xác
-          session: lesson.timeSlot?.type || "", // Buổi học (sáng/chiều), để sắp xếp lịch trình
+          period: lesson.timeSlot?.period || 0,
+          startTime: lesson.timeSlot?.startTime || "",
+          endTime: lesson.timeSlot?.endTime || "",
+          session: lesson.timeSlot?.type || "",
         },
 
         // Thông tin lớp học
         class: lesson.class
           ? {
-              _id: lesson.class._id, // ID của lớp học, để liên kết với tiết học
-              className: lesson.class.className, // Tên lớp học, để nhận diện lớp
-              gradeLevel: lesson.class.gradeLevel, // Khối lớp, để phân loại học sinh
-              academicYear: lesson.class.academicYear, // Năm học, để xác định thời gian học
-              homeroomTeacher: lesson.class.homeroomTeacher, // Giáo viên chủ nhiệm, để quản lý lớp
+              _id: lesson.class._id,
+              className: lesson.class.className,
+              gradeLevel: lesson.class.gradeLevel,
+              academicYear: lesson.class.academicYear,
+              homeroomTeacher: lesson.class.homeroomTeacher,
             }
           : null,
 
         // Thông tin môn học
         subject: lesson.subject
           ? {
-              _id: lesson.subject._id, // ID của môn học, để liên kết với tiết học
-              name: lesson.subject.subjectName, // Tên môn học, để nhận diện môn
-              code: lesson.subject.subjectCode, // Mã môn học, để phân biệt các môn
-              department: lesson.subject.department, // Khoa, để phân loại môn học
-              weeklyHours: lesson.subject.weeklyHours, // Số giờ học hàng tuần, để lập kế hoạch giảng dạy
-              description: lesson.subject.description, // Mô tả môn học, để cung cấp thông tin chi tiết
+              _id: lesson.subject._id,
+              name: lesson.subject.subjectName,
+              code: lesson.subject.subjectCode,
+              department: lesson.subject.department,
+              weeklyHours: lesson.subject.weeklyHours,
+              description: lesson.subject.description,
             }
           : null,
 
         // Thông tin giáo viên
         teacher: lesson.teacher
           ? {
-              _id: lesson.teacher._id, // ID của giáo viên, để liên kết với tiết học
-              name: lesson.teacher.name, // Tên giáo viên, để nhận diện
-              email: lesson.teacher.email, // Email giáo viên, để liên lạc
-              phoneNumber: lesson.teacher.phoneNumber, // Số điện thoại giáo viên, để liên lạc
-              role: lesson.teacher.role, // Vai trò của giáo viên, để xác định trách nhiệm
-              gender: lesson.teacher.gender, // Giới tính của giáo viên, để phân loại
-              department: lesson.teacher.department, // Khoa của giáo viên, để phân loại
+              _id: lesson.teacher._id,
+              name: lesson.teacher.name,
+              email: lesson.teacher.email,
+              phoneNumber: lesson.teacher.phoneNumber,
+              role: lesson.teacher.role,
+              gender: lesson.teacher.gender,
+              department: lesson.teacher.department,
             }
           : null,
 
         // Thông tin giáo viên dạy bù
         substituteTeacher: lesson.substituteTeacher
           ? {
-              _id: lesson.substituteTeacher._id, // ID của giáo viên dạy bù, để liên kết với tiết học
-              name: lesson.substituteTeacher.name, // Tên giáo viên dạy bù, để nhận diện
-              email: lesson.substituteTeacher.email, // Email giáo viên dạy bù, để liên lạc
-              phoneNumber: lesson.substituteTeacher.phoneNumber, // Số điện thoại giáo viên dạy bù, để liên lạc
-              role: lesson.substituteTeacher.role, // Vai trò của giáo viên dạy bù, để xác định trách nhiệm
-              department: lesson.substituteTeacher.department, // Khoa của giáo viên dạy bù, để phân loại
+              _id: lesson.substituteTeacher._id,
+              name: lesson.substituteTeacher.name,
+              email: lesson.substituteTeacher.email,
+              phoneNumber: lesson.substituteTeacher.phoneNumber,
+              role: lesson.substituteTeacher.role,
+              department: lesson.substituteTeacher.department,
             }
           : null,
 
         // Thông tin năm học
         academicYear: lesson.academicYear
           ? {
-              _id: lesson.academicYear._id, // ID của năm học, để liên kết với tiết học
-              name: lesson.academicYear.name, // Tên năm học, để nhận diện
-              startDate: lesson.academicYear.startDate, // Ngày bắt đầu năm học, để xác định thời gian
-              endDate: lesson.academicYear.endDate, // Ngày kết thúc năm học, để xác định thời gian
-              isActive: lesson.academicYear.isActive, // Trạng thái hoạt động của năm học, để quản lý
+              _id: lesson.academicYear._id,
+              name: lesson.academicYear.name,
+              startDate: lesson.academicYear.startDate,
+              endDate: lesson.academicYear.endDate,
+              isActive: lesson.academicYear.isActive,
             }
           : null,
 
         // Nội dung tiết học
-        topic: lesson.topic || "", // Chủ đề của tiết học, để xác định nội dung giảng dạy
-        description: lesson.description || "", // Mô tả chi tiết về tiết học, để cung cấp thông tin bổ sung
+        topic: lesson.topic || "",
+        description: lesson.description || "",
 
         // Đánh giá và điểm danh
-        evaluation: lesson.evaluation || null, // Đánh giá tiết học, để theo dõi chất lượng giảng dạy
-        attendance: lesson.attendance || null, // Điểm danh học sinh, để theo dõi sự tham gia
-        isEvaluatedByTeacher: lesson.isEvaluatedByTeacher || false, // Trạng thái đánh giá giáo viên, để theo dõi việc đánh giá
+        evaluation: lesson.evaluation || null,
+        attendance: lesson.attendance || null,
+
+        // Thông tin đánh giá giáo viên (mới thêm)
+        teacherEvaluation: teacherEvaluation
+          ? {
+              _id: teacherEvaluation._id,
+              teacher: teacherEvaluation.teacher
+                ? {
+                    _id: teacherEvaluation.teacher._id,
+                    name: teacherEvaluation.teacher.name,
+                    email: teacherEvaluation.teacher.email,
+                  }
+                : null,
+              lessonContent: teacherEvaluation.lessonContent,
+              evaluation: {
+                rating: teacherEvaluation.evaluation.rating,
+                comments: teacherEvaluation.evaluation.comments,
+                details: teacherEvaluation.evaluation.details,
+              },
+              absentStudents: teacherEvaluation.absentStudents.map(
+                (absent) => ({
+                  student: {
+                    id: absent.student._id,
+                    name: absent.student.name,
+                    studentId: absent.student.studentId,
+                    email: absent.student.email,
+                  },
+                  isExcused: absent.isExcused,
+                  reason: absent.reason,
+                  recordedAt: absent.recordedAt,
+                })
+              ),
+              oralTests: teacherEvaluation.oralTests.map((test) => ({
+                student: {
+                  id: test.student._id,
+                  name: test.student.name,
+                  studentId: test.student.studentId,
+                  email: test.student.email,
+                },
+                score: test.score,
+                question: test.question,
+                comment: test.comment,
+                testedAt: test.testedAt,
+              })),
+              violations: teacherEvaluation.violations.map((violation) => ({
+                student: {
+                  id: violation.student._id,
+                  name: violation.student.name,
+                  studentId: violation.student.studentId,
+                  email: violation.student.email,
+                },
+                description: violation.description,
+                type: violation.type,
+                severity: violation.severity,
+                action: violation.action,
+                recordedAt: violation.recordedAt,
+              })),
+              summary: teacherEvaluation.summary,
+              status: teacherEvaluation.status,
+              completedAt: teacherEvaluation.completedAt,
+              submittedAt: teacherEvaluation.submittedAt,
+              createdAt: teacherEvaluation.createdAt,
+              updatedAt: teacherEvaluation.updatedAt,
+            }
+          : null,
 
         // Các loại tiết học đặc biệt
-        makeupInfo: lesson.makeupInfo || null, // Thông tin về tiết học bù, để quản lý lịch trình
-        extracurricularInfo: lesson.extracurricularInfo || null, // Thông tin về hoạt động ngoại khóa, để quản lý
-        fixedInfo: lesson.fixedInfo || null, // Thông tin về tiết học cố định, để quản lý lịch trình
+        makeupInfo: lesson.makeupInfo || null,
+        extracurricularInfo: lesson.extracurricularInfo || null,
+        fixedInfo: lesson.fixedInfo || null,
 
         // Thông tin kiểm tra (test info)
         testInfo: testInfo
           ? {
-              _id: testInfo._id, // ID của thông tin kiểm tra
-              testType: testInfo.testType, // Loại kiểm tra (kiemtra15, kiemtra1tiet, etc.)
-              title: testInfo.title, // Tiêu đề kiểm tra
-              content: testInfo.content, // Nội dung chi tiết kiểm tra
-              chapters: testInfo.chapters || [], // Chương/bài cần ôn tập
-              references: testInfo.references || [], // Tài liệu tham khảo
-              expectedTestDate: testInfo.expectedTestDate, // Ngày kiểm tra dự kiến
-              testInfoDate: testInfo.testInfoDate, // Ngày tạo thông tin kiểm tra
-              priority: testInfo.priority, // Độ ưu tiên (low, medium, high, urgent)
-              status: testInfo.status, // Trạng thái (active, completed, cancelled)
-              reminder: testInfo.reminder, // Ghi chú thêm
-              isVisible: testInfo.isVisible, // Trạng thái hiển thị
-              createdAt: testInfo.createdAt, // Ngày tạo
-              updatedAt: testInfo.updatedAt, // Ngày cập nhật cuối
+              _id: testInfo._id,
+              testType: testInfo.testType,
+              title: testInfo.title,
+              content: testInfo.content,
+              chapters: testInfo.chapters || [],
+              references: testInfo.references || [],
+              expectedTestDate: testInfo.expectedTestDate,
+              testInfoDate: testInfo.testInfoDate,
+              priority: testInfo.priority,
+              status: testInfo.status,
+              reminder: testInfo.reminder,
+              isVisible: testInfo.isVisible,
+              createdAt: testInfo.createdAt,
+              updatedAt: testInfo.updatedAt,
               teacher: testInfo.teacher
                 ? {
                     _id: testInfo.teacher._id,
@@ -3384,28 +3460,28 @@ class ScheduleService {
         // Thông tin kiểm toán
         createdBy: lesson.createdBy
           ? {
-              _id: lesson.createdBy._id, // ID của người tạo, để theo dõi nguồn gốc
-              name: lesson.createdBy.name, // Tên người tạo, để nhận diện
-              email: lesson.createdBy.email, // Email người tạo, để liên lạc
-              role: lesson.createdBy.role, // Vai trò của người tạo, để xác định trách nhiệm
+              _id: lesson.createdBy._id,
+              name: lesson.createdBy.name,
+              email: lesson.createdBy.email,
+              role: lesson.createdBy.role,
             }
           : null,
-        createdAt: lesson.createdAt, // Ngày tạo tiết học, để theo dõi lịch sử
+        createdAt: lesson.createdAt,
         lastModifiedBy: lesson.lastModifiedBy
           ? {
-              _id: lesson.lastModifiedBy._id, // ID của người chỉnh sửa cuối, để theo dõi thay đổi
-              name: lesson.lastModifiedBy.name, // Tên người chỉnh sửa cuối, để nhận diện
-              email: lesson.lastModifiedBy.email, // Email người chỉnh sửa cuối, để liên lạc
-              role: lesson.lastModifiedBy.role, // Vai trò của người chỉnh sửa cuối, để xác định trách nhiệm
+              _id: lesson.lastModifiedBy._id,
+              name: lesson.lastModifiedBy.name,
+              email: lesson.lastModifiedBy.email,
+              role: lesson.lastModifiedBy.role,
             }
           : null,
-        updatedAt: lesson.updatedAt, // Ngày cập nhật cuối, để theo dõi thay đổi
+        updatedAt: lesson.updatedAt,
 
         // Ngữ cảnh bổ sung
-        context: additionalInfo, // Thông tin ngữ cảnh bổ sung, để cung cấp cái nhìn toàn diện
+        context: additionalInfo,
 
         // Quyền của người dùng đối với tiết học này
-        permissions: this.getLessonPermissions(lesson, currentUser), // Quyền truy cập của người dùng, để bảo mật
+        permissions: this.getLessonPermissions(lesson, currentUser),
       };
 
       console.log(`✅ Successfully retrieved lesson detail for ${lessonId}`);

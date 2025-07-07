@@ -184,11 +184,6 @@ const lessonSchema = new mongoose.Schema(
       ref: "User",
     },
 
-    // Trạng thái đánh giá giáo viên
-    isEvaluatedByTeacher: {
-      type: Boolean,
-      default: false,
-    },
   },
   {
     timestamps: true,
