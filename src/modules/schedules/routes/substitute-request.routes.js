@@ -4,10 +4,10 @@ const substituteRequestController = require('../controllers/substitute-request.c
 const substituteRequestValidation = require('../middleware/substitute-request.validation');
 const authMiddleware = require('../../auth/middleware/auth.middleware');
 
-// Apply authentication middleware to all routes
+// Áp dụng middleware xác thực cho tất cả các route
 router.use(authMiddleware.protect);
 
-// Create substitute request (teachers only)
+// Tạo yêu cầu dạy thay (chỉ dành cho giáo viên)
 router.post(
   '/',
   substituteRequestValidation.validateTeacherRole(),
@@ -15,7 +15,7 @@ router.post(
   substituteRequestController.createRequest
 );
 
-// Get available substitute teachers for a lesson (teachers only)
+// Lấy danh sách giáo viên dạy thay có sẵn cho một tiết học (chỉ dành cho giáo viên)
 router.get(
   '/available-teachers/:lessonId',
   substituteRequestValidation.validateTeacherRole(),
@@ -23,7 +23,7 @@ router.get(
   substituteRequestController.getAvailableTeachers
 );
 
-// Get current teacher's substitute requests
+// Lấy danh sách yêu cầu dạy thay của giáo viên hiện tại
 router.get(
   '/my-requests',
   substituteRequestValidation.validateTeacherRole(),
@@ -31,7 +31,7 @@ router.get(
   substituteRequestController.getTeacherRequests
 );
 
-// Get all substitute requests (admin/manager only)
+// Lấy tất cả yêu cầu dạy thay (chỉ dành cho quản trị viên/quản lý)
 router.get(
   '/all',
   substituteRequestValidation.validateManagerRole(),
@@ -39,21 +39,21 @@ router.get(
   substituteRequestController.getAllRequests
 );
 
-// Get substitute request statistics (admin/manager only)
+// Lấy thống kê yêu cầu dạy thay (chỉ dành cho quản trị viên/quản lý)
 router.get(
   '/stats',
   substituteRequestValidation.validateManagerRole(),
   substituteRequestController.getRequestStats
 );
 
-// Get substitute request by ID
+// Lấy yêu cầu dạy thay theo ID
 router.get(
   '/:requestId',
   substituteRequestValidation.validateRequestId(),
   substituteRequestController.getRequestById
 );
 
-// Approve substitute request (candidate teachers only)
+// Phê duyệt yêu cầu dạy thay (chỉ dành cho giáo viên ứng cử)
 router.post(
   '/:requestId/approve',
   substituteRequestValidation.validateTeacherRole(),
@@ -61,7 +61,7 @@ router.post(
   substituteRequestController.approveRequest
 );
 
-// Reject substitute request (candidate teachers only)
+// Từ chối yêu cầu dạy thay (chỉ dành cho giáo viên ứng cử)
 router.post(
   '/:requestId/reject',
   substituteRequestValidation.validateTeacherRole(),
@@ -69,7 +69,7 @@ router.post(
   substituteRequestController.rejectRequest
 );
 
-// Cancel substitute request (requesting teacher only)
+// Hủy yêu cầu dạy thay (chỉ dành cho giáo viên yêu cầu)
 router.post(
   '/:requestId/cancel',
   substituteRequestValidation.validateTeacherRole(),

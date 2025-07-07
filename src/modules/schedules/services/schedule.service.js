@@ -3235,7 +3235,7 @@ class ScheduleService {
           "subjectName subjectCode department weeklyHours description"
         )
 
-        .populate("teacher", "name email phoneNumber role department")
+        .populate("teacher", "name email phoneNumber role gender   department")
         .populate("substituteTeacher", "name email phoneNumber role department")
 
         .populate("timeSlot", "period startTime endTime type")

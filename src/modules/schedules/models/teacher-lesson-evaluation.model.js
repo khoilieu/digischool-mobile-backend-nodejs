@@ -357,8 +357,8 @@ teacherLessonEvaluationSchema.pre('save', async function(next) {
     }
     
     // Kiểm tra lesson có thể đánh giá không (chỉ đánh giá lesson scheduled)
-    if (lesson.status !== 'scheduled') {
-      throw new Error('Can only evaluate scheduled lessons');
+    if (lesson.status !== 'completed') {
+      throw new Error('Can only evaluate completed lessons');
     }
     
     // Kiểm tra thông tin class và subject khớp với lesson
