@@ -92,27 +92,7 @@ const lessonSchema = new mongoose.Schema(
       type: String,
       maxlength: 500,
     },
-
-    // Đánh giá lesson
-    evaluation: {
-      quality: {
-        type: Number,
-        min: 1,
-        max: 5,
-      },
-      effectiveness: {
-        type: Number,
-        min: 1,
-        max: 5,
-      },
-      studentEngagement: {
-        type: Number,
-        min: 1,
-        max: 5,
-      },
-      comments: String,
-    },
-
+    
     // Thông tin attendance
     attendance: {
       totalStudents: {

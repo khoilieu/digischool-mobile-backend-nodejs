@@ -13,6 +13,7 @@ const Subject = require("../../subjects/models/subject.model");
 const User = require("../../auth/models/user.model");
 const AdvancedSchedulerService = require("./advanced-scheduler.service");
 const TeacherLessonEvaluation = require("../models/teacher-lesson-evaluation.model");
+const StudentLessonEvaluation = require('../models/student-lesson-evaluation.model');
 const mongoose = require("mongoose");
 
 class ScheduleService {
@@ -3276,6 +3277,12 @@ class ScheduleService {
         .populate("violations.student", "name studentId email")
         .lean();
 
+      const studentEvaluations = await StudentLessonEvaluation.findOne({
+        lesson: lessonId,
+      })
+        .populate("student", "name email studentId")
+        .lean();
+
       // Format response with comprehensive information
       const lessonDetail = {
         // Basic lesson information
@@ -3357,9 +3364,17 @@ class ScheduleService {
         topic: lesson.topic || "",
         description: lesson.description || "",
 
-        // Đánh giá và điểm danh
-        evaluation: lesson.evaluation || null,
         attendance: lesson.attendance || null,
+
+        studentEvaluations: studentEvaluations
+          ? {
+              _id: studentEvaluations._id,
+              student: studentEvaluations.student,
+              evaluation: studentEvaluations.evaluation,
+              comments: studentEvaluations.comments,
+              evaluatedAt: studentEvaluations.evaluatedAt,
+            }
+          : null,
 
         // Thông tin đánh giá giáo viên (mới thêm)
         teacherEvaluation: teacherEvaluation
