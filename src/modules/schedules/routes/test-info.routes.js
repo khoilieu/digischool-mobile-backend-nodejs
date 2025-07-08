@@ -10,14 +10,14 @@ const testInfoValidation = require("../middleware/test-info.validation");
 router.use(authMiddleware.protect);
 router.use(authMiddleware.authorize("teacher", "homeroom_teacher"));
 
-// Tạo thông tin kiểm tra cho tiết học
+// Tạo thông tin kiểm tra cho tiết học ✅
 router.post(
   "/lessons/:lessonId",
   testInfoValidation.createTestInfoValidation,
   testInfoController.createTestInfo
 );
 
-// Lấy danh sách thông tin kiểm tra của giáo viên
+// Lấy danh sách thông tin kiểm tra của giáo viên ✅
 // Query params: status, priority, testType, startDate, endDate, page, limit
 router.get(
   "/",
@@ -25,58 +25,28 @@ router.get(
   testInfoController.getTeacherTestInfos
 );
 
-// Lấy thông tin kiểm tra sắp đến hạn
-// Query params: days (default: 7)
-router.get(
-  "/upcoming",
-  testInfoValidation.queryValidation,
-  testInfoController.getUpcomingTestInfos
-);
-
-// Lấy thống kê thông tin kiểm tra
-// Query params: startDate, endDate
-router.get(
-  "/stats",
-  testInfoValidation.queryValidation,
-  testInfoController.getTestInfoStats
-);
-
-// Lấy chi tiết thông tin kiểm tra
-router.get(
-  "/:testInfoId",
-  testInfoValidation.paramIdValidation,
-  testInfoController.getTestInfoDetail
-);
-
-// Cập nhật thông tin kiểm tra
+// Cập nhật thông tin kiểm tra ✅
 router.put(
   "/:testInfoId",
   testInfoValidation.updateTestInfoValidation,
   testInfoController.updateTestInfo
 );
 
-// Xóa thông tin kiểm tra
+// Xóa thông tin kiểm tra ✅
 router.delete(
   "/:testInfoId",
   testInfoValidation.paramIdValidation,
   testInfoController.deleteTestInfo
 );
 
-// Đánh dấu hoàn thành
-router.post(
-  "/:testInfoId/complete",
-  testInfoValidation.paramIdValidation,
-  testInfoController.markTestInfoCompleted
-);
-
-// Gửi lại email thông tin kiểm tra
+// Gửi lại email thông tin kiểm tra ✅
 router.post(
   "/:testInfoId/resend-email",
   testInfoValidation.paramIdValidation,
   testInfoController.resendTestInfoEmail
 );
 
-// Test gửi email
+// Test gửi email ✅
 router.post(
   "/:testInfoId/test-email",
   testInfoValidation.paramIdValidation,

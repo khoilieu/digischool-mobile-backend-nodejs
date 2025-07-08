@@ -24,17 +24,6 @@ class TestInfoController {
       next(error);
     }
   }
-  async getTestInfoDetail(req, res, next) {
-    try {
-      const result = await testInfoService.getTestInfoDetail({
-        user: req.user,
-        params: req.params,
-      });
-      res.status(result.status).json(result.body);
-    } catch (error) {
-      next(error);
-    }
-  }
   async updateTestInfo(req, res, next) {
     try {
       const result = await testInfoService.updateTestInfo({
@@ -52,39 +41,6 @@ class TestInfoController {
       const result = await testInfoService.deleteTestInfo({
         user: req.user,
         params: req.params,
-      });
-      res.status(result.status).json(result.body);
-    } catch (error) {
-      next(error);
-    }
-  }
-  async getUpcomingTestInfos(req, res, next) {
-    try {
-      const result = await testInfoService.getUpcomingTestInfos({
-        user: req.user,
-        query: req.query,
-      });
-      res.status(result.status).json(result.body);
-    } catch (error) {
-      next(error);
-    }
-  }
-  async markTestInfoCompleted(req, res, next) {
-    try {
-      const result = await testInfoService.markTestInfoCompleted({
-        user: req.user,
-        params: req.params,
-      });
-      res.status(result.status).json(result.body);
-    } catch (error) {
-      next(error);
-    }
-  }
-  async getTestInfoStats(req, res, next) {
-    try {
-      const result = await testInfoService.getTestInfoStats({
-        user: req.user,
-        query: req.query,
       });
       res.status(result.status).json(result.body);
     } catch (error) {
