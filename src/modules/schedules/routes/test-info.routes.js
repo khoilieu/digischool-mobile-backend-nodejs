@@ -2,105 +2,84 @@ const express = require("express");
 const router = express.Router();
 const testInfoController = require("../controllers/test-info.controller");
 const authMiddleware = require("../../auth/middleware/auth.middleware");
-const {
-  createTestInfoValidation,
-  updateTestInfoValidation,
-  queryValidation,
-  paramIdValidation,
-} = require("../middleware/test-info.validation");
+const testInfoValidation = require("../middleware/test-info.validation");
 
-// Routes cho quản lý thông tin kiểm tra tiết học
+// ===================== ROUTES QUẢN LÝ THÔNG TIN KIỂM TRA TIẾT HỌC =====================
 
-// POST /api/test-infos/lessons/:lessonId - Tạo thông tin kiểm tra cho tiết học
+// Áp dụng middleware xác thực cho tất cả route
+router.use(authMiddleware.protect);
+router.use(authMiddleware.authorize("teacher", "homeroom_teacher"));
+
+// Tạo thông tin kiểm tra cho tiết học
 router.post(
   "/lessons/:lessonId",
-  authMiddleware.protect,
-  authMiddleware.authorize("teacher"),
-  createTestInfoValidation,
+  testInfoValidation.createTestInfoValidation,
   testInfoController.createTestInfo
 );
 
-// GET /api/test-infos - Lấy danh sách thông tin kiểm tra của giáo viên
+// Lấy danh sách thông tin kiểm tra của giáo viên
 // Query params: status, priority, testType, startDate, endDate, page, limit
 router.get(
   "/",
-  authMiddleware.protect,
-  authMiddleware.authorize("teacher"),
-  queryValidation,
+  testInfoValidation.queryValidation,
   testInfoController.getTeacherTestInfos
 );
 
-// GET /api/test-infos/upcoming - Lấy thông tin kiểm tra sắp đến hạn
+// Lấy thông tin kiểm tra sắp đến hạn
 // Query params: days (default: 7)
 router.get(
   "/upcoming",
-  authMiddleware.protect,
-  authMiddleware.authorize("teacher"),
-  queryValidation,
+  testInfoValidation.queryValidation,
   testInfoController.getUpcomingTestInfos
 );
 
-// GET /api/test-infos/stats - Lấy thống kê thông tin kiểm tra
+// Lấy thống kê thông tin kiểm tra
 // Query params: startDate, endDate
 router.get(
   "/stats",
-  authMiddleware.protect,
-  authMiddleware.authorize("teacher"),
-  queryValidation,
+  testInfoValidation.queryValidation,
   testInfoController.getTestInfoStats
 );
 
-// GET /api/test-infos/:testInfoId - Lấy chi tiết thông tin kiểm tra
+// Lấy chi tiết thông tin kiểm tra
 router.get(
   "/:testInfoId",
-  authMiddleware.protect,
-  authMiddleware.authorize("teacher"),
-  paramIdValidation,
+  testInfoValidation.paramIdValidation,
   testInfoController.getTestInfoDetail
 );
 
-// PUT /api/test-infos/:testInfoId - Cập nhật thông tin kiểm tra
+// Cập nhật thông tin kiểm tra
 router.put(
   "/:testInfoId",
-  authMiddleware.protect,
-  authMiddleware.authorize("teacher"),
-  updateTestInfoValidation,
+  testInfoValidation.updateTestInfoValidation,
   testInfoController.updateTestInfo
 );
 
-// DELETE /api/test-infos/:testInfoId - Xóa thông tin kiểm tra
+// Xóa thông tin kiểm tra
 router.delete(
   "/:testInfoId",
-  authMiddleware.protect,
-  authMiddleware.authorize("teacher"),
-  paramIdValidation,
+  testInfoValidation.paramIdValidation,
   testInfoController.deleteTestInfo
 );
 
-// POST /api/test-infos/:testInfoId/complete - Đánh dấu hoàn thành
+// Đánh dấu hoàn thành
 router.post(
   "/:testInfoId/complete",
-  authMiddleware.protect,
-  authMiddleware.authorize("teacher"),
-  paramIdValidation,
+  testInfoValidation.paramIdValidation,
   testInfoController.markTestInfoCompleted
 );
 
-// POST /api/test-infos/:testInfoId/resend-email - Gửi lại email thông tin kiểm tra
+// Gửi lại email thông tin kiểm tra
 router.post(
   "/:testInfoId/resend-email",
-  authMiddleware.protect,
-  authMiddleware.authorize("teacher"),
-  paramIdValidation,
+  testInfoValidation.paramIdValidation,
   testInfoController.resendTestInfoEmail
 );
 
-// POST /api/test-infos/:testInfoId/test-email - Test gửi email
+// Test gửi email
 router.post(
   "/:testInfoId/test-email",
-  authMiddleware.protect,
-  authMiddleware.authorize("teacher"),
-  paramIdValidation,
+  testInfoValidation.paramIdValidation,
   testInfoController.testTestInfoEmail
 );
 
