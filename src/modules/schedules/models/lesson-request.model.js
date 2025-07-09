@@ -13,7 +13,7 @@ const lessonRequestSchema = new mongoose.Schema(
     // Loại yêu cầu
     requestType: {
       type: String,
-      enum: ["swap", "makeup", "substitute"], // Thêm 'substitute'
+      enum: ["swap", "makeup", "substitute"],
       required: true,
     },
 
@@ -24,25 +24,68 @@ const lessonRequestSchema = new mongoose.Schema(
       required: true,
     },
 
+    // ================================ FIELDS CHO SWAP & MAKEUP ================================
+
     // Thông tin tiết học gốc (tiết cần đổi hoặc tiết absent cần dạy bù)
     originalLesson: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Lesson",
       required: function () {
-        return this.requestType !== "substitute";
+        return this.requestType === "swap" || this.requestType === "makeup";
       },
     },
 
     // Thông tin tiết học thay thế
-    // - Với swap: tiết trống sẽ được đổi
+    // - Với swap: tiết có giáo viên dạy sẽ được đổi
     // - Với makeup: tiết trống sẽ được tạo thành tiết makeup
     replacementLesson: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Lesson",
       required: function () {
-        return this.requestType !== "substitute";
+        return this.requestType === "swap" || this.requestType === "makeup";
       },
     },
+
+    // ================================ FIELDS CHO SUBSTITUTE ================================
+
+    // Thông tin tiết học cần dạy thay
+    lesson: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Lesson",
+      required: function () {
+        return this.requestType === "substitute";
+      },
+    },
+
+    // Danh sách giáo viên được đề xuất dạy thay
+    candidateTeachers: [
+      {
+        teacher: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: function () {
+            return this.requestType === "substitute";
+          },
+        },
+        status: {
+          type: String,
+          enum: ["pending", "approved", "rejected"],
+          default: "pending",
+        },
+        responseDate: {
+          type: Date,
+        },
+      },
+    ],
+
+    // Giáo viên được chấp nhận dạy thay
+    approvedTeacher: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    // ================================ COMMON FIELDS ================================
 
     // Lý do yêu cầu
     reason: {
@@ -54,20 +97,14 @@ const lessonRequestSchema = new mongoose.Schema(
     // Trạng thái yêu cầu
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected", "cancelled"], // Thêm 'cancelled'
+      enum: ["pending", "approved", "rejected", "cancelled"],
       default: "pending",
     },
 
-    // Thông tin manager xử lý
+    // Thông tin manager xử lý (chỉ cho swap & makeup)
     processedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-    },
-
-    // Nhận xét của manager
-    managerComment: {
-      type: String,
-      maxlength: 500,
     },
 
     // Thời gian xử lý
@@ -75,7 +112,7 @@ const lessonRequestSchema = new mongoose.Schema(
       type: Date,
     },
 
-    // Thông tin bổ sung
+    // Thông tin bổ sung (chỉ cho swap & makeup)
     additionalInfo: {
       // Thông tin lớp học
       classInfo: {
@@ -115,35 +152,34 @@ const lessonRequestSchema = new mongoose.Schema(
       },
     },
 
-    // Thông tin substitute request (nếu là loại substitute)
-    candidateTeachers: [
-      {
-        teacher: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: "User",
-          required: function () {
-            return this.requestType === "substitute";
-          },
-        },
+    // Thông tin đặc biệt cho swap
+    swapInfo: {
+      // Giáo viên của tiết replacement (để tracking)
+      replacementTeacher: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      // Trạng thái phản hồi của giáo viên replacement
+      replacementTeacherResponse: {
         status: {
           type: String,
           enum: ["pending", "approved", "rejected"],
           default: "pending",
         },
-        responseDate: {
-          type: Date,
-        },
-        rejectionReason: {
-          type: String,
-          maxlength: 500,
-        },
+        responseDate: Date,
       },
-    ],
-    approvedTeacher: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
+      // Thông tin về conflict check
+      hasConflict: {
+        type: Boolean,
+        default: false,
+      },
+      conflictDetails: {
+        type: String,
+        maxlength: 500,
+      },
     },
+
+    // Lịch sử email đã gửi
     emailsSent: [
       {
         type: {
@@ -158,6 +194,8 @@ const lessonRequestSchema = new mongoose.Schema(
         subject: String,
       },
     ],
+
+    // Ghi chú
     notes: {
       type: String,
       maxlength: 500,
@@ -189,12 +227,14 @@ lessonRequestSchema.index({ status: 1, createdAt: -1 });
 lessonRequestSchema.index({ requestType: 1, status: 1 });
 lessonRequestSchema.index({ "additionalInfo.classInfo": 1 });
 lessonRequestSchema.index({ "additionalInfo.academicYear": 1 });
-// Indexes bổ sung cho substitute
+
+// Indexes cho substitute
 lessonRequestSchema.index({ lesson: 1 });
-lessonRequestSchema.index({ requestingTeacher: 1 });
-lessonRequestSchema.index({ status: 1 });
 lessonRequestSchema.index({ "candidateTeachers.teacher": 1 });
-lessonRequestSchema.index({ requestDate: 1 });
+
+// Indexes cho swap
+lessonRequestSchema.index({ "swapInfo.replacementTeacher": 1 });
+lessonRequestSchema.index({ "swapInfo.replacementTeacherNotified": 1 });
 
 // Virtual để lấy thông tin chi tiết
 lessonRequestSchema.virtual("originalLessonDetails", {
@@ -211,7 +251,14 @@ lessonRequestSchema.virtual("replacementLessonDetails", {
   justOne: true,
 });
 
-// Pre-save hook cho requestId (gộp logic của cả lesson và substitute)
+lessonRequestSchema.virtual("lessonDetails", {
+  ref: "Lesson",
+  localField: "lesson",
+  foreignField: "_id",
+  justOne: true,
+});
+
+// Pre-save hook cho requestId
 lessonRequestSchema.pre("save", function (next) {
   if (!this.requestId) {
     if (this.requestType === "substitute") {
@@ -228,9 +275,14 @@ lessonRequestSchema.pre("save", function (next) {
   next();
 });
 
-// Static method để tìm requests theo teacher
+// ================================ STATIC METHODS CHO SWAP & MAKEUP ================================
+
+// Static method để tìm requests theo teacher (swap & makeup)
 lessonRequestSchema.statics.findByTeacher = function (teacherId, options = {}) {
-  const query = { requestingTeacher: teacherId };
+  const query = {
+    requestingTeacher: teacherId,
+    requestType: { $in: ["swap", "makeup"] },
+  };
 
   if (options.status) query.status = options.status;
   if (options.requestType) query.requestType = options.requestType;
@@ -268,9 +320,12 @@ lessonRequestSchema.statics.findByTeacher = function (teacherId, options = {}) {
     .sort({ createdAt: -1 });
 };
 
-// Static method để tìm pending requests
+// Static method để tìm pending requests (swap & makeup)
 lessonRequestSchema.statics.findPendingRequests = function (options = {}) {
-  const query = { status: "pending" };
+  const query = {
+    status: "pending",
+    requestType: { $in: ["swap", "makeup"] },
+  };
 
   if (options.requestType) query.requestType = options.requestType;
   if (options.academicYear)
@@ -304,6 +359,72 @@ lessonRequestSchema.statics.findPendingRequests = function (options = {}) {
     )
     .sort({ createdAt: -1 });
 };
+
+// ================================ STATIC METHODS CHO SUBSTITUTE ================================
+
+// Static: findAvailableTeachers (chỉ dùng cho substitute)
+lessonRequestSchema.statics.findAvailableTeachers = async function (lessonId) {
+  const Lesson = mongoose.model("Lesson");
+  const User = mongoose.model("User");
+  const lesson = await Lesson.findById(lessonId)
+    .populate("subject", "subjectName")
+    .populate("timeSlot", "period startTime endTime");
+  if (!lesson) throw new Error("Lesson not found");
+  const availableTeachers = await User.find({
+    role: { $in: ["teacher"] },
+    $or: [{ subject: lesson.subject._id }, { subjects: lesson.subject._id }],
+    _id: { $ne: lesson.teacher },
+  }).select("name email subject subjects");
+  const teachersWithConflictInfo = [];
+  for (const teacher of availableTeachers) {
+    const conflictLesson = await Lesson.findOne({
+      teacher: teacher._id,
+      scheduledDate: lesson.scheduledDate,
+      timeSlot: lesson.timeSlot._id,
+      status: { $nin: ["cancelled"] },
+    })
+      .populate("class", "className")
+      .populate("subject", "subjectName");
+    teachersWithConflictInfo.push({
+      ...teacher.toObject(),
+      hasConflict: !!conflictLesson,
+      conflictLesson: conflictLesson
+        ? {
+            className: conflictLesson.class.className,
+            subjectName: conflictLesson.subject.subjectName,
+            lessonId: conflictLesson.lessonId,
+          }
+        : null,
+    });
+  }
+  return teachersWithConflictInfo;
+};
+
+// Static: getTeacherRequests (chỉ dùng cho substitute)
+lessonRequestSchema.statics.getTeacherRequests = function (
+  teacherId,
+  status = null
+) {
+  const query = {
+    requestType: "substitute",
+    $or: [
+      { requestingTeacher: teacherId },
+      { "candidateTeachers.teacher": teacherId },
+    ],
+  };
+  if (status) query.status = status;
+  return this.find(query)
+    .populate("lesson", "lessonId scheduledDate topic status")
+    .populate("lesson.class", "className")
+    .populate("lesson.subject", "subjectName")
+    .populate("lesson.timeSlot", "period startTime endTime")
+    .populate("requestingTeacher", "name email")
+    .populate("candidateTeachers.teacher", "name email")
+    .populate("approvedTeacher", "name email")
+    .sort({ createdAt: -1 });
+};
+
+// ================================ INSTANCE METHODS CHO SUBSTITUTE ================================
 
 // Method: approveByTeacher (chỉ dùng cho substitute)
 lessonRequestSchema.methods.approveByTeacher = async function (teacherId) {
@@ -343,11 +464,9 @@ lessonRequestSchema.methods.approveByTeacher = async function (teacherId) {
   await this.save();
   return this;
 };
+
 // Method: rejectByTeacher (chỉ dùng cho substitute)
-lessonRequestSchema.methods.rejectByTeacher = async function (
-  teacherId,
-  reason
-) {
+lessonRequestSchema.methods.rejectByTeacher = async function (teacherId) {
   if (this.requestType !== "substitute")
     throw new Error("Not a substitute request");
   const candidate = this.candidateTeachers.find((c) => {
@@ -364,7 +483,6 @@ lessonRequestSchema.methods.rejectByTeacher = async function (
     throw new Error("Request already responded to by this teacher");
   candidate.status = "rejected";
   candidate.responseDate = new Date();
-  candidate.rejectionReason = reason || "No reason provided";
   const allRejected = this.candidateTeachers.every(
     (c) => c.status === "rejected"
   );
@@ -372,6 +490,7 @@ lessonRequestSchema.methods.rejectByTeacher = async function (
   await this.save();
   return this;
 };
+
 // Method: cancel (chỉ dùng cho substitute)
 lessonRequestSchema.methods.cancel = async function () {
   if (this.requestType !== "substitute")
@@ -381,65 +500,6 @@ lessonRequestSchema.methods.cancel = async function () {
   this.status = "cancelled";
   await this.save();
   return this;
-};
-// Static: findAvailableTeachers (chỉ dùng cho substitute)
-lessonRequestSchema.statics.findAvailableTeachers = async function (lessonId) {
-  const Lesson = mongoose.model("Lesson");
-  const User = mongoose.model("User");
-  const lesson = await Lesson.findById(lessonId)
-    .populate("subject", "subjectName")
-    .populate("timeSlot", "period startTime endTime");
-  if (!lesson) throw new Error("Lesson not found");
-  const availableTeachers = await User.find({
-    role: { $in: ["teacher"] },
-    $or: [{ subject: lesson.subject._id }, { subjects: lesson.subject._id }],
-    _id: { $ne: lesson.teacher },
-  }).select("name email subject subjects");
-  const teachersWithConflictInfo = [];
-  for (const teacher of availableTeachers) {
-    const conflictLesson = await Lesson.findOne({
-      teacher: teacher._id,
-      scheduledDate: lesson.scheduledDate,
-      timeSlot: lesson.timeSlot._id,
-      status: { $nin: ["cancelled"] },
-    })
-      .populate("class", "className")
-      .populate("subject", "subjectName");
-    teachersWithConflictInfo.push({
-      ...teacher.toObject(),
-      hasConflict: !!conflictLesson,
-      conflictLesson: conflictLesson
-        ? {
-            className: conflictLesson.class.className,
-            subjectName: conflictLesson.subject.subjectName,
-            lessonId: conflictLesson.lessonId,
-          }
-        : null,
-    });
-  }
-  return teachersWithConflictInfo;
-};
-// Static: getTeacherRequests (chỉ dùng cho substitute)
-lessonRequestSchema.statics.getTeacherRequests = function (
-  teacherId,
-  status = null
-) {
-  const query = {
-    $or: [
-      { requestingTeacher: teacherId },
-      { "candidateTeachers.teacher": teacherId },
-    ],
-  };
-  if (status) query.status = status;
-  return this.find(query)
-    .populate("lesson", "lessonId scheduledDate topic status")
-    .populate("lesson.class", "className")
-    .populate("lesson.subject", "subjectName")
-    .populate("lesson.timeSlot", "period startTime endTime")
-    .populate("requestingTeacher", "name email")
-    .populate("candidateTeachers.teacher", "name email")
-    .populate("approvedTeacher", "name email")
-    .sort({ requestDate: -1 });
 };
 
 const LessonRequest = mongoose.model("LessonRequest", lessonRequestSchema);
