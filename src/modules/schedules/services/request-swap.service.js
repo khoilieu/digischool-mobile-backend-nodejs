@@ -6,6 +6,7 @@ const User = require("../../auth/models/user.model");
 const AcademicYear = require("../models/academic-year.model");
 const TimeSlot = require("../models/time-slot.model");
 const emailService = require("../../auth/services/email.service");
+const lessonReferenceSwapper = require("./lesson-reference-swapper.service");
 
 class SwapRequestService {
   // Helper function to calculate week range from a date
@@ -147,35 +148,12 @@ class SwapRequestService {
     try {
       console.log(`🔄 Creating swap request for teacher ${data.teacherId}`);
 
-      // Validate dữ liệu đầu vào
-      if (
-        !data.teacherId ||
-        !data.originalLessonId ||
-        !data.replacementLessonId ||
-        !data.reason
-      ) {
-        throw new Error("Missing required fields for swap request");
-      }
-
       // Kiểm tra originalLesson tồn tại và thuộc về giáo viên
       const originalLesson = await Lesson.findById(data.originalLessonId)
         .populate("class", "className gradeLevel")
         .populate("subject", "subjectName subjectCode")
         .populate("academicYear", "name startDate endDate")
         .populate("timeSlot", "period startTime endTime");
-
-      if (!originalLesson) {
-        throw new Error("Original lesson not found");
-      }
-
-      if (originalLesson.teacher.toString() !== data.teacherId) {
-        throw new Error("Original lesson does not belong to this teacher");
-      }
-
-      // Validate status - phải là scheduled
-      if (originalLesson.status !== "scheduled") {
-        throw new Error("Original lesson must be scheduled for swap request");
-      }
 
       // Kiểm tra replacementLesson tồn tại và có giáo viên dạy
       const replacementLesson = await Lesson.findById(data.replacementLessonId)
@@ -184,59 +162,11 @@ class SwapRequestService {
         .populate("teacher", "name email fullName")
         .populate("timeSlot", "period startTime endTime");
 
-      if (!replacementLesson) {
-        throw new Error("Replacement lesson not found");
-      }
-
-      if (replacementLesson.type === "empty") {
-        throw new Error("Replacement lesson cannot be empty for swap request");
-      }
-
-      if (!replacementLesson.teacher) {
-        throw new Error("Replacement lesson must have a teacher");
-      }
-
-      if (replacementLesson.status !== "scheduled") {
-        throw new Error("Replacement lesson must be scheduled");
-      }
-
-      // Kiểm tra cùng lớp
-      if (
-        originalLesson.class._id.toString() !==
-        replacementLesson.class._id.toString()
-      ) {
-        throw new Error(
-          "Original and replacement lessons must be in the same class"
-        );
-      }
-
       // Kiểm tra cùng tuần
       const originalWeek = this.getWeekRange(originalLesson.scheduledDate);
       const replacementWeek = this.getWeekRange(
         replacementLesson.scheduledDate
       );
-
-      if (
-        originalWeek.startOfWeek.getTime() !==
-        replacementWeek.startOfWeek.getTime()
-      ) {
-        throw new Error(
-          "Original and replacement lessons must be in the same week"
-        );
-      }
-
-      // Kiểm tra không có request đang pending cho lesson này
-      const existingRequest = await LessonRequest.findOne({
-        originalLesson: data.originalLessonId,
-        status: "pending",
-        requestType: "swap",
-      });
-
-      if (existingRequest) {
-        throw new Error(
-          "There is already a pending swap request for this lesson"
-        );
-      }
 
       // Tạo lesson request với thông tin tuần tự động tính toán
       const lessonRequestData = {
@@ -682,60 +612,22 @@ class SwapRequestService {
       status: replacementLesson.status,
     };
 
-    // Hoán đổi testInfo
-    const TestInfo = require("../models/test-info.model");
-    const testInfoA = await TestInfo.findOne({ lesson: originalLesson._id });
-    const testInfoB = await TestInfo.findOne({ lesson: replacementLesson._id });
-    if (testInfoA)
-      await TestInfo.updateOne(
-        { _id: testInfoA._id },
-        { lesson: replacementLesson._id }
-      );
-    if (testInfoB)
-      await TestInfo.updateOne(
-        { _id: testInfoB._id },
-        { lesson: originalLesson._id }
-      );
+    // Sử dụng generic lesson reference swapper
+    console.log(`🔄 Starting generic lesson reference swap...`);
+    const swapResult = await lessonReferenceSwapper.swapLessonReferences(
+      originalLesson._id,
+      replacementLesson._id,
+      lessonRequest.processedBy
+    );
 
-    // Hoán đổi teacherLessonEvaluation
-    const TeacherLessonEvaluation = require("../models/teacher-lesson-evaluation.model");
-    const evalA = await TeacherLessonEvaluation.findOne({
-      lesson: originalLesson._id,
-    });
-    const evalB = await TeacherLessonEvaluation.findOne({
-      lesson: replacementLesson._id,
-    });
-    if (evalA)
-      await TeacherLessonEvaluation.updateOne(
-        { _id: evalA._id },
-        { lesson: replacementLesson._id }
-      );
-    if (evalB)
-      await TeacherLessonEvaluation.updateOne(
-        { _id: evalB._id },
-        { lesson: originalLesson._id }
-      );
+    if (!swapResult.success) {
+      console.error("❌ Lesson reference swap failed:", swapResult.errors);
+      throw new Error("Failed to swap lesson references");
+    }
 
-    // Hoán đổi studentLessonEvaluation
-    const StudentLessonEvaluation = require("../models/student-lesson-evaluation.model");
-    const studentEvalsA = await StudentLessonEvaluation.find({
-      lesson: originalLesson._id,
-    });
-    const studentEvalsB = await StudentLessonEvaluation.find({
-      lesson: replacementLesson._id,
-    });
-    for (const se of studentEvalsA) {
-      await StudentLessonEvaluation.updateOne(
-        { _id: se._id },
-        { lesson: replacementLesson._id }
-      );
-    }
-    for (const se of studentEvalsB) {
-      await StudentLessonEvaluation.updateOne(
-        { _id: se._id },
-        { lesson: originalLesson._id }
-      );
-    }
+    console.log(
+      `✅ Swapped ${swapResult.totalSwapped} references across ${swapResult.swappedCollections.length} collections`
+    );
 
     // Cập nhật replacement lesson thành lesson chính
     replacementLesson.teacher = originalData.teacher;

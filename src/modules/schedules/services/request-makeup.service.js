@@ -6,6 +6,7 @@ const User = require("../../auth/models/user.model");
 const AcademicYear = require("../models/academic-year.model");
 const TimeSlot = require("../models/time-slot.model");
 const emailService = require("../../auth/services/email.service");
+const lessonReferenceSwapper = require("./lesson-reference-swapper.service");
 
 class MakeupRequestService {
   // Helper function to calculate week range from a date
@@ -144,16 +145,6 @@ class MakeupRequestService {
     try {
       console.log(`🔄 Creating makeup request for teacher ${data.teacherId}`);
 
-      // Validate dữ liệu đầu vào
-      if (
-        !data.teacherId ||
-        !data.originalLessonId ||
-        !data.replacementLessonId ||
-        !data.reason
-      ) {
-        throw new Error("Missing required fields for makeup request");
-      }
-
       // Kiểm tra originalLesson tồn tại và thuộc về giáo viên
       const originalLesson = await Lesson.findById(data.originalLessonId)
         .populate("class", "className gradeLevel")
@@ -161,73 +152,16 @@ class MakeupRequestService {
         .populate("academicYear", "name startDate endDate")
         .populate("timeSlot", "period startTime endTime");
 
-      if (!originalLesson) {
-        throw new Error("Original lesson not found");
-      }
-
-      if (originalLesson.teacher.toString() !== data.teacherId) {
-        throw new Error("Original lesson does not belong to this teacher");
-      }
-
-      // Validate status - phải là absent
-      if (originalLesson.status !== "absent") {
-        throw new Error("Original lesson must be absent for makeup request");
-      }
-
       // Kiểm tra replacementLesson tồn tại và là tiết trống
       const replacementLesson = await Lesson.findById(data.replacementLessonId)
         .populate("class", "className gradeLevel")
         .populate("timeSlot", "period startTime endTime");
-
-      if (!replacementLesson) {
-        throw new Error("Replacement lesson not found");
-      }
-
-      if (replacementLesson.type !== "empty") {
-        throw new Error("Replacement lesson must be empty for makeup request");
-      }
-
-      if (replacementLesson.status !== "scheduled") {
-        throw new Error("Replacement lesson must be scheduled");
-      }
-
-      // Kiểm tra cùng lớp
-      if (
-        originalLesson.class._id.toString() !==
-        replacementLesson.class._id.toString()
-      ) {
-        throw new Error(
-          "Original and replacement lessons must be in the same class"
-        );
-      }
 
       // Kiểm tra cùng tuần
       const originalWeek = this.getWeekRange(originalLesson.scheduledDate);
       const replacementWeek = this.getWeekRange(
         replacementLesson.scheduledDate
       );
-
-      if (
-        originalWeek.startOfWeek.getTime() !==
-        replacementWeek.startOfWeek.getTime()
-      ) {
-        throw new Error(
-          "Original and replacement lessons must be in the same week"
-        );
-      }
-
-      // Kiểm tra không có request đang pending cho lesson này
-      const existingRequest = await LessonRequest.findOne({
-        originalLesson: data.originalLessonId,
-        status: "pending",
-        requestType: "makeup",
-      });
-
-      if (existingRequest) {
-        throw new Error(
-          "There is already a pending makeup request for this lesson"
-        );
-      }
 
       // Tạo lesson request với thông tin tuần tự động tính toán
       const lessonRequestData = {
@@ -244,10 +178,6 @@ class MakeupRequestService {
             startOfWeek: originalWeek.startOfWeek,
             endOfWeek: originalWeek.endOfWeek,
           },
-        },
-        makeupInfo: {
-          originalDate: originalLesson.scheduledDate,
-          absentReason: data.absentReason || data.reason,
         },
         createdBy: data.teacherId,
       };
@@ -280,7 +210,23 @@ class MakeupRequestService {
         .populate("additionalInfo.academicYear", "name startDate endDate");
 
       // Gửi email thông báo cho manager
-      await this.sendNewMakeupRequestToManager(populatedRequest);
+      const managerEmails = await this.sendNewMakeupRequestToManager(
+        populatedRequest
+      );
+
+      // Cập nhật emailsSent với danh sách email thực tế
+      if (managerEmails && managerEmails.length > 0) {
+        await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
+          $push: {
+            emailsSent: {
+              type: "request",
+              recipients: managerEmails,
+              sentAt: new Date(),
+              subject: `Yêu cầu dạy bù mới - ${lessonRequest.requestId}`,
+            },
+          },
+        });
+      }
 
       console.log(`✅ Created makeup request: ${lessonRequest.requestId}`);
 
@@ -315,7 +261,7 @@ class MakeupRequestService {
 
       if (managers.length === 0) {
         console.log("⚠️ No managers found to send notification");
-        return;
+        return [];
       }
 
       // Tạo email content
@@ -340,9 +286,6 @@ class MakeupRequestService {
               lessonRequest.additionalInfo.subjectInfo.subjectName
             }</p>
             <p><strong>Lý do:</strong> ${lessonRequest.reason}</p>
-            <p><strong>Lý do vắng:</strong> ${
-              lessonRequest.makeupInfo.absentReason
-            }</p>
           </div>
           
           <div style="background-color: #e8f4f8; padding: 20px; border-radius: 8px; margin: 20px 0;">
@@ -378,16 +321,20 @@ class MakeupRequestService {
       `;
 
       // Gửi email cho từng manager
+      const sentEmails = [];
       for (const manager of managers) {
         await emailService.sendEmail(manager.email, subject, emailContent);
+        sentEmails.push(manager.email);
       }
 
       console.log(
         `📧 Sent makeup request notification to ${managers.length} managers`
       );
+      return sentEmails;
     } catch (error) {
       console.error("❌ Error sending email notification:", error.message);
       // Không throw error để không làm gián đoạn flow chính
+      return [];
     }
   }
 
@@ -486,43 +433,70 @@ class MakeupRequestService {
     }
   }
 
-  // Xử lý approval cho makeup request
+  // Xử lý approval cho makeup request - hoán đổi như swap
   async processMakeupApproval(
     lessonRequest,
     originalLesson,
     replacementLesson
   ) {
-    // Tạo tiết makeup từ replacement lesson
-    replacementLesson.teacher = originalLesson.teacher;
-    replacementLesson.subject = originalLesson.subject;
-    replacementLesson.topic =
-      originalLesson.topic ||
-      `Makeup for ${new Date(originalLesson.scheduledDate).toLocaleDateString(
-        "vi-VN"
-      )}`;
-    replacementLesson.notes = `Makeup lesson for absent lesson on ${new Date(
-      originalLesson.scheduledDate
-    ).toLocaleDateString("vi-VN")}`;
-    replacementLesson.type = "makeup";
-
-    // QUAN TRỌNG: Tạo liên kết với tiết absent thay vì copy lessonId
-    // (không thể copy lessonId vì vi phạm unique constraint)
-    replacementLesson.makeupInfo = {
-      originalLesson: originalLesson._id,
-      originalLessonId: originalLesson.lessonId, // Lưu reference để tracking
-      reason: lessonRequest.reason,
-      originalDate: originalLesson.scheduledDate,
+    // Hoán đổi thông tin giữa 2 tiết (như swap)
+    const originalData = {
+      teacher: originalLesson.teacher,
+      subject: originalLesson.subject,
+      topic: originalLesson.topic,
+      notes: originalLesson.notes,
+      type: originalLesson.type,
+      description: originalLesson.description,
+      status: originalLesson.status,
     };
-    replacementLesson.lastModifiedBy = lessonRequest.processedBy;
 
-    // Save makeup lesson với lessonId riêng (do pre-save middleware tự tạo)
-    await replacementLesson.save();
+    const replacementData = {
+      type: "empty",
+      status: "scheduled",
+    };
 
-    // Lưu thông tin makeup lesson vào request
-    lessonRequest.makeupInfo.createdMakeupLesson = replacementLesson._id;
+    // Sử dụng generic lesson reference swapper
+    console.log(`🔄 Starting generic lesson reference swap...`);
+    const swapResult = await lessonReferenceSwapper.swapLessonReferences(
+      originalLesson._id,
+      replacementLesson._id,
+      lessonRequest.processedBy
+    );
+
+    if (!swapResult.success) {
+      console.error("❌ Lesson reference swap failed:", swapResult.errors);
+      throw new Error("Failed to swap lesson references");
+    }
 
     console.log(
-      `📚 Created makeup lesson: ${replacementLesson.lessonId} for absent lesson: ${originalLesson.lessonId}`
+      `✅ Swapped ${swapResult.totalSwapped} references across ${swapResult.swappedCollections.length} collections`
+    );
+
+    // Cập nhật replacement lesson thành lesson chính (hoán đổi với tiết trống)
+    replacementLesson.teacher = originalData.teacher;
+    replacementLesson.subject = originalData.subject;
+    replacementLesson.topic = originalData.topic;
+    replacementLesson.notes = originalData.notes;
+    replacementLesson.type = originalData.type;
+    replacementLesson.description = originalData.description;
+    replacementLesson.status = originalData.status;
+    replacementLesson.lastModifiedBy = lessonRequest.processedBy;
+
+    // Cập nhật original lesson thành tiết trống
+    originalLesson.teacher = replacementData.teacher;
+    originalLesson.subject = replacementData.subject;
+    originalLesson.topic = replacementData.topic;
+    originalLesson.notes = replacementData.notes;
+    originalLesson.type = replacementData.type;
+    originalLesson.description = replacementData.description;
+    originalLesson.status = replacementData.status;
+    originalLesson.lastModifiedBy = lessonRequest.processedBy;
+
+    await originalLesson.save();
+    await replacementLesson.save();
+
+    console.log(
+      `🔄 Swapped lessons: ${originalLesson.lessonId} ↔ ${replacementLesson.lessonId}`
     );
   }
 
@@ -730,9 +704,7 @@ class MakeupRequestService {
               <p><strong>Chủ đề:</strong> ${
                 originalLesson.topic || "Chưa có"
               }</p>
-              <p><strong>Lý do vắng:</strong> ${
-                lessonRequest.makeupInfo?.absentReason || "Không rõ"
-              }</p>
+              <p><strong>Lý do:</strong> ${lessonRequest.reason}</p>
             </div>
             
             <div style="padding: 15px; background-color: #d4edda; border-radius: 5px;">
@@ -766,6 +738,46 @@ class MakeupRequestService {
     `;
   }
 
+  // Huỷ yêu cầu dạy bù (makeup) - chỉ giáo viên tạo request được huỷ
+  async cancelMakeupRequest(requestId, teacherId) {
+    try {
+      const lessonRequest = await LessonRequest.findById(requestId).populate(
+        "requestingTeacher",
+        "_id name email fullName"
+      );
+
+      if (!lessonRequest) {
+        throw new Error("Makeup request not found");
+      }
+      if (lessonRequest.requestType !== "makeup") {
+        throw new Error("Not a makeup request");
+      }
+      if (lessonRequest.status !== "pending") {
+        throw new Error("Only pending requests can be cancelled");
+      }
+      if (
+        lessonRequest.requestingTeacher._id.toString() !== teacherId.toString()
+      ) {
+        throw new Error("Only the requesting teacher can cancel this request");
+      }
+
+      lessonRequest.status = "cancelled";
+      lessonRequest.cancelledBy = teacherId;
+      lessonRequest.cancelledAt = new Date();
+      lessonRequest.lastModifiedBy = teacherId;
+      await lessonRequest.save();
+
+      return {
+        success: true,
+        message: "Makeup request cancelled successfully",
+        request: lessonRequest,
+      };
+    } catch (error) {
+      console.error("Error cancelling makeup request:", error);
+      throw new Error(error.message || "Failed to cancel makeup request");
+    }
+  }
+
   // Xử lý khi giáo viên đánh giá tiết makeup completed
   async handleMakeupLessonCompleted(makeupLessonId) {
     try {
@@ -773,29 +785,15 @@ class MakeupRequestService {
 
       // Tìm makeup lesson
       const makeupLesson = await Lesson.findById(makeupLessonId);
-      if (!makeupLesson || makeupLesson.type !== "makeup") {
-        return; // Không phải makeup lesson
+      if (!makeupLesson) {
+        return; // Không tìm thấy lesson
       }
 
-      // Tìm original lesson từ makeupInfo
-      if (makeupLesson.makeupInfo && makeupLesson.makeupInfo.originalLesson) {
-        const originalLesson = await Lesson.findById(
-          makeupLesson.makeupInfo.originalLesson
-        );
-
-        if (originalLesson && originalLesson.status === "absent") {
-          // Cập nhật original lesson thành completed
-          originalLesson.status = "completed";
-          originalLesson.actualDate = makeupLesson.actualDate || new Date();
-          originalLesson.lastModifiedBy = makeupLesson.lastModifiedBy;
-
-          await originalLesson.save();
-
-          console.log(
-            `✅ Updated original absent lesson ${originalLesson.lessonId} to completed`
-          );
-        }
-      }
+      // Với logic hoán đổi mới, không cần tracking makeupInfo nữa
+      // Lesson đã được hoán đổi trực tiếp
+      console.log(
+        `✅ Makeup lesson ${makeupLesson.lessonId} completed successfully`
+      );
     } catch (error) {
       console.error(
         "❌ Error handling makeup lesson completion:",

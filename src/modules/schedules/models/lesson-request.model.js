@@ -143,8 +143,6 @@ const lessonRequestSchema = new mongoose.Schema(
     makeupInfo: {
       // Ngày gốc của tiết absent
       originalDate: Date,
-      // Lý do absent
-      absentReason: String,
       // Tiết makeup đã được tạo (sau khi approve)
       createdMakeupLesson: {
         type: mongoose.Schema.Types.ObjectId,
@@ -164,14 +162,12 @@ const lessonRequestSchema = new mongoose.Schema(
         status: {
           type: String,
           enum: ["pending", "approved", "rejected"],
-          default: "pending",
         },
         responseDate: Date,
       },
       // Thông tin về conflict check
       hasConflict: {
         type: Boolean,
-        default: false,
       },
       conflictDetails: {
         type: String,
@@ -231,10 +227,6 @@ lessonRequestSchema.index({ "additionalInfo.academicYear": 1 });
 // Indexes cho substitute
 lessonRequestSchema.index({ lesson: 1 });
 lessonRequestSchema.index({ "candidateTeachers.teacher": 1 });
-
-// Indexes cho swap
-lessonRequestSchema.index({ "swapInfo.replacementTeacher": 1 });
-lessonRequestSchema.index({ "swapInfo.replacementTeacherNotified": 1 });
 
 // Virtual để lấy thông tin chi tiết
 lessonRequestSchema.virtual("originalLessonDetails", {

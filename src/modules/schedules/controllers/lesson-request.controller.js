@@ -196,7 +196,6 @@ class LessonRequestController {
         originalLessonId: req.body.originalLessonId,
         replacementLessonId: req.body.replacementLessonId,
         reason: req.body.reason,
-        absentReason: req.body.absentReason,
       };
 
       const result = await makeupRequestService.createMakeupRequest(data);
@@ -847,6 +846,31 @@ class LessonRequestController {
     } catch (error) {
       console.error("Error in cancelSubstituteRequest:", error);
       res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Huỷ yêu cầu dạy bù (makeup) - chỉ giáo viên tạo request được huỷ
+  async cancelMakeupRequest(req, res) {
+    try {
+      const { requestId } = req.params;
+      const teacherId = req.user.id;
+
+      const result = await makeupRequestService.cancelMakeupRequest(
+        requestId,
+        teacherId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: result.message || "Makeup request cancelled successfully",
+        request: result.request,
+      });
+    } catch (error) {
+      console.error("Error in cancelMakeupRequest:", error);
+      res.status(400).json({
         success: false,
         message: error.message,
       });

@@ -210,7 +210,12 @@ class LessonRequestValidation {
   // Helper function để tính tuần
   getWeekRange(date) {
     const startOfWeek = new Date(date);
-    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1);
+    // getDay() trả về 0-6 (0 = Chủ nhật, 1 = Thứ 2, ..., 6 = Thứ 7)
+    // Để tính thứ 2 đầu tuần: nếu hôm nay là chủ nhật (0) thì lùi 6 ngày, nếu là thứ 2 (1) thì lùi 0 ngày, v.v.
+    const dayOfWeek = startOfWeek.getDay();
+    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+    startOfWeek.setDate(startOfWeek.getDate() - daysToSubtract);
     startOfWeek.setHours(0, 0, 0, 0);
 
     const endOfWeek = new Date(startOfWeek);
@@ -252,11 +257,120 @@ class LessonRequestValidation {
         .withMessage("Reason must be between 10 and 500 characters")
         .trim(),
 
-      body("absentReason")
-        .optional()
-        .isLength({ max: 500 })
-        .withMessage("Absent reason cannot exceed 500 characters")
-        .trim(),
+      // Custom validation để kiểm tra makeup request
+      body().custom(async (value, { req }) => {
+        const Lesson = require("../models/lesson.model");
+        const LessonRequest = require("../models/lesson-request.model");
+
+        const { originalLessonId, replacementLessonId } = value;
+        const requestingTeacherId = req.user.id;
+
+        // Kiểm tra original lesson tồn tại và thuộc về giáo viên
+        const originalLesson = await Lesson.findById(originalLessonId)
+          .populate("teacher", "name email fullName")
+          .populate("class", "className gradeLevel")
+          .populate("subject", "subjectName subjectCode")
+          .populate("timeSlot", "period startTime endTime");
+
+        if (!originalLesson) {
+          throw new Error("Original lesson not found");
+        }
+
+        if (originalLesson.teacher._id.toString() !== requestingTeacherId) {
+          throw new Error("Original lesson does not belong to this teacher");
+        }
+
+        if (originalLesson.status !== "scheduled") {
+          throw new Error(
+            "Original lesson must be scheduled for makeup request"
+          );
+        }
+
+        // Kiểm tra replacement lesson tồn tại và là tiết trống
+        const replacementLesson = await Lesson.findById(replacementLessonId)
+          .populate("class", "className gradeLevel")
+          .populate("timeSlot", "period startTime endTime");
+
+        if (!replacementLesson) {
+          throw new Error("Replacement lesson not found");
+        }
+
+        if (replacementLesson.type !== "empty") {
+          throw new Error(
+            "Replacement lesson must be empty for makeup request"
+          );
+        }
+
+        if (replacementLesson.status !== "scheduled") {
+          throw new Error("Replacement lesson must be scheduled");
+        }
+
+        // Kiểm tra cùng lớp
+        if (
+          originalLesson.class._id.toString() !==
+          replacementLesson.class._id.toString()
+        ) {
+          throw new Error(
+            "Original and replacement lessons must be in the same class"
+          );
+        }
+
+        // Kiểm tra cùng tuần
+        const originalWeek = this.getWeekRange(originalLesson.scheduledDate);
+        const replacementWeek = this.getWeekRange(
+          replacementLesson.scheduledDate
+        );
+
+        console.log(originalWeek);
+        console.log(replacementWeek);
+
+        if (
+          originalWeek.startOfWeek.getTime() !==
+          replacementWeek.startOfWeek.getTime()
+        ) {
+          throw new Error(
+            "Original and replacement lessons must be in the same week"
+          );
+        }
+
+        // Kiểm tra không có request đang pending cho lesson này
+        const existingRequest = await LessonRequest.findOne({
+          originalLesson: originalLessonId,
+          status: "pending",
+          requestType: "makeup",
+        });
+
+        if (existingRequest) {
+          throw new Error(
+            "There is already a pending makeup request for this lesson"
+          );
+        }
+
+        // Kiểm tra xung đột với các yêu cầu khác
+        const pendingRequests = await LessonRequest.find({
+          $or: [
+            { originalLesson: originalLessonId },
+            { originalLesson: replacementLessonId },
+            { replacementLesson: originalLessonId },
+            { replacementLesson: replacementLessonId },
+          ],
+          status: "pending",
+          requestType: { $in: ["substitute", "makeup", "swap"] },
+        });
+
+        if (pendingRequests.length > 0) {
+          const requestTypes = [
+            ...new Set(pendingRequests.map((req) => req.requestType)),
+          ];
+          throw new Error(
+            `Có ${pendingRequests.length} yêu cầu ${requestTypes.join(
+              ", "
+            )} đang chờ xử lý cho các tiết học này`
+          );
+        }
+
+        return true;
+      }),
     ];
   }
 
@@ -307,6 +421,55 @@ class LessonRequestValidation {
         .isLength({ min: 10, max: 1000 })
         .withMessage("Reason must be between 10 and 1000 characters")
         .trim(),
+
+      // Custom validation để kiểm tra substitute request
+      body().custom(async (value, { req }) => {
+        const Lesson = require("../models/lesson.model");
+        const User = require("../../auth/models/user.model");
+
+        const { lessonId, candidateTeacherIds } = value;
+        const requestingTeacherId = req.user.id;
+
+        // Kiểm tra lesson tồn tại
+        const lesson = await Lesson.findById(lessonId)
+          .populate("teacher", "name email fullName")
+          .populate("class", "className gradeLevel")
+          .populate("subject", "subjectName subjectCode")
+          .populate("timeSlot", "period startTime endTime");
+
+        if (!lesson) {
+          throw new Error("Lesson not found");
+        }
+
+        // Kiểm tra lesson thuộc về giáo viên đang request
+        if (lesson.teacher._id.toString() !== requestingTeacherId) {
+          throw new Error("Only the assigned teacher can request substitution");
+        }
+
+        // Kiểm tra lesson có status phù hợp
+        if (lesson.status !== "scheduled") {
+          throw new Error("Lesson must be scheduled for substitute request");
+        }
+
+        // Kiểm tra candidate teachers tồn tại và là giáo viên
+        for (const teacherId of candidateTeacherIds) {
+          const teacher = await User.findById(teacherId);
+          if (!teacher) {
+            throw new Error(`Candidate teacher ${teacherId} not found`);
+          }
+
+          if (!teacher.role.includes("teacher")) {
+            throw new Error(`User ${teacherId} is not a teacher`);
+          }
+
+          // Không được chọn chính mình
+          if (teacherId === requestingTeacherId) {
+            throw new Error("Cannot select yourself as a candidate teacher");
+          }
+        }
+
+        return true;
+      }),
     ];
   }
 
@@ -323,11 +486,38 @@ class LessonRequestValidation {
           return true;
         }),
 
-      // body("reason")
-      //   .optional()
-      //   .isLength({ max: 500 })
-      //   .withMessage("Rejection reason must not exceed 500 characters")
-      //   .trim(),
+      // Custom validation để kiểm tra quyền và trạng thái
+      body().custom(async (value, { req }) => {
+        const LessonRequest = require("../models/lesson-request.model");
+
+        const lessonRequest = await LessonRequest.findById(
+          req.params.requestId
+        ).populate("substituteInfo.candidateTeachers", "name email fullName");
+
+        if (!lessonRequest) {
+          throw new Error("Substitute request not found");
+        }
+
+        if (lessonRequest.requestType !== "substitute") {
+          throw new Error("Not a substitute request");
+        }
+
+        if (lessonRequest.status !== "pending") {
+          throw new Error("Request has already been processed");
+        }
+
+        // Kiểm tra quyền - chỉ candidate teacher mới được reject
+        const candidateTeacherIds =
+          lessonRequest.substituteInfo.candidateTeachers.map((teacher) =>
+            teacher._id.toString()
+          );
+
+        if (!candidateTeacherIds.includes(req.user.id)) {
+          throw new Error("Teacher not authorized to reject this request");
+        }
+
+        return true;
+      }),
     ];
   }
 
@@ -351,6 +541,54 @@ class LessonRequestValidation {
         .isLength({ max: 500 })
         .withMessage("Comment cannot exceed 500 characters")
         .trim(),
+    ];
+  }
+
+  // Validation cho việc approve substitute request
+  validateSubstituteApproval() {
+    return [
+      param("requestId")
+        .notEmpty()
+        .withMessage("Request ID is required")
+        .custom((value) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            throw new Error("Invalid request ID format");
+          }
+          return true;
+        }),
+
+      // Custom validation để kiểm tra quyền và trạng thái
+      body().custom(async (value, { req }) => {
+        const LessonRequest = require("../models/lesson-request.model");
+
+        const lessonRequest = await LessonRequest.findById(
+          req.params.requestId
+        ).populate("substituteInfo.candidateTeachers", "name email fullName");
+
+        if (!lessonRequest) {
+          throw new Error("Substitute request not found");
+        }
+
+        if (lessonRequest.requestType !== "substitute") {
+          throw new Error("Not a substitute request");
+        }
+
+        if (lessonRequest.status !== "pending") {
+          throw new Error("Request has already been processed");
+        }
+
+        // Kiểm tra quyền - chỉ candidate teacher mới được approve
+        const candidateTeacherIds =
+          lessonRequest.substituteInfo.candidateTeachers.map((teacher) =>
+            teacher._id.toString()
+          );
+
+        if (!candidateTeacherIds.includes(req.user.id)) {
+          throw new Error("Teacher not authorized to approve this request");
+        }
+
+        return true;
+      }),
     ];
   }
 
@@ -616,6 +854,47 @@ class LessonRequestValidation {
           }
           return true;
         }),
+    ];
+  }
+
+  // Validation cho việc cancel request
+  validateCancelRequest() {
+    return [
+      param("requestId")
+        .notEmpty()
+        .withMessage("Request ID is required")
+        .custom((value) => {
+          if (!mongoose.Types.ObjectId.isValid(value)) {
+            throw new Error("Invalid request ID format");
+          }
+          return true;
+        }),
+
+      // Custom validation để kiểm tra quyền và trạng thái
+      body().custom(async (value, { req }) => {
+        const LessonRequest = require("../models/lesson-request.model");
+
+        const lessonRequest = await LessonRequest.findById(
+          req.params.requestId
+        );
+
+        if (!lessonRequest) {
+          throw new Error("Request not found");
+        }
+
+        if (lessonRequest.status !== "pending") {
+          throw new Error("Only pending requests can be cancelled");
+        }
+
+        // Kiểm tra quyền - chỉ requesting teacher mới được cancel
+        if (lessonRequest.requestingTeacher.toString() !== req.user.id) {
+          throw new Error(
+            "Only the requesting teacher can cancel this request"
+          );
+        }
+
+        return true;
+      }),
     ];
   }
 

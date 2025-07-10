@@ -16,44 +16,21 @@ class SubstituteRequestService {
     reason
   ) {
     try {
-      // Validate lesson exists and is in scheduled status
+      // Get lesson information
       const lesson = await Lesson.findById(lessonId)
         .populate("class", "className")
         .populate("subject", "subjectName")
         .populate("timeSlot", "period startTime endTime")
         .populate("teacher", "name email");
 
-      if (!lesson) {
-        throw new Error("Lesson not found");
-      }
-
-      if (lesson.status !== "scheduled") {
-        throw new Error(
-          "Can only create substitute requests for scheduled lessons"
-        );
-      }
-
-      if (lesson.teacher._id.toString() !== requestingTeacherId.toString()) {
-        throw new Error("Only the assigned teacher can request substitution");
-      }
-
-      // Validate candidate teachers
+      // Get candidate teachers information
       const candidateTeachers = await User.find({
         _id: { $in: candidateTeacherIds },
         role: { $in: ["teacher"] },
       });
 
-      if (candidateTeachers.length !== candidateTeacherIds.length) {
-        throw new Error(
-          "Some candidate teachers not found or not valid teachers"
-        );
-      }
-
-      // Không kiểm tra xung đột thời gian - cho phép tất cả giáo viên cùng bộ môn
-      // Thông tin xung đột sẽ được hiển thị trong API getAvailableTeachers
-
       // Create substitute request
-      const substituteRequest = new LessonRequest({
+      const lessonRequest = new LessonRequest({
         requestType: "substitute",
         lesson: lessonId,
         requestingTeacher: requestingTeacherId,
@@ -65,16 +42,38 @@ class SubstituteRequestService {
         createdBy: requestingTeacherId,
       });
 
-      await substituteRequest.save();
+      await lessonRequest.save();
 
       // Send email notifications
-      await this.sendRequestEmails(substituteRequest._id);
+      await this.sendRequestEmails(lessonRequest._id);
 
-      return await this.getSubstituteRequestById(substituteRequest._id);
+      return await this.getSubstituteRequestById(lessonRequest._id);
     } catch (error) {
       console.error("Error creating substitute request:", error);
       throw error;
     }
+  }
+
+  async getSubstituteRequestById(requestId) {
+    const request = await LessonRequest.findById(requestId)
+      .populate({
+        path: "lesson",
+        populate: [
+          { path: "class", select: "className" },
+          { path: "subject", select: "subjectName" },
+          { path: "timeSlot", select: "period startTime endTime" },
+          { path: "teacher", select: "name email" },
+        ],
+      })
+      .populate("requestingTeacher", "name email")
+      .populate("candidateTeachers.teacher", "name email")
+      .populate("approvedTeacher", "name email");
+
+    if (!request) {
+      throw new Error("Substitute request not found");
+    }
+
+    return request;
   }
 
   // Get teacher's substitute requests
@@ -107,19 +106,6 @@ class SubstituteRequestService {
   async approveRequest(requestId, teacherId) {
     try {
       const request = await this.getSubstituteRequestById(requestId);
-      // Check if teacher is in candidate list
-      const teacherIdStr = teacherId._id
-        ? teacherId._id.toString()
-        : teacherId.toString();
-      const isCandidate = request.candidateTeachers.some((c) => {
-        const candidateId = c.teacher._id
-          ? c.teacher._id.toString()
-          : c.teacher.toString();
-        return candidateId === teacherIdStr;
-      });
-      if (!isCandidate) {
-        throw new Error("Teacher not authorized to approve this request");
-      }
       // Approve the request
       await request.approveByTeacher(teacherId);
       // Update the lesson with substitute teacher (không thay thế giáo viên gốc)
@@ -143,13 +129,6 @@ class SubstituteRequestService {
   async rejectRequest(requestId, teacherId) {
     try {
       const request = await this.getSubstituteRequestById(requestId);
-      // Check if teacher is in candidate list
-      const isCandidate = request.candidateTeachers.some(
-        (c) => c.teacher._id.toString() === teacherId.toString()
-      );
-      if (!isCandidate) {
-        throw new Error("Teacher not authorized to reject this request");
-      }
       // Reject the request
       await request.rejectByTeacher(teacherId);
       // Send rejection emails
@@ -165,10 +144,6 @@ class SubstituteRequestService {
   async cancelRequest(requestId, teacherId) {
     try {
       const request = await this.getSubstituteRequestById(requestId);
-      // Check if teacher is the requesting teacher
-      if (request.requestingTeacher._id.toString() !== teacherId.toString()) {
-        throw new Error("Only the requesting teacher can cancel this request");
-      }
       await request.cancel();
       return await this.getSubstituteRequestById(requestId);
     } catch (error) {

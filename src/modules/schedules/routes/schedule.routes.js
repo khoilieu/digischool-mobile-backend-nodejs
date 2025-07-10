@@ -61,10 +61,7 @@ router.get(
 
 // GET /api/schedules/check-class - Kiểm tra lớp có tồn tại không ✅
 // Ví dụ: /api/schedules/check-class?className=12A1&academicYear=2024-2025
-router.get(
-  "/check-class",
-  scheduleController.checkClassExists
-);
+router.get("/check-class", scheduleController.checkClassExists);
 
 // PATCH /api/schedules/lesson/:lessonId/complete - Hoàn thành tiết học ✅
 // Ví dụ: /api/schedules/lesson/675a1b2c3d4e5f6789012345/complete

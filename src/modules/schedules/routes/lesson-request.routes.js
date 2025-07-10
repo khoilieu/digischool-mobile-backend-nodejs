@@ -9,28 +9,36 @@ router.use(authMiddleware.protect);
 
 // ================================ MAKEUP ROUTES (DẠY BÙ) ================================
 
-// GET /api/schedules/lesson-request/makeup/teacher-lessons - Lấy các tiết absent của giáo viên để dạy bù
-router.get(
-  "/makeup/teacher-lessons",
-  authMiddleware.authorize("teacher", "admin", "manager"),
-  lessonRequestValidation.validateTeacherLessonsQuery(),
-  lessonRequestController.getTeacherLessonsForMakeup
-);
-
-// GET /api/schedules/lesson-request/makeup/available-lessons - Lấy các tiết trống để dạy bù
-router.get(
-  "/makeup/available-lessons",
-  authMiddleware.authorize("teacher", "admin", "manager"),
-  lessonRequestValidation.validateAvailableLessonsQuery(),
-  lessonRequestController.getAvailableLessonsForMakeup
-);
-
 // POST /api/schedules/lesson-request/makeup/create - Tạo yêu cầu dạy bù
 router.post(
   "/makeup/create",
   authMiddleware.authorize("teacher"),
   lessonRequestValidation.createMakeupRequest(),
   lessonRequestController.createMakeupRequest
+);
+
+// POST /api/schedules/lesson-request/makeup/:requestId/cancel - Huỷ yêu cầu dạy bù
+router.post(
+  "/makeup/:requestId/cancel",
+  authMiddleware.authorize("teacher"),
+  lessonRequestValidation.validateRequestId(),
+  lessonRequestController.cancelMakeupRequest
+);
+
+// POST /api/schedules/lesson-request/:requestId/approve - Duyệt yêu cầu (makeup)
+router.post(
+  "/makeup/:requestId/approve",
+  authMiddleware.authorize("admin", "manager"),
+  lessonRequestValidation.processRequest(),
+  lessonRequestController.approveRequest
+);
+
+// POST /api/schedules/lesson-request/:requestId/reject - Từ chối yêu cầu (makeup)
+router.post(
+  "/makeup/:requestId/reject",
+  authMiddleware.authorize("admin", "manager"),
+  lessonRequestValidation.processRequest(),
+  lessonRequestController.rejectRequest
 );
 
 // ================================ SUBSTITUTE ROUTES (DẠY THAY) ================================
@@ -77,7 +85,7 @@ router.post(
 
 // ================================ SWAP SPECIFIC ROUTES ================================
 
-// POST /api/schedules/lesson-request/swap/create - Tạo yêu cầu đổi tiết
+// ✅ POST /api/schedules/lesson-request/swap/create - Tạo yêu cầu đổi tiết
 router.post(
   "/swap/create",
   authMiddleware.authorize("teacher"),
@@ -85,7 +93,7 @@ router.post(
   lessonRequestController.createSwapRequest
 );
 
-// POST /api/schedules/lesson-request/swap/:requestId/cancel - Hủy yêu cầu đổi tiết bởi requesting teacher
+// ✅ POST /api/schedules/lesson-request/swap/:requestId/cancel - Hủy yêu cầu đổi tiết bởi requesting teacher
 router.post(
   "/swap/:requestId/cancel",
   authMiddleware.authorize("teacher"),
@@ -93,7 +101,7 @@ router.post(
   lessonRequestController.cancelSwapRequest
 );
 
-// POST /api/schedules/lesson-request/swap/:requestId/approve - Duyệt yêu cầu đổi tiết bởi replacement teacher
+// ✅ POST /api/schedules/lesson-request/swap/:requestId/approve - Duyệt yêu cầu đổi tiết bởi replacement teacher
 router.post(
   "/swap/:requestId/approve",
   authMiddleware.authorize("teacher"),
@@ -101,37 +109,12 @@ router.post(
   lessonRequestController.approveSwapRequest
 );
 
-// POST /api/schedules/lesson-request/swap/:requestId/reject - Từ chối yêu cầu đổi tiết bởi replacement teacher
+// ✅ POST /api/schedules/lesson-request/swap/:requestId/reject - Từ chối yêu cầu đổi tiết bởi replacement teacher
 router.post(
   "/swap/:requestId/reject",
   authMiddleware.authorize("teacher"),
   lessonRequestValidation.processRequest(),
   lessonRequestController.rejectSwapRequest
-);
-
-// ================================ MAKEUP ROUTES (DẠY BÙ) ================================
-
-// POST /api/schedules/lesson-request/:requestId/approve - Duyệt yêu cầu (makeup)
-router.post(
-  "/:requestId/approve",
-  authMiddleware.authorize("admin", "manager"),
-  lessonRequestValidation.processRequest(),
-  lessonRequestController.approveRequest
-);
-
-// POST /api/schedules/lesson-request/:requestId/reject - Từ chối yêu cầu (makeup)
-router.post(
-  "/:requestId/reject",
-  authMiddleware.authorize("admin", "manager"),
-  lessonRequestValidation.processRequest(),
-  lessonRequestController.rejectRequest
-);
-
-// GET /api/schedules/lesson-request/:requestId - Lấy chi tiết yêu cầu
-router.get(
-  "/:requestId",
-  lessonRequestValidation.validateRequestId(),
-  lessonRequestController.getRequestDetails
 );
 
 // ================================ COMMON ROUTES ================================
@@ -142,14 +125,6 @@ router.get(
   authMiddleware.authorize("teacher", "admin", "manager"),
   lessonRequestValidation.validateTeacherRequestsQuery(),
   lessonRequestController.getTeacherRequests
-);
-
-// GET /api/schedules/lesson-request/pending - Lấy danh sách yêu cầu đang chờ duyệt (swap & makeup)
-router.get(
-  "/pending",
-  authMiddleware.authorize("admin", "manager"),
-  lessonRequestValidation.validatePendingRequestsQuery(),
-  lessonRequestController.getPendingRequests
 );
 
 module.exports = router;
