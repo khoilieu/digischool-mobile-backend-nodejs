@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [develop]
+    branches: [dev]
   pull_request:
-    branches: [develop]
+    branches: [dev]
 
 jobs:
   build-test-push:
@@ -27,7 +27,7 @@ jobs:
   deploy-gcp:
     needs: build-test-push
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     steps:
       - name: Checkout
         uses: actions/checkout@v3
