@@ -30,8 +30,8 @@ class LessonRequestValidation {
       body("reason")
         .notEmpty()
         .withMessage("Reason is required")
-        .isLength({ min: 10, max: 500 })
-        .withMessage("Reason must be between 10 and 500 characters")
+        .isLength({ min: 1, max: 300 })
+        .withMessage("Reason must be between 1 and 300 characters")
         .trim(),
 
       // Custom validation để kiểm tra xung đột khi tạo yêu cầu
@@ -96,20 +96,19 @@ class LessonRequestValidation {
           );
         }
 
-        // Kiểm tra cùng tuần
-        const originalWeek = this.getWeekRange(originalLesson.scheduledDate);
-        const replacementWeek = this.getWeekRange(
-          replacementLesson.scheduledDate
-        );
-
-        if (
-          originalWeek.startOfWeek.getTime() !==
-          replacementWeek.startOfWeek.getTime()
-        ) {
-          throw new Error(
-            "Original and replacement lessons must be in the same week"
-          );
-        }
+        // BỎ kiểm tra cùng tuần
+        // const originalWeek = this.getWeekRange(originalLesson.scheduledDate);
+        // const replacementWeek = this.getWeekRange(
+        //   replacementLesson.scheduledDate
+        // );
+        // if (
+        //   originalWeek.startOfWeek.getTime() !==
+        //   replacementWeek.startOfWeek.getTime()
+        // ) {
+        //   throw new Error(
+        //     "Original and replacement lessons must be in the same week"
+        //   );
+        // }
 
         // Kiểm tra không có request đang pending cho lesson này
         const existingRequest = await LessonRequest.findOne({
@@ -253,8 +252,8 @@ class LessonRequestValidation {
       body("reason")
         .notEmpty()
         .withMessage("Reason is required")
-        .isLength({ min: 10, max: 500 })
-        .withMessage("Reason must be between 10 and 500 characters")
+        .isLength({ min: 1, max: 300 })
+        .withMessage("Reason must be between 1 and 300 characters")
         .trim(),
 
       // Custom validation để kiểm tra makeup request
@@ -315,23 +314,42 @@ class LessonRequestValidation {
           );
         }
 
-        // Kiểm tra cùng tuần
-        const originalWeek = this.getWeekRange(originalLesson.scheduledDate);
-        const replacementWeek = this.getWeekRange(
-          replacementLesson.scheduledDate
-        );
+        // Kiểm tra xung đột thời gian cho giáo viên
+        const teacherConflicts = await Lesson.find({
+          teacher: originalLesson.teacher._id,
+          scheduledDate: replacementLesson.scheduledDate,
+          _id: { $ne: originalLesson._id },
+          status: "scheduled",
+        }).populate("timeSlot", "period startTime endTime");
 
-        console.log(originalWeek);
-        console.log(replacementWeek);
+        const replacementTimeSlot = replacementLesson.timeSlot;
+        const sameTimeConflicts = teacherConflicts.filter((lesson) => {
+          return lesson.timeSlot.period === replacementTimeSlot.period;
+        });
 
-        if (
-          originalWeek.startOfWeek.getTime() !==
-          replacementWeek.startOfWeek.getTime()
-        ) {
+        if (sameTimeConflicts.length > 0) {
           throw new Error(
-            "Original and replacement lessons must be in the same week"
+            `Bạn đã có tiết ${
+              sameTimeConflicts[0].timeSlot.period
+            } vào thời gian này (${new Date(
+              replacementLesson.scheduledDate
+            ).toLocaleDateString("vi-VN")})`
           );
         }
+
+        // BỎ kiểm tra cùng tuần
+        // const originalWeek = this.getWeekRange(originalLesson.scheduledDate);
+        // const replacementWeek = this.getWeekRange(
+        //   replacementLesson.scheduledDate
+        // );
+        // if (
+        //   originalWeek.startOfWeek.getTime() !==
+        //   replacementWeek.startOfWeek.getTime()
+        // ) {
+        //   throw new Error(
+        //     "Original and replacement lessons must be in the same week"
+        //   );
+        // }
 
         // Kiểm tra không có request đang pending cho lesson này
         const existingRequest = await LessonRequest.findOne({
@@ -382,10 +400,51 @@ class LessonRequestValidation {
       body("lessonId")
         .notEmpty()
         .withMessage("Lesson ID is required")
-        .custom((value) => {
+        .custom(async (value, { req }) => {
           if (!mongoose.Types.ObjectId.isValid(value)) {
             throw new Error("Invalid lesson ID format");
           }
+
+          const Lesson = require("../models/lesson.model");
+          const LessonRequest = require("../models/lesson-request.model");
+
+          const lesson = await Lesson.findById(value);
+
+          if (!lesson) {
+            throw new Error("Lesson not found");
+          }
+
+          // Kiểm tra lesson thuộc về giáo viên đang request
+          if (lesson.teacher._id.toString() !== req.user.id) {
+            throw new Error(
+              "Only the assigned teacher can request substitution"
+            );
+          }
+
+          // Kiểm tra lesson có status phù hợp
+          if (lesson.status !== "scheduled") {
+            throw new Error("Lesson must be scheduled for substitute request");
+          }
+
+          // Kiểm tra lesson type
+          if (lesson.type !== "regular" && lesson.type !== "makeup") {
+            throw new Error(
+              "Chỉ cho phép dạy thay cho tiết học thường hoặc tiết bù"
+            );
+          }
+
+          // Kiểm tra không có substitute request pending cho lesson này
+          const pendingSubstitute = await LessonRequest.findOne({
+            lesson: value,
+            requestType: "substitute",
+            status: "pending",
+          });
+          if (pendingSubstitute) {
+            throw new Error(
+              "Đã có yêu cầu dạy thay đang chờ xử lý cho tiết này"
+            );
+          }
+
           return true;
         }),
 
@@ -418,8 +477,8 @@ class LessonRequestValidation {
       body("reason")
         .notEmpty()
         .withMessage("Reason is required")
-        .isLength({ min: 10, max: 1000 })
-        .withMessage("Reason must be between 10 and 1000 characters")
+        .isLength({ min: 1, max: 300 })
+        .withMessage("Reason must be between 1 and 300 characters")
         .trim(),
 
       // Custom validation để kiểm tra substitute request
@@ -492,7 +551,7 @@ class LessonRequestValidation {
 
         const lessonRequest = await LessonRequest.findById(
           req.params.requestId
-        ).populate("substituteInfo.candidateTeachers", "name email fullName");
+        ).populate("candidateTeachers.teacher", "name email fullName");
 
         if (!lessonRequest) {
           throw new Error("Substitute request not found");
@@ -507,10 +566,9 @@ class LessonRequestValidation {
         }
 
         // Kiểm tra quyền - chỉ candidate teacher mới được reject
-        const candidateTeacherIds =
-          lessonRequest.substituteInfo.candidateTeachers.map((teacher) =>
-            teacher._id.toString()
-          );
+        const candidateTeacherIds = lessonRequest.candidateTeachers.map(
+          (candidate) => candidate.teacher._id.toString()
+        );
 
         if (!candidateTeacherIds.includes(req.user.id)) {
           throw new Error("Teacher not authorized to reject this request");
@@ -541,54 +599,6 @@ class LessonRequestValidation {
         .isLength({ max: 500 })
         .withMessage("Comment cannot exceed 500 characters")
         .trim(),
-    ];
-  }
-
-  // Validation cho việc approve substitute request
-  validateSubstituteApproval() {
-    return [
-      param("requestId")
-        .notEmpty()
-        .withMessage("Request ID is required")
-        .custom((value) => {
-          if (!mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid request ID format");
-          }
-          return true;
-        }),
-
-      // Custom validation để kiểm tra quyền và trạng thái
-      body().custom(async (value, { req }) => {
-        const LessonRequest = require("../models/lesson-request.model");
-
-        const lessonRequest = await LessonRequest.findById(
-          req.params.requestId
-        ).populate("substituteInfo.candidateTeachers", "name email fullName");
-
-        if (!lessonRequest) {
-          throw new Error("Substitute request not found");
-        }
-
-        if (lessonRequest.requestType !== "substitute") {
-          throw new Error("Not a substitute request");
-        }
-
-        if (lessonRequest.status !== "pending") {
-          throw new Error("Request has already been processed");
-        }
-
-        // Kiểm tra quyền - chỉ candidate teacher mới được approve
-        const candidateTeacherIds =
-          lessonRequest.substituteInfo.candidateTeachers.map((teacher) =>
-            teacher._id.toString()
-          );
-
-        if (!candidateTeacherIds.includes(req.user.id)) {
-          throw new Error("Teacher not authorized to approve this request");
-        }
-
-        return true;
-      }),
     ];
   }
 
@@ -644,110 +654,6 @@ class LessonRequestValidation {
 
         return true;
       }),
-    ];
-  }
-
-  // Validation cho query parameters của teacher lessons
-  validateTeacherLessonsQuery() {
-    return [
-      query("teacherId")
-        .notEmpty()
-        .withMessage("Teacher ID is required")
-        .custom((value) => {
-          if (!mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid teacher ID format");
-          }
-          return true;
-        }),
-
-      query("academicYear")
-        .notEmpty()
-        .withMessage("Academic year is required")
-        .custom((value) => {
-          if (!mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid academic year ID format");
-          }
-          return true;
-        }),
-
-      query("startOfWeek")
-        .notEmpty()
-        .withMessage("Start of week is required")
-        .isISO8601()
-        .withMessage("Start of week must be a valid date"),
-
-      query("endOfWeek")
-        .notEmpty()
-        .withMessage("End of week is required")
-        .isISO8601()
-        .withMessage("End of week must be a valid date")
-        .custom((value, { req }) => {
-          const startDate = new Date(req.query.startOfWeek);
-          const endDate = new Date(value);
-
-          if (endDate <= startDate) {
-            throw new Error("End of week must be after start of week");
-          }
-
-          return true;
-        }),
-    ];
-  }
-
-  // Validation cho available lessons query
-  validateAvailableLessonsQuery() {
-    return [
-      query("classId")
-        .notEmpty()
-        .withMessage("Class ID is required")
-        .custom((value) => {
-          if (!mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid class ID format");
-          }
-          return true;
-        }),
-
-      query("academicYear")
-        .notEmpty()
-        .withMessage("Academic year is required")
-        .custom((value) => {
-          if (!mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid academic year ID format");
-          }
-          return true;
-        }),
-
-      query("subjectId")
-        .notEmpty()
-        .withMessage("Subject ID is required")
-        .custom((value) => {
-          if (!mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid subject ID format");
-          }
-          return true;
-        }),
-
-      query("startOfWeek")
-        .notEmpty()
-        .withMessage("Start of week is required")
-        .isISO8601()
-        .withMessage("Start of week must be a valid date"),
-
-      query("endOfWeek")
-        .notEmpty()
-        .withMessage("End of week is required")
-        .isISO8601()
-        .withMessage("End of week must be a valid date")
-        .custom((value, { req }) => {
-          const startDate = new Date(req.query.startOfWeek);
-          const endDate = new Date(value);
-
-          if (endDate <= startDate) {
-            throw new Error("End of week must be after start of week");
-          }
-
-          return true;
-        }),
     ];
   }
 
@@ -814,34 +720,6 @@ class LessonRequestValidation {
     ];
   }
 
-  // Validation cho pending requests query
-  validatePendingRequestsQuery() {
-    return [
-      query("academicYear")
-        .optional()
-        .custom((value) => {
-          if (value && !mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid academic year ID format");
-          }
-          return true;
-        }),
-
-      query("classId")
-        .optional()
-        .custom((value) => {
-          if (value && !mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid class ID format");
-          }
-          return true;
-        }),
-
-      query("requestType")
-        .optional()
-        .isIn(["swap", "makeup"])
-        .withMessage("Request type must be either swap or makeup"),
-    ];
-  }
-
   // Validation for lesson ID parameter
   validateLessonId() {
     return [
@@ -855,168 +733,6 @@ class LessonRequestValidation {
           return true;
         }),
     ];
-  }
-
-  // Validation cho việc cancel request
-  validateCancelRequest() {
-    return [
-      param("requestId")
-        .notEmpty()
-        .withMessage("Request ID is required")
-        .custom((value) => {
-          if (!mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid request ID format");
-          }
-          return true;
-        }),
-
-      // Custom validation để kiểm tra quyền và trạng thái
-      body().custom(async (value, { req }) => {
-        const LessonRequest = require("../models/lesson-request.model");
-
-        const lessonRequest = await LessonRequest.findById(
-          req.params.requestId
-        );
-
-        if (!lessonRequest) {
-          throw new Error("Request not found");
-        }
-
-        if (lessonRequest.status !== "pending") {
-          throw new Error("Only pending requests can be cancelled");
-        }
-
-        // Kiểm tra quyền - chỉ requesting teacher mới được cancel
-        if (lessonRequest.requestingTeacher.toString() !== req.user.id) {
-          throw new Error(
-            "Only the requesting teacher can cancel this request"
-          );
-        }
-
-        return true;
-      }),
-    ];
-  }
-
-  // Validation for query parameters
-  validateGetRequests() {
-    return [
-      query("status")
-        .optional()
-        .isIn(["pending", "approved", "rejected", "cancelled"])
-        .withMessage("Invalid status value"),
-
-      query("page")
-        .optional()
-        .isInt({ min: 1 })
-        .withMessage("Page must be a positive integer"),
-
-      query("limit")
-        .optional()
-        .isInt({ min: 1, max: 100 })
-        .withMessage("Limit must be between 1 and 100"),
-    ];
-  }
-
-  // ================================ LEGACY VALIDATION (DEPRECATED) ================================
-
-  // Validation cho việc tạo yêu cầu đổi tiết/dạy bù (DEPRECATED - use specific ones above)
-  createLessonRequest() {
-    return [
-      body("originalLessonId")
-        .notEmpty()
-        .withMessage("Original lesson ID is required")
-        .custom((value) => {
-          if (!mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid original lesson ID format");
-          }
-          return true;
-        }),
-
-      body("replacementLessonId")
-        .notEmpty()
-        .withMessage("Replacement lesson ID is required")
-        .custom((value) => {
-          if (!mongoose.Types.ObjectId.isValid(value)) {
-            throw new Error("Invalid replacement lesson ID format");
-          }
-          return true;
-        }),
-
-      body("requestType")
-        .notEmpty()
-        .withMessage("Request type is required")
-        .isIn(["swap", "makeup"])
-        .withMessage("Request type must be either swap or makeup"),
-
-      body("reason")
-        .notEmpty()
-        .withMessage("Reason is required")
-        .isLength({ min: 10, max: 500 })
-        .withMessage("Reason must be between 10 and 500 characters")
-        .trim(),
-
-      body("absentReason")
-        .optional()
-        .isLength({ max: 500 })
-        .withMessage("Absent reason cannot exceed 500 characters")
-        .trim(),
-    ];
-  }
-
-  // Validation for creating substitute request (DEPRECATED - use validateCreateSubstituteRequest)
-  validateCreateRequest() {
-    return this.validateCreateSubstituteRequest();
-  }
-
-  // Validation for rejecting request (DEPRECATED - use validateRejectSubstituteRequest)
-  validateRejectRequest() {
-    return this.validateRejectSubstituteRequest();
-  }
-
-  // Validation for teacher role (DEPRECATED - use auth middleware)
-  validateTeacherRole() {
-    return (req, res, next) => {
-      if (!req.user) {
-        return res.status(401).json({
-          success: false,
-          message: "Authentication required",
-        });
-      }
-
-      if (!req.user.role.includes("teacher")) {
-        return res.status(403).json({
-          success: false,
-          message: "Teacher role required",
-        });
-      }
-
-      next();
-    };
-  }
-
-  // Validation for manager/admin role (DEPRECATED - use auth middleware)
-  validateManagerRole() {
-    return (req, res, next) => {
-      if (!req.user) {
-        return res.status(401).json({
-          success: false,
-          message: "Authentication required",
-        });
-      }
-
-      if (
-        !req.user.role.includes("manager") &&
-        !req.user.role.includes("admin")
-      ) {
-        return res.status(403).json({
-          success: false,
-          message: "Manager or admin role required",
-        });
-      }
-
-      next();
-    };
   }
 }
 

@@ -358,28 +358,45 @@ lessonRequestSchema.statics.findPendingRequests = function (options = {}) {
 lessonRequestSchema.statics.findAvailableTeachers = async function (lessonId) {
   const Lesson = mongoose.model("Lesson");
   const User = mongoose.model("User");
+
+  // Lấy thông tin tiết học
   const lesson = await Lesson.findById(lessonId)
     .populate("subject", "subjectName")
     .populate("timeSlot", "period startTime endTime");
   if (!lesson) throw new Error("Lesson not found");
+
+  // Lấy danh sách giáo viên có thể dạy môn học này
   const availableTeachers = await User.find({
     role: { $in: ["teacher"] },
     $or: [{ subject: lesson.subject._id }, { subjects: lesson.subject._id }],
     _id: { $ne: lesson.teacher },
   }).select("name email subject subjects");
+
   const teachersWithConflictInfo = [];
+
   for (const teacher of availableTeachers) {
+    // Kiểm tra xung đột thời gian
     const conflictLesson = await Lesson.findOne({
       teacher: teacher._id,
       scheduledDate: lesson.scheduledDate,
       timeSlot: lesson.timeSlot._id,
-      status: { $nin: ["cancelled"] },
+      status: { $nin: ["cancelled", "absent"] },
     })
       .populate("class", "className")
       .populate("subject", "subjectName");
+
+    // Kiểm tra pending substitute requests của giáo viên này
+    const pendingRequests = await this.find({
+      requestType: "substitute",
+      status: "pending",
+      "candidateTeachers.teacher": teacher._id,
+      "candidateTeachers.status": "pending",
+    });
+
     teachersWithConflictInfo.push({
       ...teacher.toObject(),
       hasConflict: !!conflictLesson,
+      hasPendingRequests: pendingRequests.length > 0,
       conflictLesson: conflictLesson
         ? {
             className: conflictLesson.class.className,
@@ -387,9 +404,16 @@ lessonRequestSchema.statics.findAvailableTeachers = async function (lessonId) {
             lessonId: conflictLesson.lessonId,
           }
         : null,
+      pendingRequestsCount: pendingRequests.length,
     });
   }
-  return teachersWithConflictInfo;
+
+  // Lọc ra những giáo viên không có xung đột (có thể có pending requests)
+  const filteredTeachers = teachersWithConflictInfo.filter(
+    (teacher) => !teacher.hasConflict
+  );
+
+  return filteredTeachers;
 };
 
 // Static: getTeacherRequests (chỉ dùng cho substitute)

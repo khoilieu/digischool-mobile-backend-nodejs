@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const LessonRequest = require("../models/lesson-request.model");
 const Lesson = require("../models/lesson.model");
 const Class = require("../../classes/models/class.model");
@@ -108,9 +109,10 @@ class SubstituteRequestService {
       const request = await this.getSubstituteRequestById(requestId);
       // Approve the request
       await request.approveByTeacher(teacherId);
-      // Update the lesson with substitute teacher (không thay thế giáo viên gốc)
+      // Update the lesson by replacing the original teacher with substitute teacher
       await Lesson.findByIdAndUpdate(request.lesson._id, {
-        substituteTeacher: teacherId,
+        teacher: teacherId, // Thay thế giáo viên gốc
+        substituteTeacher: request.lesson.teacher, // Lưu giáo viên gốc vào substituteTeacher để backup
       });
       // Cancel other pending requests from this teacher
       await this.cancelOtherTeacherRequests(teacherId, requestId);
@@ -154,8 +156,94 @@ class SubstituteRequestService {
 
   // Get available substitute teachers for a lesson
   async getAvailableTeachers(lessonId) {
-    // Sử dụng static của LessonRequest
-    return await LessonRequest.findAvailableTeachers(lessonId);
+    // Sử dụng static của LessonRequest để lấy danh sách giáo viên có sẵn
+    const availableTeachers = await LessonRequest.findAvailableTeachers(
+      lessonId
+    );
+
+    // Bổ sung thông tin pending requests cho các giáo viên available
+    for (const teacher of availableTeachers) {
+      const pendingRequests = await LessonRequest.find({
+        requestType: "substitute",
+        status: "pending",
+        "candidateTeachers.teacher": teacher._id,
+        "candidateTeachers.status": "pending",
+      });
+
+      teacher.pendingRequestsCount = pendingRequests.length;
+      teacher.hasPendingRequests = pendingRequests.length > 0;
+    }
+
+    // Lấy thêm thông tin về những giáo viên không có sẵn để hiển thị lý do
+    const Lesson = mongoose.model("Lesson");
+    const User = mongoose.model("User");
+
+    const lesson = await Lesson.findById(lessonId)
+      .populate("subject", "subjectName")
+      .populate("timeSlot", "period startTime endTime");
+
+    if (!lesson) throw new Error("Lesson not found");
+
+    // Lấy tất cả giáo viên có thể dạy môn học này
+    const allTeachers = await User.find({
+      role: { $in: ["teacher"] },
+      $or: [{ subject: lesson.subject._id }, { subjects: lesson.subject._id }],
+      _id: { $ne: lesson.teacher },
+    }).select("name email subject subjects");
+
+    // Tìm những giáo viên không có sẵn
+    const unavailableTeachers = [];
+
+    for (const teacher of allTeachers) {
+      // Kiểm tra xung đột thời gian
+      const conflictLesson = await Lesson.findOne({
+        teacher: teacher._id,
+        scheduledDate: lesson.scheduledDate,
+        timeSlot: lesson.timeSlot._id,
+        status: { $nin: ["cancelled", "absent"] },
+      })
+        .populate("class", "className")
+        .populate("subject", "subjectName");
+
+      // Kiểm tra pending substitute requests
+      const pendingRequests = await LessonRequest.find({
+        requestType: "substitute",
+        status: "pending",
+        "candidateTeachers.teacher": teacher._id,
+        "candidateTeachers.status": "pending",
+      });
+
+      // Nếu giáo viên không có trong danh sách available, thêm vào unavailable
+      const isAvailable = availableTeachers.some(
+        (available) => available._id.toString() === teacher._id.toString()
+      );
+
+      // Chỉ loại bỏ giáo viên khi có xung đột thời gian thực sự
+      if (conflictLesson) {
+        const reasons = [];
+        reasons.push(
+          `Xung đột thời gian với tiết ${conflictLesson.class.className} - ${conflictLesson.subject.subjectName}`
+        );
+
+        unavailableTeachers.push({
+          ...teacher.toObject(),
+          reasons: reasons,
+          hasConflict: true,
+          hasPendingRequests: pendingRequests.length > 0,
+        });
+      }
+    }
+
+    return {
+      availableTeachers,
+      unavailableTeachers,
+      totalChecked: allTeachers.length,
+      lessonInfo: {
+        subjectName: lesson.subject.subjectName,
+        scheduledDate: lesson.scheduledDate,
+        timeSlot: lesson.timeSlot,
+      },
+    };
   }
 
   // Cancel other pending requests from the same teacher (when they approve one request)
@@ -233,7 +321,7 @@ class SubstituteRequestService {
             <p><strong>Lý do:</strong> ${request.reason}</p>
           </div>
           <p>Vui lòng phản hồi yêu cầu này bằng cách truy cập hệ thống DigiSchool.</p>
-          <p><strong>Lưu ý:</strong> Bạn sẽ cùng với giáo viên chính dạy tiết học này để hỗ trợ học sinh.</p>
+          <p><strong>Lưu ý:</strong> Bạn sẽ thay thế giáo viên chính để dạy tiết học này.</p>
           <hr style="margin: 30px 0;">
           <p style="color: #7f8c8d; font-size: 12px;">Email này được gửi tự động từ hệ thống DigiSchool.</p>
         </div>
@@ -510,11 +598,11 @@ class SubstituteRequestService {
             <p><strong>Ngày:</strong> ${lessonDate}</p>
             <p><strong>Tiết:</strong> ${request.lesson.timeSlot.period}</p>
             <p><strong>Thời gian:</strong> ${lessonTime}</p>
-            <p><strong>Giáo viên chính:</strong> ${request.requestingTeacher.name}</p>
-            <p><strong>Giáo viên dạy thay:</strong> ${request.approvedTeacher.name}</p>
+                      <p><strong>Giáo viên gốc:</strong> ${request.requestingTeacher.name}</p>
+          <p><strong>Giáo viên dạy thay:</strong> ${request.approvedTeacher.name}</p>
           </div>
           <p>Các em vui lòng chuẩn bị bài học và đến lớp đúng giờ như thường lệ.</p>
-          <p><strong>Lưu ý:</strong> Cả hai giáo viên sẽ cùng tham gia tiết học này để hỗ trợ các em học tập tốt hơn.</p>
+          <p><strong>Lưu ý:</strong> Giáo viên ${request.approvedTeacher.name} sẽ thay thế giáo viên ${request.requestingTeacher.name} để dạy tiết học này.</p>
           <hr style="margin: 30px 0;">
           <p style="color: #7f8c8d; font-size: 12px;">Email này được gửi tự động từ hệ thống DigiSchool.</p>
         </div>

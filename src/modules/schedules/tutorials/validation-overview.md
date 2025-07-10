@@ -107,7 +107,7 @@
 
 - ✅ `lessonId`: Required, valid ObjectId
 - ✅ `candidateTeacherIds`: Array, ít nhất 1 teacher, valid ObjectIds, không duplicate
-- ✅ `reason`: Required, 10-1000 characters
+- ✅ `reason`: Required, 1-300 characters
 
 #### **Business Logic Validation:**
 
@@ -116,6 +116,8 @@
 - ✅ **Kiểm tra lesson status = "scheduled"**
 - ✅ **Kiểm tra candidate teachers tồn tại và là giáo viên**
 - ✅ **Không được chọn chính mình làm candidate**
+- ✅ **Kiểm tra candidate teachers không có pending substitute requests**
+- ✅ **Kiểm tra candidate teachers không có xung đột thời gian**
 
 #### **Approve Substitute (`validateSubstituteApproval`):**
 
@@ -147,11 +149,11 @@
 | **Lesson Existence**  | ✅   | ✅     | ✅         |
 | **Teacher Ownership** | ✅   | ✅     | ✅         |
 | **Lesson Status**     | ✅   | ✅     | ✅         |
-| **Type Validation**   | ✅   | ✅     | ❌         |
+| **Type Validation**   | ✅   | ✅     | ✅         |
 | **Same Class**        | ✅   | ✅     | ❌         |
 | **Same Week**         | ✅   | ✅     | ❌         |
-| **Time Conflicts**    | ✅   | ❌     | ❌         |
-| **Pending Conflicts** | ✅   | ✅     | ❌         |
+| **Time Conflicts**    | ✅   | ✅     | ✅         |
+| **Pending Conflicts** | ✅   | ✅     | ✅         |
 | **Approval Rights**   | ✅   | ✅     | ✅         |
 | **Cancel Rights**     | ✅   | ✅     | ✅         |
 
@@ -184,20 +186,35 @@
 - ✅ **Single Responsibility**: Mỗi file có chức năng rõ ràng
 - ✅ **Consistency**: Tất cả validation đều trong middleware
 
+### **5. Cải thiện API Available Teachers:**
+
+- ✅ **Lọc giáo viên theo xung đột thời gian**
+- ✅ **Lọc giáo viên theo pending requests**
+- ✅ **Trả về thông tin chi tiết về lý do giáo viên không có sẵn**
+- ✅ **Hiển thị số lượng giáo viên được kiểm tra và có sẵn**
+
 ---
 
-## 🔧 **ĐỀ XUẤT CẢI THIỆN TIẾP THEO**
+## 🎯 **TỔNG KẾT CÁC CẢI THIỆN**
 
-### **1. Bổ sung Substitute Validation:**
+### **1. Validation Rules:**
 
-```javascript
-// Cần thêm validation cho:
-- Type validation (lesson type)
-- Same class validation
-- Same week validation
-- Time conflicts check
-- Pending conflicts check
-```
+- ✅ Giảm độ dài reason field từ 10-500 xuống 1-300 cho tất cả chức năng
+- ✅ Bỏ yêu cầu "same week" cho swap và makeup
+- ✅ Thêm kiểm tra xung đột thời gian cho makeup
+- ✅ Thêm kiểm tra pending requests cho substitute
+
+### **2. API Improvements:**
+
+- ✅ API lấy danh sách giáo viên dạy thay có sẵn đã được cải thiện với filtering
+- ✅ Trả về thông tin chi tiết về những giáo viên không có sẵn
+- ✅ Hiển thị lý do cụ thể tại sao giáo viên không thể dạy thay
+
+### **3. Code Quality:**
+
+- ✅ Tất cả validation logic đã được chuyển từ service sang middleware
+- ✅ Clean separation giữa validation và business logic
+- ✅ Consistent validation patterns across all functionalities
 
 ### **2. Bổ sung Makeup Validation:**
 
