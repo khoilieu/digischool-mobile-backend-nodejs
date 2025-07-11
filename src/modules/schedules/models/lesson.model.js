@@ -72,7 +72,7 @@ const lessonSchema = new mongoose.Schema(
     // Trạng thái
     status: {
       type: String,
-      enum: ["scheduled", "completed", "cancelled", "postponed", "absent"],
+      enum: ["scheduled", "completed", "absent"],
       default: "scheduled",
     },
 
@@ -254,7 +254,6 @@ lessonSchema.statics.checkConflict = async function (
     teacher: teacherId,
     scheduledDate: scheduledDate,
     timeSlot: timeSlotId,
-    status: { $nin: ["cancelled"] },
   };
 
   if (excludeId) {
@@ -319,7 +318,6 @@ lessonSchema.statics.getStatistics = async function (classId, academicYearId) {
     total: 0,
     completed: 0,
     scheduled: 0,
-    cancelled: 0,
     absent: 0,
     byType: {
       regular: 0,

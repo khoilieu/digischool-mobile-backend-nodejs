@@ -1,11 +1,11 @@
-const LeaveRequest = require('../models/leave-request.model');
+const StudentLeaveRequest = require('../models/student-leave-request.model');
 const Lesson = require('../../schedules/models/lesson.model');
 const Class = require('../../classes/models/class.model');
 const Subject = require('../../subjects/models/subject.model');
 const User = require('../../auth/models/user.model');
 const mongoose = require('mongoose');
 
-class LeaveRequestService {
+class StudentLeaveRequestService {
   
   // Tạo đơn xin vắng cho nhiều tiết cùng lúc
   async createMultipleLeaveRequests(data, studentId) {
@@ -69,7 +69,7 @@ class LeaveRequestService {
           // }
           
           // Check if leave request already exists for this lesson
-          const existingRequest = await LeaveRequest.findOne({
+          const existingRequest = await StudentLeaveRequest.findOne({
             studentId,
             lessonId: lesson._id
           });
@@ -83,7 +83,7 @@ class LeaveRequestService {
           const period = lesson.timeSlot?.period || 1;
           
           // Create leave request
-          const leaveRequest = new LeaveRequest({
+          const leaveRequest = new StudentLeaveRequest({
             studentId,
             lessonId: lesson._id,
             classId: lesson.class._id,
@@ -155,11 +155,11 @@ class LeaveRequestService {
       
       const skip = (page - 1) * limit;
       
-      const requests = await LeaveRequest.findByStudent(studentId, options)
+      const requests = await StudentLeaveRequest.findByStudent(studentId, options)
         .skip(skip)
         .limit(limit);
       
-      const total = await LeaveRequest.countDocuments({
+      const total = await StudentLeaveRequest.countDocuments({
         studentId,
         ...(status && { status }),
         ...(startDate && { date: { $gte: new Date(startDate) } }),
@@ -167,7 +167,7 @@ class LeaveRequestService {
       });
       
       // Group by status for summary
-      const statusSummary = await LeaveRequest.aggregate([
+      const statusSummary = await StudentLeaveRequest.aggregate([
         { $match: { studentId: new mongoose.Types.ObjectId(studentId) } },
         {
           $group: {
@@ -213,7 +213,7 @@ class LeaveRequestService {
       
       const skip = (page - 1) * limit;
       
-      const requests = await LeaveRequest.find(query)
+      const requests = await StudentLeaveRequest.find(query)
         .populate('studentId', 'name email')
         .populate('lessonId', 'lessonId type topic scheduledDate')
         .populate('subjectId', 'subjectName subjectCode')
@@ -222,7 +222,7 @@ class LeaveRequestService {
         .skip(skip)
         .limit(limit);
       
-      const total = await LeaveRequest.countDocuments(query);
+      const total = await StudentLeaveRequest.countDocuments(query);
       
       // Group by date for better organization
       const requestsByDate = {};
@@ -262,11 +262,11 @@ class LeaveRequestService {
       
       const skip = (page - 1) * limit;
       
-      const requests = await LeaveRequest.findByTeacher(teacherId, options)
+      const requests = await StudentLeaveRequest.findByTeacher(teacherId, options)
         .skip(skip)
         .limit(limit);
       
-      const total = await LeaveRequest.countDocuments({
+      const total = await StudentLeaveRequest.countDocuments({
         teacherId,
         ...(status && { status }),
         ...(startDate && { date: { $gte: new Date(startDate) } }),
@@ -291,7 +291,7 @@ class LeaveRequestService {
   // Duyệt đơn xin vắng
   async approveLeaveRequest(requestId, teacherId, comment = '') {
     try {
-      const request = await LeaveRequest.findById(requestId)
+      const request = await StudentLeaveRequest.findById(requestId)
         .populate('studentId', 'name email fullName')
         .populate('lessonId', 'lessonId topic scheduledDate')
         .populate('subjectId', 'subjectName')
@@ -364,7 +364,7 @@ class LeaveRequestService {
         throw error;
       }
       
-      const request = await LeaveRequest.findById(requestId)
+      const request = await StudentLeaveRequest.findById(requestId)
         .populate('studentId', 'name email fullName')
         .populate('lessonId', 'lessonId topic scheduledDate')
         .populate('subjectId', 'subjectName')
@@ -431,7 +431,7 @@ class LeaveRequestService {
   // Lấy chi tiết đơn xin vắng
   async getLeaveRequestDetail(requestId, userId, userRole) {
     try {
-      const request = await LeaveRequest.findById(requestId)
+      const request = await StudentLeaveRequest.findById(requestId)
         .populate('studentId', 'name email')
         .populate('lessonId', 'lessonId type topic scheduledDate')
         .populate('subjectId', 'subjectName subjectCode')
@@ -479,7 +479,7 @@ class LeaveRequestService {
   // Hủy đơn xin vắng (chỉ khi pending)
   async cancelLeaveRequest(requestId, studentId) {
     try {
-      const request = await LeaveRequest.findById(requestId);
+      const request = await StudentLeaveRequest.findById(requestId);
       
       if (!request) {
         throw new Error('Leave request not found');
@@ -500,7 +500,7 @@ class LeaveRequestService {
         throw new Error('Cannot cancel request for past lessons');
       }
       
-      await LeaveRequest.findByIdAndDelete(requestId);
+      await StudentLeaveRequest.findByIdAndDelete(requestId);
       
       console.log(`🗑️ Leave request cancelled by student ${studentId}`);
       
@@ -530,7 +530,7 @@ class LeaveRequestService {
         if (endDate) matchStage.date.$lte = new Date(endDate);
       }
       
-      const stats = await LeaveRequest.aggregate([
+      const stats = await StudentLeaveRequest.aggregate([
         { $match: matchStage },
         {
           $group: {
@@ -587,7 +587,7 @@ class LeaveRequestService {
       console.log(`📚 Found ${lessons.length} lessons for class ${student.class_id.className}`);
       
       // Get existing leave requests for this period
-      const existingRequests = await LeaveRequest.find({
+      const existingRequests = await StudentLeaveRequest.find({
         studentId,
         date: { $gte: start, $lte: end }
       }).select('lessonId');
@@ -853,4 +853,4 @@ class LeaveRequestService {
   }
 }
 
-module.exports = new LeaveRequestService(); 
+module.exports = new StudentLeaveRequestService(); 

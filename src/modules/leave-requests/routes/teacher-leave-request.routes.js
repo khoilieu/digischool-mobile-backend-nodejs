@@ -8,7 +8,7 @@ const validation = require('../middleware/teacher-leave-request.validation');
 router.use(authMiddleware.protect);
 
 // Teacher routes - for teachers to manage their own leave requests
-router.post('/', 
+router.post('/create', 
   authMiddleware.authorize('teacher'),
   validation.validateCreateTeacherLeaveRequest,
   validation.handleValidationErrors,

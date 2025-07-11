@@ -229,8 +229,82 @@ class MakeupRequestService {
     }
   }
 
+  // Hàm generic để swap lesson fields cho makeup (chuyển từ tiết gốc sang tiết trống)
+  async swapLessonFieldsForMakeup(
+    originalLesson,
+    replacementLesson,
+    processedBy
+  ) {
+    // Lấy tất cả các trường của Lesson model (trừ _id, __v, timestamps, lessonId)
+    const lessonFields = Object.keys(originalLesson.toObject()).filter(
+      (field) =>
+        !["_id", "__v", "createdAt", "updatedAt", "lessonId", "class", "academicYear", "timeSlot", "scheduledDate", "createdBy"].includes(field)
+    );
+
+    // Lưu dữ liệu từ tiết gốc
+    const originalData = {};
+    lessonFields.forEach((field) => {
+      originalData[field] = originalLesson[field];
+    });
+
+    // Sử dụng generic lesson reference swapper
+    console.log(`🔄 Starting generic lesson reference swap...`);
+    const swapResult = await lessonReferenceSwapper.swapLessonReferences(
+      originalLesson._id,
+      replacementLesson._id,
+      processedBy
+    );
+
+    if (!swapResult.success) {
+      console.error("❌ Lesson reference swap failed:", swapResult.errors);
+      throw new Error("Failed to swap lesson references");
+    }
+
+    console.log(
+      `✅ Swapped ${swapResult.totalSwapped} references across ${swapResult.swappedCollections.length} collections`
+    );
+
+    // Cập nhật replacement lesson thành lesson chính (chuyển từ tiết trống thành tiết makeup)
+    lessonFields.forEach((field) => {
+      replacementLesson[field] = originalData[field];
+    });
+    replacementLesson.lastModifiedBy = processedBy;
+
+    
+    originalLesson.teacher = undefined;
+    originalLesson.subject = undefined;
+    originalLesson.substituteTeacher = undefined;
+    originalLesson.topic = undefined;
+    originalLesson.description = undefined;
+    originalLesson.type = "empty";
+    originalLesson.status = "scheduled";
+    originalLesson.lastModifiedBy = processedBy;
+
+    // Lưu lessons mà không trigger pre-save hook để tránh tạo lại lessonId
+    await originalLesson.save({ validateBeforeSave: false });
+    await replacementLesson.save({ validateBeforeSave: false });
+
+    console.log(
+      `🔄 Swapped lessons: ${originalLesson.lessonId} ↔ ${replacementLesson.lessonId}`
+    );
+  }
+
+  // Xử lý approval cho makeup request - hoán đổi như swap
+  async processMakeupApproval(
+    lessonRequest,
+    originalLesson,
+    replacementLesson
+  ) {
+    // Sử dụng hàm generic để swap lesson fields
+    await this.swapLessonFieldsForMakeup(
+      originalLesson,
+      replacementLesson,
+      lessonRequest.processedBy
+    );
+  }
+
   // Duyệt yêu cầu dạy bù
-  async approveMakeupRequest(requestId, managerId, comment = "") {
+  async approveMakeupRequest(requestId, managerId) {
     try {
       console.log(`✅ Approving makeup request: ${requestId}`);
 
@@ -296,17 +370,12 @@ class MakeupRequestService {
       lessonRequest.status = "approved";
       lessonRequest.processedBy = managerId;
       lessonRequest.processedAt = new Date();
-      lessonRequest.managerComment = comment;
       lessonRequest.lastModifiedBy = managerId;
 
       await lessonRequest.save();
 
       // Gửi email thông báo cho giáo viên
-      await this.sendMakeupRequestNotifications(
-        lessonRequest,
-        "approved",
-        comment
-      );
+      await this.sendMakeupRequestNotifications(lessonRequest, "approved");
 
       // Gửi email thông báo cho học sinh
       await this.sendStudentNotifications(lessonRequest, "approved");
@@ -324,75 +393,8 @@ class MakeupRequestService {
     }
   }
 
-  // Xử lý approval cho makeup request - hoán đổi như swap
-  async processMakeupApproval(
-    lessonRequest,
-    originalLesson,
-    replacementLesson
-  ) {
-    // Hoán đổi thông tin giữa 2 tiết (như swap)
-    const originalData = {
-      teacher: originalLesson.teacher,
-      subject: originalLesson.subject,
-      topic: originalLesson.topic,
-      notes: originalLesson.notes,
-      type: originalLesson.type,
-      description: originalLesson.description,
-      status: originalLesson.status,
-    };
-
-    const replacementData = {
-      type: "empty",
-      status: "scheduled",
-    };
-
-    // Sử dụng generic lesson reference swapper
-    console.log(`🔄 Starting generic lesson reference swap...`);
-    const swapResult = await lessonReferenceSwapper.swapLessonReferences(
-      originalLesson._id,
-      replacementLesson._id,
-      lessonRequest.processedBy
-    );
-
-    if (!swapResult.success) {
-      console.error("❌ Lesson reference swap failed:", swapResult.errors);
-      throw new Error("Failed to swap lesson references");
-    }
-
-    console.log(
-      `✅ Swapped ${swapResult.totalSwapped} references across ${swapResult.swappedCollections.length} collections`
-    );
-
-    // Cập nhật replacement lesson thành lesson chính (hoán đổi với tiết trống)
-    replacementLesson.teacher = originalData.teacher;
-    replacementLesson.subject = originalData.subject;
-    replacementLesson.topic = originalData.topic;
-    replacementLesson.notes = originalData.notes;
-    replacementLesson.type = originalData.type;
-    replacementLesson.description = originalData.description;
-    replacementLesson.status = originalData.status;
-    replacementLesson.lastModifiedBy = lessonRequest.processedBy;
-
-    // Cập nhật original lesson thành tiết trống
-    originalLesson.teacher = replacementData.teacher;
-    originalLesson.subject = replacementData.subject;
-    originalLesson.topic = replacementData.topic;
-    originalLesson.notes = replacementData.notes;
-    originalLesson.type = replacementData.type;
-    originalLesson.description = replacementData.description;
-    originalLesson.status = replacementData.status;
-    originalLesson.lastModifiedBy = lessonRequest.processedBy;
-
-    await originalLesson.save();
-    await replacementLesson.save();
-
-    console.log(
-      `🔄 Swapped lessons: ${originalLesson.lessonId} ↔ ${replacementLesson.lessonId}`
-    );
-  }
-
   // Từ chối yêu cầu dạy bù
-  async rejectMakeupRequest(requestId, managerId, comment = "") {
+  async rejectMakeupRequest(requestId, managerId) {
     try {
       console.log(`❌ Rejecting makeup request: ${requestId}`);
 
@@ -434,17 +436,12 @@ class MakeupRequestService {
       lessonRequest.status = "rejected";
       lessonRequest.processedBy = managerId;
       lessonRequest.processedAt = new Date();
-      lessonRequest.managerComment = comment;
       lessonRequest.lastModifiedBy = managerId;
 
       await lessonRequest.save();
 
       // Gửi email thông báo
-      await this.sendMakeupRequestNotifications(
-        lessonRequest,
-        "rejected",
-        comment
-      );
+      await this.sendMakeupRequestNotifications(lessonRequest, "rejected");
 
       console.log(`❌ Rejected makeup request: ${requestId}`);
 
@@ -460,7 +457,7 @@ class MakeupRequestService {
   }
 
   // Gửi email thông báo kết quả xử lý dạy bù
-  async sendMakeupRequestNotifications(lessonRequest, status, comment) {
+  async sendMakeupRequestNotifications(lessonRequest, status) {
     try {
       const statusText =
         status === "approved" ? "đã được duyệt" : "đã bị từ chối";
@@ -484,17 +481,6 @@ class MakeupRequestService {
             }</p>
             <p><strong>Trạng thái:</strong> <span style="color: ${statusColor}; font-weight: bold;">${statusText.toUpperCase()}</span></p>
           </div>
-          
-          ${
-            comment
-              ? `
-          <div style="background-color: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
-            <h3 style="color: #856404; margin-top: 0;">Nhận xét từ quản lý</h3>
-            <p style="color: #856404;">${comment}</p>
-          </div>
-          `
-              : ""
-          }
           
           <div style="text-align: center; margin: 30px 0;">
             <p style="color: #7f8c8d;">Vui lòng đăng nhập vào hệ thống để xem chi tiết.</p>

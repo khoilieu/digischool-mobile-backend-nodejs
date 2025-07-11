@@ -11,18 +11,8 @@ class LessonReferenceSwapperService {
         lessonField: "lesson",
         description: "Test information",
       },
-      {
-        modelName: "TeacherLessonEvaluation",
-        modelPath: "../models/teacher-lesson-evaluation.model",
-        lessonField: "lesson",
-        description: "Teacher lesson evaluations",
-      },
-      {
-        modelName: "StudentLessonEvaluation",
-        modelPath: "../models/student-lesson-evaluation.model",
-        lessonField: "lesson",
-        description: "Student lesson evaluations",
-      },
+      // Đã loại bỏ TeacherLessonEvaluation và StudentLessonEvaluation
+      // vì không cần swap evaluation khi swap lesson
       {
         modelName: "LessonRequest",
         modelPath: "../models/lesson-request.model",

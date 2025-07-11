@@ -224,7 +224,6 @@ class LessonRequestController {
       }
 
       const { requestId } = req.params;
-      const { comment } = req.body;
       const managerId = req.user.id;
 
       // Tìm request để xác định loại
@@ -242,8 +241,7 @@ class LessonRequestController {
       if (request.requestType === "makeup") {
         result = await makeupRequestService.approveMakeupRequest(
           requestId,
-          managerId,
-          comment
+          managerId
         );
       } else {
         return res.status(400).json({
@@ -276,7 +274,6 @@ class LessonRequestController {
       }
 
       const { requestId } = req.params;
-      const { comment } = req.body;
       const managerId = req.user.id;
 
       // Tìm request để xác định loại
@@ -294,8 +291,7 @@ class LessonRequestController {
       if (request.requestType === "makeup") {
         result = await makeupRequestService.rejectMakeupRequest(
           requestId,
-          managerId,
-          comment
+          managerId
         );
       } else {
         return res.status(400).json({

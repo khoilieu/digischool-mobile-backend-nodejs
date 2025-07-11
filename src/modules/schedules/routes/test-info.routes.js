@@ -13,7 +13,7 @@ router.use(authMiddleware.authorize("teacher", "homeroom_teacher"));
 // Tạo thông tin kiểm tra cho tiết học ✅
 router.post(
   "/lessons/:lessonId",
-  testInfoValidation.createTestInfoValidation,
+  testInfoValidation.createTestInfoValidation(),
   testInfoController.createTestInfo
 );
 
@@ -21,35 +21,35 @@ router.post(
 // Query params: status, priority, testType, startDate, endDate, page, limit
 router.get(
   "/",
-  testInfoValidation.queryValidation,
+  testInfoValidation.queryValidation(),
   testInfoController.getTeacherTestInfos
 );
 
 // Cập nhật thông tin kiểm tra ✅
 router.put(
   "/:testInfoId",
-  testInfoValidation.updateTestInfoValidation,
+  testInfoValidation.updateTestInfoValidation(),
   testInfoController.updateTestInfo
 );
 
 // Xóa thông tin kiểm tra ✅
 router.delete(
   "/:testInfoId",
-  testInfoValidation.paramIdValidation,
+  testInfoValidation.paramIdValidation(),
   testInfoController.deleteTestInfo
 );
 
 // Gửi lại email thông tin kiểm tra ✅
 router.post(
   "/:testInfoId/resend-email",
-  testInfoValidation.paramIdValidation,
+  testInfoValidation.paramIdValidation(),
   testInfoController.resendTestInfoEmail
 );
 
 // Test gửi email ✅
 router.post(
   "/:testInfoId/test-email",
-  testInfoValidation.paramIdValidation,
+  testInfoValidation.paramIdValidation(),
   testInfoController.testTestInfoEmail
 );
 

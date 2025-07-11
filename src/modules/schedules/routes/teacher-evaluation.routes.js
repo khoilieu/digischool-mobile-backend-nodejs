@@ -4,7 +4,6 @@ const teacherEvaluationController = require("../controllers/teacher-evaluation.c
 const authMiddleware = require("../../auth/middleware/auth.middleware");
 const teacherEvaluationValidation = require("../middleware/teacher-evaluation.validation");
 
-
 // Áp dụng middleware xác thực và role cho tất cả route
 router.use(authMiddleware.protect);
 router.use(authMiddleware.authorize("teacher", "homeroom_teacher"));
@@ -14,63 +13,63 @@ router.use(authMiddleware.authorize("teacher", "homeroom_teacher"));
 // Tạo đánh giá mới cho tiết học
 router.post(
   "/lessons/:lessonId/evaluate",
-  teacherEvaluationValidation.createEvaluationValidation,
+  teacherEvaluationValidation.createEvaluationValidation(),
   teacherEvaluationController.createEvaluation
 );
 
 // Cập nhật đánh giá tiết học
 router.put(
   "/:evaluationId",
-  teacherEvaluationValidation.updateEvaluationValidation,
+  teacherEvaluationValidation.updateEvaluationValidation(),
   teacherEvaluationController.updateEvaluation
 );
 
 // Lấy danh sách đánh giá của giáo viên hiện tại
 router.get(
   "/",
-  teacherEvaluationValidation.getTeacherEvaluationsValidation,
+  teacherEvaluationValidation.getTeacherEvaluationsValidation(),
   teacherEvaluationController.getTeacherEvaluations
 );
 
 // Lấy chi tiết một đánh giá
 router.get(
   "/:evaluationId",
-  teacherEvaluationValidation.getEvaluationDetailValidation,
+  teacherEvaluationValidation.getEvaluationDetailValidation(),
   teacherEvaluationController.getEvaluationDetail
 );
 
 // Hoàn thành đánh giá
 router.post(
   "/:evaluationId/complete",
-  teacherEvaluationValidation.completeEvaluationValidation,
+  teacherEvaluationValidation.completeEvaluationValidation(),
   teacherEvaluationController.completeEvaluation
 );
 
 // Submit đánh giá
 router.post(
   "/:evaluationId/submit",
-  teacherEvaluationValidation.submitEvaluationValidation,
+  teacherEvaluationValidation.submitEvaluationValidation(),
   teacherEvaluationController.submitEvaluation
 );
 
 // Thêm học sinh vắng
 router.post(
   "/:evaluationId/absent-students",
-  teacherEvaluationValidation.addAbsentStudentValidation,
+  teacherEvaluationValidation.addAbsentStudentValidation(),
   teacherEvaluationController.addAbsentStudent
 );
 
 // Thêm kiểm tra miệng
 router.post(
   "/:evaluationId/oral-tests",
-  teacherEvaluationValidation.addOralTestValidation,
+  teacherEvaluationValidation.addOralTestValidation(),
   teacherEvaluationController.addOralTest
 );
 
 // Thêm vi phạm
 router.post(
   "/:evaluationId/violations",
-  teacherEvaluationValidation.addViolationValidation,
+  teacherEvaluationValidation.addViolationValidation(),
   teacherEvaluationController.addViolation
 );
 
@@ -79,7 +78,7 @@ router.post(
 // Lấy thống kê đánh giá của giáo viên
 router.get(
   "/stats/summary",
-  teacherEvaluationValidation.getEvaluationStatsValidation,
+  teacherEvaluationValidation.getEvaluationStatsValidation(),
   teacherEvaluationController.getEvaluationStats
 );
 

@@ -50,13 +50,6 @@ class ScheduleController {
       const { className, academicYear, weekNumber, startOfWeek, endOfWeek } =
         req.query;
 
-      if (!className || !academicYear) {
-        return res.status(400).json({
-          success: false,
-          message: "Class name and academic year are required",
-        });
-      }
-
       let result;
 
       // Nếu có startOfWeek và endOfWeek, dùng NEW detailed lesson-based method
@@ -90,13 +83,6 @@ class ScheduleController {
     try {
       const { className, academicYear } = req.query;
 
-      if (!className || !academicYear) {
-        return res.status(400).json({
-          success: false,
-          message: "Class name and academic year are required",
-        });
-      }
-
       const result = await scheduleService.checkClassExists(
         className,
         academicYear
@@ -116,14 +102,6 @@ class ScheduleController {
     try {
       const { teacherId, academicYear, startOfWeek, endOfWeek } = req.query;
       const currentUser = req.user; // Từ authMiddleware.protect
-
-      if (!teacherId || !academicYear || !startOfWeek || !endOfWeek) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "teacherId, academicYear, startOfWeek, and endOfWeek are required",
-        });
-      }
 
       // Kiểm tra phân quyền: giáo viên chỉ có thể xem lịch của chính mình
       if (
@@ -160,13 +138,6 @@ class ScheduleController {
     try {
       const { lessonId } = req.params;
       const currentUser = req.user; // Từ authMiddleware.protect
-
-      if (!lessonId) {
-        return res.status(400).json({
-          success: false,
-          message: "lessonId is required",
-        });
-      }
 
       // Lấy chi tiết tiết học
       const lessonDetail = await scheduleService.getLessonDetailById(
@@ -280,13 +251,6 @@ class ScheduleController {
       const { lessonId } = req.params;
       const { description } = req.body;
       const currentUser = req.user;
-
-      if (!description || description.trim() === "") {
-        return res.status(400).json({
-          success: false,
-          message: "Description is required and cannot be empty",
-        });
-      }
 
       // Tìm lesson và populate thông tin cần thiết
       const lesson = await Lesson.findById(lessonId)

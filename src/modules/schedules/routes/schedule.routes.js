@@ -22,7 +22,7 @@ router.post(
     next();
   },
   authMiddleware.authorize("admin", "manager"),
-  scheduleValidation.validateInitializeSchedule,
+  scheduleValidation.validateInitializeSchedule(),
   scheduleController.initializeSchedulesForAcademicYear
 );
 
@@ -31,7 +31,7 @@ router.post(
 // Ví dụ: /api/schedules/class?className=12A4&academicYear=2023-2024&startOfWeek=2024-12-16&endOfWeek=2024-12-22
 router.get(
   "/class",
-  scheduleValidation.validateGetClassSchedule,
+  scheduleValidation.validateGetClassSchedule(),
   scheduleController.getClassSchedule
 );
 
@@ -40,6 +40,7 @@ router.get(
 router.get(
   "/teacher",
   authMiddleware.authorize("teacher", "manager"),
+  scheduleValidation.validateGetTeacherSchedule(),
   scheduleController.getTeacherSchedule
 );
 
@@ -48,6 +49,7 @@ router.get(
 router.get(
   "/lesson/:lessonId",
   authMiddleware.authorize("teacher", "manager", "student"),
+  scheduleValidation.validateGetLessonDetail(),
   scheduleController.getLessonDetail
 );
 
@@ -56,18 +58,24 @@ router.get(
 router.get(
   "/lesson/:lessonId/students",
   authMiddleware.authorize("teacher"),
+  scheduleValidation.validateGetLessonStudents(),
   scheduleController.getLessonStudents
 );
 
 // GET /api/schedules/check-class - Kiểm tra lớp có tồn tại không ✅
 // Ví dụ: /api/schedules/check-class?className=12A1&academicYear=2024-2025
-router.get("/check-class", scheduleController.checkClassExists);
+router.get(
+  "/check-class",
+  scheduleValidation.validateCheckClassExists(),
+  scheduleController.checkClassExists
+);
 
 // PATCH /api/schedules/lesson/:lessonId/complete - Hoàn thành tiết học ✅
 // Ví dụ: /api/schedules/lesson/675a1b2c3d4e5f6789012345/complete
 router.patch(
   "/lesson/:lessonId/complete",
   authMiddleware.authorize("teacher"),
+  scheduleValidation.validateCompleteLesson(),
   scheduleController.completeLessonById
 );
 
@@ -76,6 +84,7 @@ router.patch(
 router.patch(
   "/lessons/:lessonId/description",
   authMiddleware.authorize("teacher", "manager", "admin"),
+  scheduleValidation.validateUpdateLessonDescription(),
   scheduleController.updateLessonDescription
 );
 
@@ -84,6 +93,7 @@ router.patch(
 router.delete(
   "/lessons/:lessonId/description",
   authMiddleware.authorize("teacher", "manager", "admin"),
+  scheduleValidation.validateDeleteLessonDescription(),
   scheduleController.deleteLessonDescription
 );
 

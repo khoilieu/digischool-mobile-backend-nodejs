@@ -9,7 +9,7 @@ const scheduleRoutes = require("../modules/schedules/routes/schedule.routes");
 const studentEvaluationRoutes = require("../modules/schedules/routes/student-evaluation.routes");
 const teacherEvaluationRoutes = require("../modules/schedules/routes/teacher-evaluation.routes");
 const testInfoRoutes = require("../modules/schedules/routes/test-info.routes");
-const leaveRequestRoutes = require("../modules/leave-requests/routes/leave-request.routes");
+const studentLeaveRequestRoutes = require("../modules/leave-requests/routes/student-leave-request.routes");
 const teacherLeaveRequestRoutes = require("../modules/leave-requests/routes/teacher-leave-request.routes");
 
 // Health check route
@@ -33,8 +33,8 @@ router.use("/student-evaluations", studentEvaluationRoutes);
 router.use("/teacher-evaluations", teacherEvaluationRoutes);
 // /api/test-infos
 router.use("/test-infos", testInfoRoutes);
-// /api/leave-requests
-router.use("/leave-requests", leaveRequestRoutes);
+// /api/student-leave-requests
+router.use("/student-leave-requests", studentLeaveRequestRoutes);
 // /api/teacher-leave-requests
 router.use("/teacher-leave-requests", teacherLeaveRequestRoutes);
 

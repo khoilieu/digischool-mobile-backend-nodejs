@@ -13,42 +13,42 @@ router.use(authMiddleware.authorize("student"));
 // Tạo đánh giá mới cho tiết học
 router.post(
   "/lessons/:lessonId/evaluate",
-  studentEvaluationValidation.createEvaluationValidation,
+  studentEvaluationValidation.createEvaluationValidation(),
   studentEvaluationController.createEvaluation
 );
 
 // Cập nhật đánh giá tiết học
 router.put(
   "/:evaluationId",
-  studentEvaluationValidation.updateEvaluationValidation,
+  studentEvaluationValidation.updateEvaluationValidation(),
   studentEvaluationController.updateEvaluation
 );
 
 // Lấy danh sách đánh giá của học sinh hiện tại
 router.get(
   "/",
-  studentEvaluationValidation.getStudentEvaluationsValidation,
+  studentEvaluationValidation.getStudentEvaluationsValidation(),
   studentEvaluationController.getStudentEvaluations
 );
 
 // Lấy chi tiết một đánh giá
 router.get(
   "/:evaluationId",
-  studentEvaluationValidation.getEvaluationDetailValidation,
+  studentEvaluationValidation.getEvaluationDetailValidation(),
   studentEvaluationController.getEvaluationDetail
 );
 
 // Kiểm tra học sinh có thể đánh giá tiết học không
 router.get(
   "/lessons/:lessonId/can-evaluate",
-  studentEvaluationValidation.checkCanEvaluateValidation,
+  studentEvaluationValidation.checkCanEvaluateValidation(),
   studentEvaluationController.checkCanEvaluate
 );
 
 // Lấy danh sách tiết học có thể đánh giá
 router.get(
   "/lessons/evaluable",
-  studentEvaluationValidation.getEvaluableLessonsValidation,
+  studentEvaluationValidation.getEvaluableLessonsValidation(),
   studentEvaluationController.getEvaluableLessons
 );
 

@@ -593,12 +593,6 @@ class LessonRequestValidation {
           }
           return true;
         }),
-
-      body("comment")
-        .optional()
-        .isLength({ max: 500 })
-        .withMessage("Comment cannot exceed 500 characters")
-        .trim(),
     ];
   }
 

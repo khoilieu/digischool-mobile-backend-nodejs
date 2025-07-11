@@ -350,6 +350,71 @@ class SwapRequestService {
     }
   }
 
+  // Hàm generic để swap tất cả các trường của Lesson model
+  async swapLessonFields(originalLesson, replacementLesson, processedBy) {
+    // Lấy tất cả các trường của Lesson model (trừ _id, __v, timestamps, lessonId)
+    const lessonFields = Object.keys(originalLesson.toObject()).filter(
+      (field) =>
+        !["_id", "__v", "createdAt", "updatedAt", "lessonId", "class", "academicYear", "timeSlot", "scheduledDate", "createdBy"].includes(field)
+    );
+
+    // Tạo data objects với tất cả các trường
+    const originalData = {};
+    const replacementData = {};
+
+    lessonFields.forEach((field) => {
+      originalData[field] = originalLesson[field];
+      replacementData[field] = replacementLesson[field];
+    });
+
+    // Sử dụng generic lesson reference swapper
+    console.log(`🔄 Starting generic lesson reference swap...`);
+    const swapResult = await lessonReferenceSwapper.swapLessonReferences(
+      originalLesson._id,
+      replacementLesson._id,
+      processedBy
+    );
+
+    if (!swapResult.success) {
+      console.error("❌ Lesson reference swap failed:", swapResult.errors);
+      throw new Error("Failed to swap lesson references");
+    }
+
+    console.log(
+      `✅ Swapped ${swapResult.totalSwapped} references across ${swapResult.swappedCollections.length} collections`
+    );
+
+    // Cập nhật replacement lesson với tất cả trường từ original
+    lessonFields.forEach((field) => {
+      replacementLesson[field] = originalData[field];
+    });
+    replacementLesson.lastModifiedBy = processedBy;
+
+    // Cập nhật original lesson với tất cả trường từ replacement
+    lessonFields.forEach((field) => {
+      originalLesson[field] = replacementData[field];
+    });
+    originalLesson.lastModifiedBy = processedBy;
+
+    // Lưu lessons mà không trigger pre-save hook để tránh tạo lại lessonId
+    await originalLesson.save({ validateBeforeSave: false });
+    await replacementLesson.save({ validateBeforeSave: false });
+
+    console.log(
+      `🔄 Swapped lessons: ${originalLesson.lessonId} ↔ ${replacementLesson.lessonId}`
+    );
+  }
+
+  // Xử lý approval cho swap request
+  async processSwapApproval(lessonRequest, originalLesson, replacementLesson) {
+    // Sử dụng hàm generic để swap tất cả trường
+    await this.swapLessonFields(
+      originalLesson,
+      replacementLesson,
+      lessonRequest.processedBy
+    );
+  }
+
   // Duyệt yêu cầu đổi tiết bởi giáo viên replacement
   async approveSwapRequestByReplacementTeacher(
     requestId,
@@ -475,74 +540,6 @@ class SwapRequestService {
       console.error("❌ Error approving swap request:", error.message);
       throw new Error(`Failed to approve swap request: ${error.message}`);
     }
-  }
-
-  // Xử lý approval cho swap request
-  async processSwapApproval(lessonRequest, originalLesson, replacementLesson) {
-    // Hoán đổi thông tin giữa 2 tiết
-    const originalData = {
-      teacher: originalLesson.teacher,
-      subject: originalLesson.subject,
-      topic: originalLesson.topic,
-      notes: originalLesson.notes,
-      type: originalLesson.type,
-      description: originalLesson.description,
-      status: originalLesson.status,
-    };
-
-    const replacementData = {
-      teacher: replacementLesson.teacher,
-      subject: replacementLesson.subject,
-      topic: replacementLesson.topic,
-      notes: replacementLesson.notes,
-      type: replacementLesson.type,
-      description: replacementLesson.description,
-      status: replacementLesson.status,
-    };
-
-    // Sử dụng generic lesson reference swapper
-    console.log(`🔄 Starting generic lesson reference swap...`);
-    const swapResult = await lessonReferenceSwapper.swapLessonReferences(
-      originalLesson._id,
-      replacementLesson._id,
-      lessonRequest.processedBy
-    );
-
-    if (!swapResult.success) {
-      console.error("❌ Lesson reference swap failed:", swapResult.errors);
-      throw new Error("Failed to swap lesson references");
-    }
-
-    console.log(
-      `✅ Swapped ${swapResult.totalSwapped} references across ${swapResult.swappedCollections.length} collections`
-    );
-
-    // Cập nhật replacement lesson thành lesson chính
-    replacementLesson.teacher = originalData.teacher;
-    replacementLesson.subject = originalData.subject;
-    replacementLesson.topic = originalData.topic;
-    replacementLesson.notes = originalData.notes;
-    replacementLesson.type = originalData.type;
-    replacementLesson.description = originalData.description;
-    replacementLesson.status = originalData.status;
-    replacementLesson.lastModifiedBy = lessonRequest.processedBy;
-
-    // Cập nhật original lesson thành lesson của giáo viên khác
-    originalLesson.teacher = replacementData.teacher;
-    originalLesson.subject = replacementData.subject;
-    originalLesson.topic = replacementData.topic;
-    originalLesson.notes = replacementData.notes;
-    originalLesson.type = replacementData.type;
-    originalLesson.description = replacementData.description;
-    originalLesson.status = replacementData.status;
-    originalLesson.lastModifiedBy = lessonRequest.processedBy;
-
-    await originalLesson.save();
-    await replacementLesson.save();
-
-    console.log(
-      `🔄 Swapped lessons: ${originalLesson.lessonId} ↔ ${replacementLesson.lessonId}`
-    );
   }
 
   // Từ chối yêu cầu đổi tiết bởi giáo viên replacement
