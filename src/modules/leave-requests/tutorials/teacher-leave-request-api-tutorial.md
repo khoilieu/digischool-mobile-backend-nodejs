@@ -157,7 +157,7 @@ Authorization: Bearer <your_jwt_token>
 
 ### 3. 🔍 Xem tiết học có thể xin nghỉ (Teacher)
 
-**GET** `/api/teacher-leave-requests/available-lessons`
+**GET** `/api/teacher-leave-requests/available-lessons?startDate=2024-01-15&endDate=2024-01-31`
 
 **Quyền**: `teacher`
 

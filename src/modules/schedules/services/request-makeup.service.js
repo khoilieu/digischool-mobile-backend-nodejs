@@ -238,7 +238,18 @@ class MakeupRequestService {
     // Lấy tất cả các trường của Lesson model (trừ _id, __v, timestamps, lessonId)
     const lessonFields = Object.keys(originalLesson.toObject()).filter(
       (field) =>
-        !["_id", "__v", "createdAt", "updatedAt", "lessonId", "class", "academicYear", "timeSlot", "scheduledDate", "createdBy"].includes(field)
+        ![
+          "_id",
+          "__v",
+          "createdAt",
+          "updatedAt",
+          "lessonId",
+          "class",
+          "academicYear",
+          "timeSlot",
+          "scheduledDate",
+          "createdBy",
+        ].includes(field)
     );
 
     // Lưu dữ liệu từ tiết gốc
@@ -270,14 +281,24 @@ class MakeupRequestService {
     });
     replacementLesson.lastModifiedBy = processedBy;
 
-    
+    // Cập nhật original lesson - nếu là absent thì chuyển thành scheduled
     originalLesson.teacher = undefined;
     originalLesson.subject = undefined;
     originalLesson.substituteTeacher = undefined;
     originalLesson.topic = undefined;
     originalLesson.description = undefined;
     originalLesson.type = "empty";
-    originalLesson.status = "scheduled";
+
+    // Nếu lesson gốc là absent, chuyển thành scheduled (để giáo viên dạy)
+    if (originalLesson.status === "absent") {
+      originalLesson.status = "scheduled";
+      console.log(
+        `✅ Original lesson ${originalLesson.lessonId} status changed from absent to scheduled`
+      );
+    } else {
+      originalLesson.status = "scheduled";
+    }
+
     originalLesson.lastModifiedBy = processedBy;
 
     // Lưu lessons mà không trigger pre-save hook để tránh tạo lại lessonId

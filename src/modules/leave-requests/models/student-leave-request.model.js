@@ -71,19 +71,12 @@ const studentLeaveRequestSchema = new mongoose.Schema({
     default: "pending",
   },
 
-  // Nhận xét của giáo viên
-  teacherComment: {
-    type: String,
-    trim: true,
-    maxLength: 300,
-  },
-
   // Thời gian xử lý
-  approvedAt: {
+  processedAt: {
     type: Date,
   },
 
-  approvedBy: {
+  teacherId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
   },
@@ -167,32 +160,26 @@ studentLeaveRequestSchema.statics.findPendingByTeacher = function (teacherId) {
 };
 
 // Instance methods
-studentLeaveRequestSchema.methods.approve = function (teacherId, comment = "") {
+studentLeaveRequestSchema.methods.approve = function (teacherId) {
   if (this.teacherId.toString() !== teacherId.toString()) {
     throw new Error("Only the lesson teacher can approve this request");
   }
 
   this.status = "approved";
-  this.teacherComment = comment;
-  this.approvedAt = new Date();
-  this.approvedBy = teacherId;
+  this.processedAt = new Date();
+  this.teacherId = teacherId;
 
   return this.save();
 };
 
-studentLeaveRequestSchema.methods.reject = function (teacherId, comment = "") {
+studentLeaveRequestSchema.methods.reject = function (teacherId) {
   if (this.teacherId.toString() !== teacherId.toString()) {
     throw new Error("Only the lesson teacher can reject this request");
   }
 
-  if (!comment.trim()) {
-    throw new Error("Comment is required when rejecting a request");
-  }
-
   this.status = "rejected";
-  this.teacherComment = comment;
-  this.approvedAt = new Date();
-  this.approvedBy = teacherId;
+  this.processedAt = new Date();
+  this.teacherId = teacherId;
 
   return this.save();
 };

@@ -279,9 +279,12 @@ class LessonRequestValidation {
           throw new Error("Original lesson does not belong to this teacher");
         }
 
-        if (originalLesson.status !== "scheduled") {
+        if (
+          originalLesson.status !== "scheduled" &&
+          originalLesson.status !== "absent"
+        ) {
           throw new Error(
-            "Original lesson must be scheduled for makeup request"
+            "Original lesson must be scheduled or absent for makeup request"
           );
         }
 
