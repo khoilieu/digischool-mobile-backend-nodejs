@@ -72,7 +72,7 @@ const lessonSchema = new mongoose.Schema(
     // Trạng thái
     status: {
       type: String,
-      enum: ["scheduled", "completed", "cancelled", "postponed", "absent"],
+      enum: ["scheduled", "completed", "absent"],
       default: "scheduled",
     },
 
@@ -92,7 +92,7 @@ const lessonSchema = new mongoose.Schema(
       type: String,
       maxlength: 500,
     },
-    
+
     // Thông tin attendance
     attendance: {
       totalStudents: {
@@ -163,7 +163,6 @@ const lessonSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
-
   },
   {
     timestamps: true,
@@ -255,7 +254,6 @@ lessonSchema.statics.checkConflict = async function (
     teacher: teacherId,
     scheduledDate: scheduledDate,
     timeSlot: timeSlotId,
-    status: { $nin: ["cancelled"] },
   };
 
   if (excludeId) {
@@ -298,38 +296,6 @@ lessonSchema.statics.getClassLessons = function (classId, startDate, endDate) {
     .sort({ scheduledDate: 1, "timeSlot.period": 1 });
 };
 
-// Static method để tạo makeup lesson
-lessonSchema.statics.createMakeupLesson = async function (
-  originalLessonId,
-  newDate,
-  newTimeSlot,
-  teacherId,
-  createdBy
-) {
-  const originalLesson = await this.findById(originalLessonId);
-  if (!originalLesson) throw new Error("Original lesson not found");
-
-  const makeupLesson = new this({
-    class: originalLesson.class,
-    subject: originalLesson.subject,
-    teacher: teacherId || originalLesson.teacher,
-    academicYear: originalLesson.academicYear,
-    timeSlot: newTimeSlot,
-    scheduledDate: newDate,
-    type: "makeup",
-    status: "scheduled",
-    topic: originalLesson.topic,
-    makeupInfo: {
-      originalLesson: originalLessonId,
-      reason: "Makeup for cancelled/postponed lesson",
-      originalDate: originalLesson.scheduledDate,
-    },
-    createdBy,
-  });
-
-  return makeupLesson.save();
-};
-
 // Static method để lấy statistics
 lessonSchema.statics.getStatistics = async function (classId, academicYearId) {
   const stats = await this.aggregate([
@@ -352,7 +318,6 @@ lessonSchema.statics.getStatistics = async function (classId, academicYearId) {
     total: 0,
     completed: 0,
     scheduled: 0,
-    cancelled: 0,
     absent: 0,
     byType: {
       regular: 0,

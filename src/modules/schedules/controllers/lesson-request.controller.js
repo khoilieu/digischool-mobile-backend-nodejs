@@ -1,324 +1,513 @@
-const LessonRequestService = require('../services/lesson-request.service');
-const { validationResult } = require('express-validator');
+const swapRequestService = require("../services/request-swap.service");
+const makeupRequestService = require("../services/request-makeup.service");
+const substituteRequestService = require("../services/request-substitute.service");
+const { validationResult } = require("express-validator");
 
 class LessonRequestController {
-  constructor() {
-    this.lessonRequestService = new LessonRequestService();
-  }
-  
-  // Lấy các tiết học của giáo viên để tạo request (swap/makeup)
-  async getTeacherLessonsForRequest(req, res) {
+  // ================================ SWAP CONTROLLERS (ĐỔI TIẾT) ================================
+
+  // Tạo yêu cầu đổi tiết
+  async createSwapRequest(req, res) {
     try {
-      const { teacherId, academicYear, startOfWeek, endOfWeek, requestType = 'swap' } = req.query;
-      
-      // Validate required parameters
-      if (!teacherId || !academicYear || !startOfWeek || !endOfWeek) {
-        return res.status(400).json({
-          success: false,
-          message: 'Missing required parameters: teacherId, academicYear, startOfWeek, endOfWeek'
-        });
-      }
-      
-      // Validate requestType
-      if (!['swap', 'makeup'].includes(requestType)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid requestType. Must be swap or makeup'
-        });
-      }
-      
-      // Validate teacher authorization (teacher can only see their own lessons)
-      if (req.user.role === 'teacher' && req.user.id !== teacherId) {
-        return res.status(403).json({
-          success: false,
-          message: 'You can only view your own lessons'
-        });
-      }
-      
-      const result = await this.lessonRequestService.getTeacherLessonsForWeek(
-        teacherId,
-        academicYear,
-        startOfWeek,
-        endOfWeek,
-        requestType
-      );
-      
-      res.json(result);
-      
-    } catch (error) {
-      console.error('❌ Error in getTeacherLessonsForRequest:', error.message);
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
-    }
-  }
-  
-  // Lấy các tiết trống có thể dùng cho request
-  async getAvailableLessonsForRequest(req, res) {
-    try {
-      const { classId, academicYear, startOfWeek, endOfWeek, subjectId } = req.query;
-      
-      // Validate required parameters
-      if (!classId || !academicYear || !startOfWeek || !endOfWeek || !subjectId) {
-        return res.status(400).json({
-          success: false,
-          message: 'Missing required parameters: classId, academicYear, startOfWeek, endOfWeek, subjectId'
-        });
-      }
-      
-      const result = await this.lessonRequestService.getAvailableLessonsForRequest(
-        classId,
-        academicYear,
-        startOfWeek,
-        endOfWeek,
-        subjectId
-      );
-      
-      res.json(result);
-      
-    } catch (error) {
-      console.error('❌ Error in getAvailableLessonsForRequest:', error.message);
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
-    }
-  }
-  
-  // Tạo yêu cầu đổi tiết hoặc dạy bù
-  async createLessonRequest(req, res) {
-    try {
-      // Check validation errors
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,
-          message: 'Validation failed',
-          errors: errors.array()
+          message: "Validation errors",
+          errors: errors.array(),
         });
       }
-      
-      const { originalLessonId, replacementLessonId, reason, requestType, absentReason } = req.body;
-      
-      const requestData = {
+
+      const data = {
         teacherId: req.user.id,
-        originalLessonId,
-        replacementLessonId,
-        reason,
-        requestType,
-        absentReason // Chỉ dùng cho makeup request
+        originalLessonId: req.body.originalLessonId,
+        replacementLessonId: req.body.replacementLessonId,
+        reason: req.body.reason,
       };
-      
-      const result = await this.lessonRequestService.createLessonRequest(requestData);
-      
+
+      const result = await swapRequestService.createSwapRequest(data);
+
       res.status(201).json(result);
-      
     } catch (error) {
-      console.error('❌ Error in createLessonRequest:', error.message);
+      console.error("Error in createSwapRequest:", error);
       res.status(500).json({
         success: false,
-        message: error.message
+        message: error.message,
       });
     }
   }
-  
-  // Lấy danh sách yêu cầu của giáo viên
+
+  // Tạo yêu cầu dạy bù
+  async createMakeupRequest(req, res) {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: "Validation errors",
+          errors: errors.array(),
+        });
+      }
+
+      const data = {
+        teacherId: req.user.id,
+        originalLessonId: req.body.originalLessonId,
+        replacementLessonId: req.body.replacementLessonId,
+        reason: req.body.reason,
+      };
+
+      const result = await makeupRequestService.createMakeupRequest(data);
+
+      res.status(201).json(result);
+    } catch (error) {
+      console.error("Error in createMakeupRequest:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // ================================ SUBSTITUTE CONTROLLERS (DẠY THAY) ================================
+
+  // Tạo yêu cầu dạy thay
+  async createSubstituteRequest(req, res) {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: "Validation errors",
+          errors: errors.array(),
+        });
+      }
+
+      const { lessonId, candidateTeacherIds, reason } = req.body;
+
+      const result = await substituteRequestService.createSubstituteRequest(
+        lessonId,
+        req.user.id,
+        candidateTeacherIds,
+        reason
+      );
+
+      res.status(201).json({
+        success: true,
+        message: "Substitute request created successfully",
+        request: result,
+      });
+    } catch (error) {
+      console.error("Error in createSubstituteRequest:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Lấy danh sách giáo viên dạy thay có sẵn
+  async getAvailableTeachersForSubstitute(req, res) {
+    try {
+      const { lessonId } = req.params;
+
+      const result = await substituteRequestService.getAvailableTeachers(
+        lessonId
+      );
+
+      res.status(200).json({
+        success: true,
+        availableTeachers: result.availableTeachers,
+        unavailableTeachers: result.unavailableTeachers,
+        totalChecked: result.totalChecked,
+        lessonInfo: result.lessonInfo,
+        message: `Tìm thấy ${result.availableTeachers.length} giáo viên có thể dạy thay trong tổng số ${result.totalChecked} giáo viên được kiểm tra`,
+      });
+    } catch (error) {
+      console.error("Error in getAvailableTeachersForSubstitute:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // ================================ COMMON CONTROLLERS ================================
+
+  // Lấy danh sách yêu cầu của giáo viên (tất cả loại)
   async getTeacherRequests(req, res) {
     try {
-      const teacherId = req.user.role === 'teacher' ? req.user.id : req.query.teacherId;
-      
-      if (!teacherId) {
-        return res.status(400).json({
-          success: false,
-          message: 'Teacher ID is required'
-        });
-      }
-      
-      // Validate teacher authorization
-      if (req.user.role === 'teacher' && req.user.id !== teacherId) {
-        return res.status(403).json({
-          success: false,
-          message: 'You can only view your own requests'
-        });
-      }
-      
-      const options = {};
-      if (req.query.status) options.status = req.query.status;
-      if (req.query.requestType) options.requestType = req.query.requestType;
-      if (req.query.startDate) options.startDate = new Date(req.query.startDate);
-      if (req.query.endDate) options.endDate = new Date(req.query.endDate);
-      
-      // Use static method from model
-      const LessonRequest = require('../models/lesson-request.model');
-      const requests = await LessonRequest.findByTeacher(teacherId, options);
-      
-      res.json({
+      const { status, page = 1, limit = 20 } = req.query;
+      const teacherId = req.user.id;
+
+      // Lấy substitute requests
+      const substituteRequests =
+        await substituteRequestService.getTeacherRequests(teacherId, status);
+
+      // Lấy swap requests
+      const swapRequests = await swapRequestService.getTeacherSwapRequests(
+        teacherId,
+        status
+      );
+
+      // Lấy makeup requests (chỉ requesting teacher)
+      const LessonRequest = require("../models/lesson-request.model");
+      const makeupQuery = {
+        requestingTeacher: teacherId,
+        requestType: "makeup",
+      };
+      if (status) makeupQuery.status = status;
+
+      const makeupRequests = await LessonRequest.find(makeupQuery)
+        .populate({
+          path: "originalLesson",
+          select: "lessonId scheduledDate timeSlot topic status type",
+          populate: {
+            path: "timeSlot",
+            select: "period name startTime endTime",
+          },
+        })
+        .populate({
+          path: "replacementLesson",
+          select: "lessonId scheduledDate timeSlot topic status type",
+          populate: {
+            path: "timeSlot",
+            select: "period name startTime endTime",
+          },
+        })
+        .populate("requestingTeacher", "name email fullName")
+        .populate("additionalInfo.classInfo", "className gradeLevel")
+        .populate("additionalInfo.subjectInfo", "subjectName subjectCode")
+        .populate("additionalInfo.academicYear", "name startDate endDate")
+        .sort({ createdAt: -1 });
+
+      // Kết hợp tất cả requests
+      const allRequests = [
+        ...substituteRequests,
+        ...swapRequests,
+        ...makeupRequests,
+      ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      // Phân trang
+      const startIndex = (parseInt(page) - 1) * parseInt(limit);
+      const endIndex = startIndex + parseInt(limit);
+      const paginatedRequests = allRequests.slice(startIndex, endIndex);
+
+      res.status(200).json({
         success: true,
-        requests: requests,
-        count: requests.length
+        requests: paginatedRequests,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: allRequests.length,
+          pages: Math.ceil(allRequests.length / parseInt(limit)),
+        },
       });
-      
     } catch (error) {
-      console.error('❌ Error in getTeacherRequests:', error.message);
+      console.error("Error in getTeacherRequests:", error);
       res.status(500).json({
         success: false,
-        message: error.message
+        message: error.message,
       });
     }
   }
-  
-  // Lấy danh sách yêu cầu đang chờ duyệt (cho manager)
-  async getPendingRequests(req, res) {
-    try {
-      const options = {};
-      if (req.query.academicYear) options.academicYear = req.query.academicYear;
-      if (req.query.classId) options.classId = req.query.classId;
-      if (req.query.requestType) options.requestType = req.query.requestType;
-      
-      // Use static method from model
-      const LessonRequest = require('../models/lesson-request.model');
-      const pendingRequests = await LessonRequest.findPendingRequests(options);
-      
-      res.json({
-        success: true,
-        pendingRequests: pendingRequests,
-        count: pendingRequests.length
-      });
-      
-    } catch (error) {
-      console.error('❌ Error in getPendingRequests:', error.message);
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
-    }
-  }
-  
-  // Duyệt yêu cầu
+
+  // Duyệt yêu cầu (swap & makeup)
   async approveRequest(req, res) {
     try {
-      // Check validation errors
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,
-          message: 'Validation failed',
-          errors: errors.array()
+          message: "Validation errors",
+          errors: errors.array(),
         });
       }
-      
+
       const { requestId } = req.params;
-      const { comment = '' } = req.body;
-      
-      const result = await this.lessonRequestService.approveRequest(
-        requestId,
-        req.user.id,
-        comment
-      );
-      
-      res.json(result);
-      
-    } catch (error) {
-      console.error('❌ Error in approveRequest:', error.message);
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
-    }
-  }
-  
-  // Từ chối yêu cầu
-  async rejectRequest(req, res) {
-    try {
-      // Check validation errors
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: errors.array()
-        });
-      }
-      
-      const { requestId } = req.params;
-      const { comment = '' } = req.body;
-      
-      const result = await this.lessonRequestService.rejectRequest(
-        requestId,
-        req.user.id,
-        comment
-      );
-      
-      res.json(result);
-      
-    } catch (error) {
-      console.error('❌ Error in rejectRequest:', error.message);
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
-    }
-  }
-  
-  // Lấy chi tiết yêu cầu
-  async getRequestDetails(req, res) {
-    try {
-      const { requestId } = req.params;
-      
-      const LessonRequest = require('../models/lesson-request.model');
-      const request = await LessonRequest.findById(requestId)
-        .populate({
-          path: 'originalLesson',
-          select: 'lessonId scheduledDate timeSlot topic status type',
-          populate: {
-            path: 'timeSlot',
-            select: 'period name startTime endTime'
-          }
-        })
-                  .populate({
-            path: 'replacementLesson',
-            select: 'lessonId scheduledDate timeSlot topic status type',
-            populate: {
-              path: 'timeSlot',
-              select: 'period name startTime endTime'
-            }
-          })
-        .populate('requestingTeacher', 'name email fullName')
-        .populate('processedBy', 'name email fullName')
-        .populate('additionalInfo.classInfo', 'className gradeLevel')
-        .populate('additionalInfo.subjectInfo', 'subjectName subjectCode')
-        .populate('additionalInfo.academicYear', 'name startDate endDate')
-        .populate('makeupInfo.createdMakeupLesson', 'lessonId scheduledDate timeSlot status');
-      
+      const managerId = req.user.id;
+
+      // Tìm request để xác định loại
+      const LessonRequest = require("../models/lesson-request.model");
+      const request = await LessonRequest.findById(requestId);
+
       if (!request) {
         return res.status(404).json({
           success: false,
-          message: 'Request not found'
+          message: "Request not found",
         });
       }
-      
-      // Check authorization
-      if (req.user.role === 'teacher' && req.user.id !== request.requestingTeacher._id.toString()) {
-        return res.status(403).json({
+
+      let result;
+      if (request.requestType === "makeup") {
+        result = await makeupRequestService.approveMakeupRequest(
+          requestId,
+          managerId
+        );
+      } else {
+        return res.status(400).json({
           success: false,
-          message: 'You can only view your own requests'
+          message:
+            "This endpoint only supports makeup requests. For swap requests, use /swap/:requestId/approve",
         });
       }
-      
-      res.json({
-        success: true,
-        request: request
-      });
-      
+
+      res.status(200).json(result);
     } catch (error) {
-      console.error('❌ Error in getRequestDetails:', error.message);
+      console.error("Error in approveRequest:", error);
       res.status(500).json({
         success: false,
-        message: error.message
+        message: error.message,
+      });
+    }
+  }
+
+  // Từ chối yêu cầu (swap & makeup)
+  async rejectRequest(req, res) {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: "Validation errors",
+          errors: errors.array(),
+        });
+      }
+
+      const { requestId } = req.params;
+      const managerId = req.user.id;
+
+      // Tìm request để xác định loại
+      const LessonRequest = require("../models/lesson-request.model");
+      const request = await LessonRequest.findById(requestId);
+
+      if (!request) {
+        return res.status(404).json({
+          success: false,
+          message: "Request not found",
+        });
+      }
+
+      let result;
+      if (request.requestType === "makeup") {
+        result = await makeupRequestService.rejectMakeupRequest(
+          requestId,
+          managerId
+        );
+      } else {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This endpoint only supports makeup requests. For swap requests, use /swap/:requestId/reject",
+        });
+      }
+
+      res.status(200).json(result);
+    } catch (error) {
+      console.error("Error in rejectRequest:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // ================================ SWAP SPECIFIC CONTROLLERS ================================
+
+  // Hủy yêu cầu đổi tiết bởi requesting teacher
+  async cancelSwapRequest(req, res) {
+    try {
+      const { requestId } = req.params;
+      const requestingTeacherId = req.user.id;
+
+      const result = await swapRequestService.cancelSwapRequest(
+        requestId,
+        requestingTeacherId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result.request,
+      });
+    } catch (error) {
+      console.error("❌ Error in cancelSwapRequest controller:", error.message);
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Duyệt yêu cầu đổi tiết bởi giáo viên replacement
+  async approveSwapRequest(req, res) {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: "Validation errors",
+          errors: errors.array(),
+        });
+      }
+
+      const { requestId } = req.params;
+      const replacementTeacherId = req.user.id;
+
+      const result =
+        await swapRequestService.approveSwapRequestByReplacementTeacher(
+          requestId,
+          replacementTeacherId
+        );
+
+      res.status(200).json(result);
+    } catch (error) {
+      console.error("Error in approveSwapRequest:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Từ chối yêu cầu đổi tiết bởi giáo viên replacement
+  async rejectSwapRequest(req, res) {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: "Validation errors",
+          errors: errors.array(),
+        });
+      }
+
+      const { requestId } = req.params;
+      const replacementTeacherId = req.user.id;
+
+      const result =
+        await swapRequestService.rejectSwapRequestByReplacementTeacher(
+          requestId,
+          replacementTeacherId
+        );
+
+      res.status(200).json(result);
+    } catch (error) {
+      console.error("Error in rejectSwapRequest:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Phê duyệt yêu cầu dạy thay
+  async approveSubstituteRequest(req, res) {
+    try {
+      const { requestId } = req.params;
+      const teacherId = req.user.id;
+
+      const result = await substituteRequestService.approveRequest(
+        requestId,
+        teacherId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Substitute request approved successfully",
+        request: result,
+      });
+    } catch (error) {
+      console.error("Error in approveSubstituteRequest:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Từ chối yêu cầu dạy thay
+  async rejectSubstituteRequest(req, res) {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: "Validation errors",
+          errors: errors.array(),
+        });
+      }
+
+      const { requestId } = req.params;
+      const teacherId = req.user.id;
+
+      const result = await substituteRequestService.rejectRequest(
+        requestId,
+        teacherId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Substitute request rejected",
+        request: result,
+      });
+    } catch (error) {
+      console.error("Error in rejectSubstituteRequest:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Hủy yêu cầu dạy thay
+  async cancelSubstituteRequest(req, res) {
+    try {
+      const { requestId } = req.params;
+      const teacherId = req.user.id;
+
+      const result = await substituteRequestService.cancelRequest(
+        requestId,
+        teacherId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Substitute request cancelled",
+        request: result,
+      });
+    } catch (error) {
+      console.error("Error in cancelSubstituteRequest:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Huỷ yêu cầu dạy bù (makeup) - chỉ giáo viên tạo request được huỷ
+  async cancelMakeupRequest(req, res) {
+    try {
+      const { requestId } = req.params;
+      const teacherId = req.user.id;
+
+      const result = await makeupRequestService.cancelMakeupRequest(
+        requestId,
+        teacherId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: result.message || "Makeup request cancelled successfully",
+        request: result.request,
+      });
+    } catch (error) {
+      console.error("Error in cancelMakeupRequest:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message,
       });
     }
   }
 }
 
-module.exports = LessonRequestController; 
+module.exports = new LessonRequestController();

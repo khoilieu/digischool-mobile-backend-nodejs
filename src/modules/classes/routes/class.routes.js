@@ -35,6 +35,7 @@ router.get('/available-teachers',
 );
 
 // Lấy danh sách lớp học
+// Ví dụ: /api/classes?grade=12&academicYear=2024-2025
 router.get('/', 
   protect,
   validateGetClasses,

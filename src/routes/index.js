@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const lessonRequestRoutes = require('../modules/schedules/routes/lesson-request.routes');
-const courseRoutes = require("../modules/courses/routes/course.routes");
+const lessonRequestRoutes = require("../modules/schedules/routes/lesson-request.routes");
 const authRoutes = require("../modules/auth/routes/auth.routes");
 const userRoutes = require("../modules/user/routes/user.routes");
 const subjectRoutes = require("../modules/subjects/routes/subject.routes");
@@ -10,45 +9,42 @@ const scheduleRoutes = require("../modules/schedules/routes/schedule.routes");
 const studentEvaluationRoutes = require("../modules/schedules/routes/student-evaluation.routes");
 const teacherEvaluationRoutes = require("../modules/schedules/routes/teacher-evaluation.routes");
 const testInfoRoutes = require("../modules/schedules/routes/test-info.routes");
-const leaveRequestRoutes = require("../modules/leave-requests/routes/leave-request.routes");
+const studentLeaveRequestRoutes = require("../modules/leave-requests/routes/student-leave-request.routes");
 const teacherLeaveRequestRoutes = require("../modules/leave-requests/routes/teacher-leave-request.routes");
-const noteRoutes = require('../modules/note/routes/note.routes');
 
+const noteRoutes = require("../modules/note/routes/note.routes");
+const newsRoutes = require("../modules/news/routes/news.routes");
 
 // Health check route
 router.get("/health", (req, res) => {
   res.status(200).json({ status: "OK", message: "Server is healthy" });
 });
 
-// Auth routes
+// /api/auth
 router.use("/auth", authRoutes);
+// /api/users
 router.use("/users", userRoutes);
-// Course routes
-router.use("/courses", courseRoutes);
-// Subject routes
+// /api/subjects
 router.use("/subjects", subjectRoutes);
-// Class routes
+// /api/classes
 router.use("/classes", classRoutes);
-// Schedule routes
+// /api/schedules
 router.use("/schedules", scheduleRoutes);
-// Student evaluation routes
+// /api/student-evaluations
 router.use("/student-evaluations", studentEvaluationRoutes);
-// Teacher evaluation routes
+// /api/teacher-evaluations
 router.use("/teacher-evaluations", teacherEvaluationRoutes);
-// Test info routes
+// /api/test-infos
 router.use("/test-infos", testInfoRoutes);
-// Leave request routes
-router.use("/leave-requests", leaveRequestRoutes);
-// Teacher leave request routes
 
-router.use('/teacher-leave-requests', teacherLeaveRequestRoutes);
-// Lesson request routes (swap/makeup)
-router.use('/lesson-requests', lessonRequestRoutes);
-// Note routes
-router.use('/notes', noteRoutes);
+// /api/student-leave-requests
+router.use("/student-leave-requests", studentLeaveRequestRoutes);
+// /api/teacher-leave-requests
+router.use("/teacher-leave-requests", teacherLeaveRequestRoutes);
+// /api/notes
+router.use("/notes", noteRoutes);
+// /api/news
+router.use("/news", newsRoutes);
 
-
-// Import and use other route modules here
-// Example: router.use('/users', require('./userRoutes'));
 
 module.exports = router;
