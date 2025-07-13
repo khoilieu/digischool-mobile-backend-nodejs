@@ -8,6 +8,7 @@ const noteValidation = require('../middleware/note.validation');
 router.use(auth.protect);
 
 // Tạo ghi chú mới
+
 router.post('/create', noteValidation.create, noteController.createNote);
 // Lấy danh sách ghi chú của user tại 1 tiết học
 router.get('/get-by-lesson', noteController.getNotesByLesson);
@@ -15,5 +16,6 @@ router.get('/get-by-lesson', noteController.getNotesByLesson);
 router.patch('/update/:id', noteValidation.update, noteController.updateNote);
 // Xóa ghi chú
 router.delete('/delete/:id', noteController.deleteNote);
+
 
 module.exports = router; 
