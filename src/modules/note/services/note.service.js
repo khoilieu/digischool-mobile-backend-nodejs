@@ -1,3 +1,4 @@
+
 const Note = require("../models/note.model");
 
 class NoteService {
