@@ -7,6 +7,7 @@ const AcademicYear = require("../models/academic-year.model");
 const TimeSlot = require("../models/time-slot.model");
 const emailService = require("../../auth/services/email.service");
 const lessonReferenceSwapper = require("./lesson-reference-swapper.service");
+const notificationService = require("../../notification/services/notification.service");
 
 class SwapRequestService {
   // Helper function to calculate week range from a date
@@ -107,31 +108,50 @@ class SwapRequestService {
         .populate("additionalInfo.subjectInfo", "subjectName subjectCode")
         .populate("additionalInfo.academicYear", "name startDate endDate");
 
-      // Gửi email thông báo cho manager và giáo viên replacement
-      const managerEmails = await this.sendNewSwapRequestToManager(
-        populatedRequest
-      );
-      const replacementTeacherEmail =
-        await this.sendNewSwapRequestToReplacementTeacher(populatedRequest);
-
-      // Cập nhật emailsSent với danh sách email thực tế
-      const allRecipients = [...managerEmails];
-      if (replacementTeacherEmail) {
-        allRecipients.push(replacementTeacherEmail);
-      }
-
-      if (allRecipients.length > 0) {
-        await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
-          $push: {
-            emailsSent: {
-              type: "request",
-              recipients: allRecipients,
-              sentAt: new Date(),
-              subject: `Yêu cầu đổi tiết mới - ${lessonRequest.requestId}`,
-            },
-          },
-        });
-      }
+      // ==== Gửi notification thay cho email ====
+      // Gửi notification cho manager
+      const managers = await User.find({ role: { $in: ["manager", "admin"] } });
+      const managerIds = managers.map((m) => m._id.toString());
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu đổi tiết mới",
+        content: `Có yêu cầu đổi tiết mới từ giáo viên ${
+          populatedRequest.requestingTeacher.fullName ||
+          populatedRequest.requestingTeacher.name
+        } cho lớp ${populatedRequest.additionalInfo.classInfo.className}, môn ${
+          populatedRequest.additionalInfo.subjectInfo.subjectName
+        }.`,
+        sender: data.teacherId,
+        receiverScope: {
+          type: "user",
+          ids: managerIds,
+        },
+        relatedObject: {
+          id: populatedRequest._id,
+          requestType: "swap_request",
+        },
+      });
+      // Gửi notification cho giáo viên replacement
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Bạn nhận được yêu cầu đổi tiết",
+        content: `Bạn được đề xuất đổi tiết với giáo viên ${
+          populatedRequest.requestingTeacher.fullName ||
+          populatedRequest.requestingTeacher.name
+        } cho lớp ${populatedRequest.additionalInfo.classInfo.className}, môn ${
+          populatedRequest.additionalInfo.subjectInfo.subjectName
+        }.`,
+        sender: data.teacherId,
+        receiverScope: {
+          type: "user",
+          ids: [populatedRequest.swapInfo.replacementTeacher._id.toString()],
+        },
+        relatedObject: {
+          id: populatedRequest._id,
+          requestType: "swap_request",
+        },
+      });
+      // =========================================
 
       console.log(`✅ Created swap request: ${lessonRequest.requestId}`);
 
@@ -158,204 +178,23 @@ class SwapRequestService {
     return periodText;
   }
 
-  // Gửi email thông báo yêu cầu đổi tiết mới cho giáo viên của tiết replacement
-  async sendNewSwapRequestToReplacementTeacher(lessonRequest) {
-    try {
-      // Sử dụng thông tin từ swapInfo nếu có, nếu không thì query lại
-      let teacher = lessonRequest.swapInfo?.replacementTeacher;
-
-      if (!teacher) {
-        // Fallback: query lại từ replacement lesson
-        const replacementLesson = await Lesson.findById(
-          lessonRequest.replacementLesson
-        )
-          .populate("teacher", "name email fullName")
-          .lean();
-
-        if (!replacementLesson || !replacementLesson.teacher) {
-          console.log("⚠️ No replacement teacher found");
-          return null;
-        }
-        teacher = replacementLesson.teacher;
-      }
-
-      if (!teacher.email) {
-        console.log("⚠️ Replacement teacher has no email");
-        return null;
-      }
-
-      // Tạo email content
-      const subject = `Yêu cầu đổi tiết - Thông báo cho giáo viên - ${lessonRequest.requestId}`;
-
-      const emailContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #e67e22;">Thông báo yêu cầu đổi tiết</h2>
-          
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <h3 style="color: #34495e; margin-top: 0;">Thông tin yêu cầu</h3>
-            <p><strong>Mã yêu cầu:</strong> ${lessonRequest.requestId}</p>
-            <p><strong>Loại yêu cầu:</strong> Đổi tiết</p>
-            <p><strong>Giáo viên yêu cầu:</strong> ${
-              lessonRequest.requestingTeacher.fullName ||
-              lessonRequest.requestingTeacher.name
-            }</p>
-            <p><strong>Lớp:</strong> ${
-              lessonRequest.additionalInfo.classInfo.className
-            }</p>
-            <p><strong>Môn học:</strong> ${
-              lessonRequest.additionalInfo.subjectInfo.subjectName
-            }</p>
-            <p><strong>Lý do:</strong> ${lessonRequest.reason}</p>
-          </div>
-          
-          <div style="background-color: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
-            <h3 style="color: #856404; margin-top: 0;">⚠️ Tiết học của bạn sẽ bị ảnh hưởng</h3>
-            <p><strong>Tiết hiện tại của bạn:</strong></p>
-            <p>Ngày: ${new Date(
-              lessonRequest.replacementLesson.scheduledDate
-            ).toLocaleDateString("vi-VN")}</p>
-            <p>${this.formatLessonInfo(lessonRequest.replacementLesson)}</p>
-            <p><strong>Chủ đề:</strong> ${
-              lessonRequest.replacementLesson.topic || "Chưa có"
-            }</p>
-          </div>
-          
-          <div style="background-color: #e8f4f8; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <h3 style="color: #2980b9; margin-top: 0;">Thông tin tiết sẽ đổi</h3>
-            <p><strong>Tiết sẽ đổi với:</strong></p>
-            <p>Ngày: ${new Date(
-              lessonRequest.originalLesson.scheduledDate
-            ).toLocaleDateString("vi-VN")}</p>
-            <p>${this.formatLessonInfo(lessonRequest.originalLesson)}</p>
-            <p><strong>Chủ đề:</strong> ${
-              lessonRequest.originalLesson.topic || "Chưa có"
-            }</p>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <p style="color: #7f8c8d;">Yêu cầu này đang chờ phê duyệt từ quản lý. Bạn sẽ được thông báo khi có kết quả.</p>
-          </div>
-          
-          <div style="border-top: 1px solid #bdc3c7; padding-top: 20px; text-align: center; color: #95a5a6; font-size: 12px;">
-            <p>Email này được gửi tự động từ hệ thống quản lý lịch học DigiSchool.</p>
-          </div>
-        </div>
-      `;
-
-      // Gửi email cho giáo viên replacement
-      await emailService.sendEmail(teacher.email, subject, emailContent);
-
-      console.log(
-        `📧 Sent swap request notification to replacement teacher: ${teacher.email}`
-      );
-
-      return teacher.email;
-    } catch (error) {
-      console.error(
-        "❌ Error sending email to replacement teacher:",
-        error.message
-      );
-      // Không throw error để không làm gián đoạn flow chính
-      return null;
-    }
-  }
-
-  // Gửi email thông báo yêu cầu đổi tiết mới cho manager
-  async sendNewSwapRequestToManager(lessonRequest) {
-    try {
-      // Tìm managers và admins
-      const managers = await User.find({
-        role: { $in: ["manager", "admin"] },
-      }).select("email");
-
-      if (managers.length === 0) {
-        console.log("⚠️ No managers found to send notification");
-        return;
-      }
-
-      const managerEmails = managers.map((m) => m.email);
-
-      // Tạo email content
-      const subject = `Yêu cầu đổi tiết mới - ${lessonRequest.requestId}`;
-
-      const emailContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2c3e50;">Yêu cầu đổi tiết mới</h2>
-          
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <h3 style="color: #34495e; margin-top: 0;">Thông tin yêu cầu</h3>
-            <p><strong>Mã yêu cầu:</strong> ${lessonRequest.requestId}</p>
-            <p><strong>Loại yêu cầu:</strong> Đổi tiết</p>
-            <p><strong>Giáo viên:</strong> ${
-              lessonRequest.requestingTeacher.fullName ||
-              lessonRequest.requestingTeacher.name
-            }</p>
-            <p><strong>Lớp:</strong> ${
-              lessonRequest.additionalInfo.classInfo.className
-            }</p>
-            <p><strong>Môn học:</strong> ${
-              lessonRequest.additionalInfo.subjectInfo.subjectName
-            }</p>
-            <p><strong>Lý do:</strong> ${lessonRequest.reason}</p>
-          </div>
-          
-          <div style="background-color: #e8f4f8; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <h3 style="color: #2980b9; margin-top: 0;">Thông tin tiết học</h3>
-            <div style="display: flex; justify-content: space-between;">
-              <div style="flex: 1; margin-right: 20px;">
-                <h4 style="color: #e74c3c;">Tiết gốc:</h4>
-                <p>Ngày: ${new Date(
-                  lessonRequest.originalLesson.scheduledDate
-                ).toLocaleDateString("vi-VN")}</p>
-                <p>${this.formatLessonInfo(lessonRequest.originalLesson)}</p>
-                <p>Trạng thái: ${lessonRequest.originalLesson.status}</p>
-              </div>
-              <div style="flex: 1;">
-                <h4 style="color: #27ae60;">Tiết thay thế:</h4>
-                <p>Ngày: ${new Date(
-                  lessonRequest.replacementLesson.scheduledDate
-                ).toLocaleDateString("vi-VN")}</p>
-                <p>${this.formatLessonInfo(lessonRequest.replacementLesson)}</p>
-                <p>Trạng thái: ${lessonRequest.replacementLesson.status}</p>
-              </div>
-            </div>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <p style="color: #7f8c8d;">Vui lòng đăng nhập vào hệ thống để xem chi tiết và xử lý yêu cầu này.</p>
-          </div>
-          
-          <div style="border-top: 1px solid #bdc3c7; padding-top: 20px; text-align: center; color: #95a5a6; font-size: 12px;">
-            <p>Email này được gửi tự động từ hệ thống quản lý lịch học DigiSchool.</p>
-          </div>
-        </div>
-      `;
-
-      // Gửi email cho tất cả managers
-      await Promise.all(
-        managerEmails.map((email) =>
-          emailService.sendEmail(email, subject, emailContent)
-        )
-      );
-
-      console.log(
-        `📧 Sent swap request notification to ${managerEmails.length} managers`
-      );
-
-      return managerEmails;
-    } catch (error) {
-      console.error("❌ Error sending email notification:", error.message);
-      // Không throw error để không làm gián đoạn flow chính
-      return [];
-    }
-  }
-
   // Hàm generic để swap tất cả các trường của Lesson model
   async swapLessonFields(originalLesson, replacementLesson, processedBy) {
     // Lấy tất cả các trường của Lesson model (trừ _id, __v, timestamps, lessonId)
     const lessonFields = Object.keys(originalLesson.toObject()).filter(
       (field) =>
-        !["_id", "__v", "createdAt", "updatedAt", "lessonId", "class", "academicYear", "timeSlot", "scheduledDate", "createdBy"].includes(field)
+        ![
+          "_id",
+          "__v",
+          "createdAt",
+          "updatedAt",
+          "lessonId",
+          "class",
+          "academicYear",
+          "timeSlot",
+          "scheduledDate",
+          "createdBy",
+        ].includes(field)
     );
 
     // Tạo data objects với tất cả các trường
@@ -497,39 +336,62 @@ class SwapRequestService {
       lessonRequest.processedBy = replacementTeacherId;
       lessonRequest.processedAt = new Date();
       lessonRequest.lastModifiedBy = replacementTeacherId;
-
-      // Cập nhật trạng thái phản hồi của replacement teacher
       lessonRequest.swapInfo.replacementTeacherResponse = {
         status: "approved",
         responseDate: new Date(),
       };
-
       await lessonRequest.save();
 
-      // Gửi email thông báo cho giáo viên
-      const teacherRecipients = await this.sendSwapRequestNotifications(
-        lessonRequest,
-        "approved"
-      );
-
-      // Gửi email thông báo cho học sinh
-      await this.sendStudentNotifications(lessonRequest, "approved");
-
-      // Cập nhật emailsSent với danh sách email thực tế
-      const allRecipients = [...teacherRecipients];
-
-      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
-        $push: {
-          emailsSent: {
-            type: "approval",
-            recipients: allRecipients,
-            sentAt: new Date(),
-            subject: `Yêu cầu đổi tiết đã được duyệt - ${lessonRequest.requestId}`,
-          },
+      // ==== Gửi notification thay cho email ====
+      // 1. Gửi notification cho giáo viên yêu cầu
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu đổi tiết đã được chấp nhận",
+        content: `Yêu cầu đổi tiết của bạn đã được giáo viên ${
+          lessonRequest.swapInfo.replacementTeacher.fullName ||
+          lessonRequest.swapInfo.replacementTeacher.name
+        } chấp nhận.`,
+        sender: replacementTeacherId,
+        receiverScope: {
+          type: "user",
+          ids: [lessonRequest.requestingTeacher._id.toString()],
         },
+        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
       });
-
-      console.log(`✅ Approved swap request: ${requestId}`);
+      // 2. Gửi notification cho giáo viên replacement
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Bạn đã chấp nhận đổi tiết",
+        content: `Bạn đã chấp nhận đổi tiết với giáo viên ${
+          lessonRequest.requestingTeacher.fullName ||
+          lessonRequest.requestingTeacher.name
+        }.`,
+        sender: replacementTeacherId,
+        receiverScope: {
+          type: "user",
+          ids: [replacementTeacherId.toString()],
+        },
+        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
+      });
+      // 3. Gửi notification cho học sinh lớp đó
+      const students = await User.find({
+        role: "student",
+        class_id: lessonRequest.additionalInfo.classInfo._id,
+      }).select("_id");
+      if (students.length > 0) {
+        await notificationService.createNotification({
+          type: "activity",
+          title: "Thông báo đổi tiết",
+          content: `Lịch học lớp ${lessonRequest.additionalInfo.classInfo.className} đã được đổi tiết theo yêu cầu. Vui lòng kiểm tra lại lịch học mới.`,
+          sender: replacementTeacherId,
+          receiverScope: {
+            type: "user",
+            ids: students.map((s) => s._id.toString()),
+          },
+          relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
+        });
+      }
+      // =========================================
 
       return {
         success: true,
@@ -596,34 +458,44 @@ class SwapRequestService {
       lessonRequest.processedBy = replacementTeacherId;
       lessonRequest.processedAt = new Date();
       lessonRequest.lastModifiedBy = replacementTeacherId;
-
-      // Cập nhật trạng thái phản hồi của replacement teacher
       lessonRequest.swapInfo.replacementTeacherResponse = {
         status: "rejected",
         responseDate: new Date(),
       };
-
       await lessonRequest.save();
 
-      // Gửi email thông báo
-      const teacherRecipients = await this.sendSwapRequestNotifications(
-        lessonRequest,
-        "rejected"
-      );
-
-      // Cập nhật emailsSent với danh sách email thực tế
-      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
-        $push: {
-          emailsSent: {
-            type: "rejection",
-            recipients: teacherRecipients,
-            sentAt: new Date(),
-            subject: `Yêu cầu đổi tiết đã bị từ chối - ${lessonRequest.requestId}`,
-          },
+      // ==== Gửi notification thay cho email ====
+      // 1. Gửi notification cho giáo viên yêu cầu
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu đổi tiết bị từ chối",
+        content: `Yêu cầu đổi tiết của bạn đã bị giáo viên ${
+          lessonRequest.swapInfo.replacementTeacher.fullName ||
+          lessonRequest.swapInfo.replacementTeacher.name
+        } từ chối.`,
+        sender: replacementTeacherId,
+        receiverScope: {
+          type: "user",
+          ids: [lessonRequest.requestingTeacher._id.toString()],
         },
+        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
       });
-
-      console.log(`❌ Rejected swap request: ${requestId}`);
+      // 2. Gửi notification cho giáo viên replacement
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Bạn đã từ chối đổi tiết",
+        content: `Bạn đã từ chối đổi tiết với giáo viên ${
+          lessonRequest.requestingTeacher.fullName ||
+          lessonRequest.requestingTeacher.name
+        }.`,
+        sender: replacementTeacherId,
+        receiverScope: {
+          type: "user",
+          ids: [replacementTeacherId.toString()],
+        },
+        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
+      });
+      // =========================================
 
       return {
         success: true,
@@ -633,214 +505,6 @@ class SwapRequestService {
     } catch (error) {
       console.error("❌ Error rejecting swap request:", error.message);
       throw new Error(`Failed to reject swap request: ${error.message}`);
-    }
-  }
-
-  // Gửi email thông báo kết quả xử lý đổi tiết
-  async sendSwapRequestNotifications(lessonRequest, status) {
-    try {
-      let statusText, statusColor;
-      switch (status) {
-        case "approved":
-          statusText = "đã được duyệt";
-          statusColor = "#27ae60";
-          break;
-        case "rejected":
-          statusText = "đã bị từ chối";
-          statusColor = "#e74c3c";
-          break;
-        case "cancelled":
-          statusText = "đã được hủy";
-          statusColor = "#95a5a6";
-          break;
-        default:
-          statusText = "đã được xử lý";
-          statusColor = "#2c3e50";
-      }
-
-      const subject = `Yêu cầu đổi tiết ${statusText} - ${lessonRequest.requestId}`;
-
-      const emailContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: ${statusColor};">Yêu cầu đổi tiết ${statusText}</h2>
-          
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <h3 style="color: #34495e; margin-top: 0;">Thông tin yêu cầu</h3>
-            <p><strong>Mã yêu cầu:</strong> ${lessonRequest.requestId}</p>
-            <p><strong>Loại yêu cầu:</strong> Đổi tiết</p>
-            <p><strong>Lớp:</strong> ${
-              lessonRequest.additionalInfo.classInfo.className
-            }</p>
-            <p><strong>Môn học:</strong> ${
-              lessonRequest.additionalInfo.subjectInfo.subjectName
-            }</p>
-            <p><strong>Trạng thái:</strong> <span style="color: ${statusColor}; font-weight: bold;">${statusText.toUpperCase()}</span></p>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <p style="color: #7f8c8d;">Vui lòng đăng nhập vào hệ thống để xem chi tiết.</p>
-          </div>
-          
-          <div style="border-top: 1px solid #bdc3c7; padding-top: 20px; text-align: center; color: #95a5a6; font-size: 12px;">
-            <p>Email này được gửi tự động từ hệ thống quản lý lịch học DigiSchool.</p>
-          </div>
-        </div>
-      `;
-
-      // Gửi email cho giáo viên yêu cầu
-      await emailService.sendEmail(
-        lessonRequest.requestingTeacher.email,
-        subject,
-        emailContent
-      );
-
-      // Gửi email cho giáo viên replacement
-      let replacementTeacher = lessonRequest.swapInfo?.replacementTeacher;
-
-      if (!replacementTeacher) {
-        // Fallback: query lại từ replacement lesson
-        const replacementLesson = await Lesson.findById(
-          lessonRequest.replacementLesson
-        )
-          .populate("teacher", "name email fullName")
-          .lean();
-        replacementTeacher = replacementLesson?.teacher;
-      }
-
-      const allRecipients = [lessonRequest.requestingTeacher.email];
-
-      if (replacementTeacher && replacementTeacher.email) {
-        const replacementSubject = `Yêu cầu đổi tiết ${statusText} - Thông báo cho giáo viên - ${lessonRequest.requestId}`;
-
-        const replacementEmailContent = `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: ${statusColor};">Yêu cầu đổi tiết ${statusText}</h2>
-            
-            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-              <h3 style="color: #34495e; margin-top: 0;">Thông tin yêu cầu</h3>
-              <p><strong>Mã yêu cầu:</strong> ${lessonRequest.requestId}</p>
-              <p><strong>Loại yêu cầu:</strong> Đổi tiết</p>
-              <p><strong>Giáo viên yêu cầu:</strong> ${
-                lessonRequest.requestingTeacher.fullName ||
-                lessonRequest.requestingTeacher.name
-              }</p>
-              <p><strong>Lớp:</strong> ${
-                lessonRequest.additionalInfo.classInfo.className
-              }</p>
-              <p><strong>Môn học:</strong> ${
-                lessonRequest.additionalInfo.subjectInfo.subjectName
-              }</p>
-              <p><strong>Trạng thái:</strong> <span style="color: ${statusColor}; font-weight: bold;">${statusText.toUpperCase()}</span></p>
-            </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-              <p style="color: #7f8c8d;">Vui lòng đăng nhập vào hệ thống để xem chi tiết.</p>
-            </div>
-            
-            <div style="border-top: 1px solid #bdc3c7; padding-top: 20px; text-align: center; color: #95a5a6; font-size: 12px;">
-              <p>Email này được gửi tự động từ hệ thống quản lý lịch học DigiSchool.</p>
-            </div>
-          </div>
-        `;
-
-        await emailService.sendEmail(
-          replacementTeacher.email,
-          replacementSubject,
-          replacementEmailContent
-        );
-
-        allRecipients.push(replacementTeacher.email);
-        console.log(
-          `📧 Sent swap ${status} notification to replacement teacher`
-        );
-      }
-
-      console.log(`📧 Sent swap ${status} notification to teachers`);
-
-      return allRecipients;
-    } catch (error) {
-      console.error("❌ Error sending notification email:", error.message);
-      // Không throw error để không làm gián đoạn flow chính
-    }
-  }
-
-  // Gửi email thông báo cho học sinh khi yêu cầu đổi tiết được approve
-  async sendStudentNotifications(lessonRequest, status) {
-    try {
-      console.log(`📧 Sending student notifications for swap ${status}`);
-
-      // Lấy danh sách học sinh trong lớp
-      const students = await User.find({
-        role: "student",
-        class_id: lessonRequest.additionalInfo.classInfo._id,
-      })
-        .select("email name fullName class_id")
-        .lean();
-
-      if (students.length === 0) {
-        console.log("⚠️ No students found in class");
-        return;
-      }
-
-      const subject = `Thông báo đổi tiết - ${lessonRequest.additionalInfo.classInfo.className}`;
-
-      // Tạo email content cho thông báo đổi tiết
-      const emailContent = this.createSwapNotificationEmail(lessonRequest);
-
-      // Gửi email cho từng học sinh
-      for (const student of students) {
-        await emailService.sendEmail(student.email, subject, emailContent);
-      }
-
-      console.log(`📧 Sent swap notification to ${students.length} students`);
-    } catch (error) {
-      console.error("❌ Error sending student notifications:", error.message);
-      // Không throw error để không làm gián đoạn flow chính
-    }
-  }
-
-  // Lấy danh sách swap requests của giáo viên (cả requesting và replacement)
-  async getTeacherSwapRequests(teacherId, status = null) {
-    try {
-      const query = {
-        requestType: "swap",
-        $or: [
-          { requestingTeacher: teacherId },
-          { "swapInfo.replacementTeacher": teacherId },
-        ],
-      };
-
-      if (status) query.status = status;
-
-      const requests = await LessonRequest.find(query)
-        .populate({
-          path: "originalLesson",
-          select: "lessonId scheduledDate timeSlot topic status type",
-          populate: {
-            path: "timeSlot",
-            select: "period name startTime endTime",
-          },
-        })
-        .populate({
-          path: "replacementLesson",
-          select: "lessonId scheduledDate timeSlot topic status type",
-          populate: {
-            path: "timeSlot",
-            select: "period name startTime endTime",
-          },
-        })
-        .populate("requestingTeacher", "name email fullName")
-        .populate("swapInfo.replacementTeacher", "name email fullName")
-        .populate("processedBy", "name email fullName")
-        .populate("additionalInfo.classInfo", "className gradeLevel")
-        .populate("additionalInfo.subjectInfo", "subjectName subjectCode")
-        .populate("additionalInfo.academicYear", "name startDate endDate")
-        .sort({ createdAt: -1 });
-
-      return requests;
-    } catch (error) {
-      console.error("❌ Error getting teacher swap requests:", error.message);
-      throw new Error(`Failed to get teacher swap requests: ${error.message}`);
     }
   }
 
@@ -899,28 +563,40 @@ class SwapRequestService {
       lessonRequest.processedBy = requestingTeacherId;
       lessonRequest.processedAt = new Date();
       lessonRequest.lastModifiedBy = requestingTeacherId;
-
       await lessonRequest.save();
 
-      // Gửi email thông báo hủy
-      const teacherRecipients = await this.sendSwapRequestNotifications(
-        lessonRequest,
-        "cancelled"
-      );
-
-      // Cập nhật emailsSent với danh sách email thực tế
-      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
-        $push: {
-          emailsSent: {
-            type: "cancellation",
-            recipients: teacherRecipients,
-            sentAt: new Date(),
-            subject: `Yêu cầu đổi tiết đã được hủy - ${lessonRequest.requestId}`,
-          },
+      // ==== Gửi notification thay cho email ====
+      // 1. Gửi notification cho giáo viên replacement
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu đổi tiết đã bị hủy",
+        content: `Yêu cầu đổi tiết với giáo viên ${
+          lessonRequest.swapInfo.replacementTeacher.fullName ||
+          lessonRequest.swapInfo.replacementTeacher.name
+        } đã bị hủy bởi giáo viên yêu cầu.`,
+        sender: requestingTeacherId,
+        receiverScope: {
+          type: "user",
+          ids: [lessonRequest.swapInfo.replacementTeacher._id.toString()],
         },
+        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
       });
-
-      console.log(`❌ Cancelled swap request: ${requestId}`);
+      // 2. Gửi notification cho giáo viên yêu cầu
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Bạn đã hủy yêu cầu đổi tiết",
+        content: `Bạn đã hủy yêu cầu đổi tiết với giáo viên ${
+          lessonRequest.swapInfo.replacementTeacher.fullName ||
+          lessonRequest.swapInfo.replacementTeacher.name
+        }.`,
+        sender: requestingTeacherId,
+        receiverScope: {
+          type: "user",
+          ids: [requestingTeacherId.toString()],
+        },
+        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
+      });
+      // =========================================
 
       return {
         success: true,

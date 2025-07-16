@@ -6,7 +6,8 @@ const Subject = require("../../subjects/models/subject.model");
 const User = require("../../auth/models/user.model");
 const AcademicYear = require("../models/academic-year.model");
 const TimeSlot = require("../models/time-slot.model");
-const emailService = require("../../auth/services/email.service");
+// const emailService = require("../../auth/services/email.service");
+const notificationService = require("../../notification/services/notification.service");
 
 class SubstituteRequestService {
   // Create a new substitute request
@@ -45,8 +46,58 @@ class SubstituteRequestService {
 
       await lessonRequest.save();
 
-      // Send email notifications
-      await this.sendRequestEmails(lessonRequest._id);
+      // ==== Tạo notification thay cho gửi email ====
+      // Lấy danh sách manager
+      const managers = await User.find({ role: { $in: ["manager", "admin"] } });
+      const managerIds = managers.map((m) => m._id);
+      // Gửi notification cho candidate teachers
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu dạy thay mới",
+        content:
+          `Bạn đã được đề xuất dạy thay cho tiết ${
+            lesson.subject.subjectName
+          } lớp ${lesson.class.className} vào ngày ${new Date(
+            lesson.scheduledDate
+          ).toLocaleDateString("vi-VN")} (Tiết ${lesson.timeSlot.period})` +
+          (reason ? ` \n Lý do: ${reason}` : ""),
+        sender: requestingTeacherId,
+        receiverScope: {
+          type: "user",
+          ids: candidateTeacherIds.map((id) => id.toString()),
+        },
+        relatedObject: {
+          id: lessonRequest._id,
+          requestType: "substitute_request",
+        },
+      });
+      // Gửi notification cho managers
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Thông báo yêu cầu dạy thay mới",
+        content:
+          `Có yêu cầu dạy thay mới từ giáo viên ${
+            lesson.teacher.name
+          } cho tiết ${lesson.subject.subjectName} lớp ${
+            lesson.class.className
+          } vào ngày ${new Date(lesson.scheduledDate).toLocaleDateString(
+            "vi-VN"
+          )} (Tiết ${lesson.timeSlot.period})` +
+          (reason ? `\nLý do: ${reason}` : ""),
+        sender: requestingTeacherId,
+        receiverScope: {
+          type: "user",
+          ids: managerIds.map((id) => id.toString()),
+        },
+        relatedObject: {
+          id: lessonRequest._id,
+          requestType: "substitute_request",
+        },
+      });
+      // ============================================
+
+      // Không gửi email nữa
+      // await this.sendRequestEmails(lessonRequest._id);
 
       return await this.getSubstituteRequestById(lessonRequest._id);
     } catch (error) {
@@ -116,10 +167,100 @@ class SubstituteRequestService {
       });
       // Cancel other pending requests from this teacher
       await this.cancelOtherTeacherRequests(teacherId, requestId);
-      // Send approval emails
-      await this.sendApprovalEmails(requestId);
-      // Send notification to students about teacher change
-      await this.sendStudentNotificationEmails(requestId);
+      // ==== Gửi notification thay cho email ====
+      // 1. Gửi notification cho giáo viên yêu cầu
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu dạy thay đã được chấp nhận",
+        content: `Yêu cầu dạy thay cho tiết ${
+          request.lesson.subject.subjectName
+        } lớp ${request.lesson.class.className} vào ngày ${new Date(
+          request.lesson.scheduledDate
+        ).toLocaleDateString("vi-VN")} (Tiết ${
+          request.lesson.timeSlot.period
+        }) đã được giáo viên ${request.approvedTeacher.name} chấp nhận.`,
+        sender: teacherId,
+        receiverScope: {
+          type: "user",
+          ids: [request.requestingTeacher._id.toString()],
+        },
+        relatedObject: { id: request._id, requestType: "substitute_request" },
+      });
+      // 2. Gửi notification cho các manager
+      const managers = await User.find({ role: { $in: ["manager", "admin"] } });
+      const managerIds = managers.map((m) => m._id.toString());
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Thông báo yêu cầu dạy thay đã được chấp nhận",
+        content: `Yêu cầu dạy thay cho tiết ${
+          request.lesson.subject.subjectName
+        } lớp ${request.lesson.class.className} vào ngày ${new Date(
+          request.lesson.scheduledDate
+        ).toLocaleDateString("vi-VN")} (Tiết ${
+          request.lesson.timeSlot.period
+        }) đã được giáo viên ${request.approvedTeacher.name} chấp nhận.`,
+        sender: teacherId,
+        receiverScope: {
+          type: "user",
+          ids: managerIds,
+        },
+        relatedObject: { id: request._id, requestType: "substitute_request" },
+      });
+      // 3. Gửi notification cho các candidate còn lại (trừ người đã nhận)
+      const otherCandidates = request.candidateTeachers.filter(
+        (c) =>
+          c.teacher._id.toString() !== request.approvedTeacher._id.toString()
+      );
+      if (otherCandidates.length > 0) {
+        await notificationService.createNotification({
+          type: "activity",
+          title: "Yêu cầu dạy thay đã được chấp nhận bởi giáo viên khác",
+          content: `Yêu cầu dạy thay cho tiết ${
+            request.lesson.subject.subjectName
+          } lớp ${request.lesson.class.className} vào ngày ${new Date(
+            request.lesson.scheduledDate
+          ).toLocaleDateString("vi-VN")} (Tiết ${
+            request.lesson.timeSlot.period
+          }) đã được giáo viên khác chấp nhận.`,
+          sender: teacherId,
+          receiverScope: {
+            type: "user",
+            ids: otherCandidates.map((c) => c.teacher._id.toString()),
+          },
+          relatedObject: { id: request._id, requestType: "substitute_request" },
+        });
+      }
+      // 4. Gửi notification cho học sinh lớp đó
+      const ClassModel = require("../../classes/models/class.model");
+      const classInfo = await ClassModel.findById(request.lesson.class._id);
+      if (classInfo && typeof classInfo.getStudents === "function") {
+        const students = await classInfo.getStudents();
+        if (students && students.length > 0) {
+          await notificationService.createNotification({
+            type: "activity",
+            title: "Thông báo thay đổi giáo viên dạy",
+            content: `Tiết ${request.lesson.subject.subjectName} lớp ${
+              request.lesson.class.className
+            } vào ngày ${new Date(
+              request.lesson.scheduledDate
+            ).toLocaleDateString("vi-VN")} (Tiết ${
+              request.lesson.timeSlot.period
+            }) sẽ được giáo viên ${
+              request.approvedTeacher.name
+            } dạy thay cho giáo viên ${request.requestingTeacher.name}.`,
+            sender: teacherId,
+            receiverScope: {
+              type: "user",
+              ids: students.map((s) => s._id.toString()),
+            },
+            relatedObject: {
+              id: request._id,
+              requestType: "substitute_request",
+            },
+          });
+        }
+      }
+      // ======================================
       return await this.getSubstituteRequestById(requestId);
     } catch (error) {
       console.error("Error approving substitute request:", error);
@@ -133,8 +274,29 @@ class SubstituteRequestService {
       const request = await this.getSubstituteRequestById(requestId);
       // Reject the request
       await request.rejectByTeacher(teacherId);
-      // Send rejection emails
-      await this.sendRejectionEmails(requestId, teacherId);
+      // ==== Gửi notification thay cho email ====
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu dạy thay bị từ chối",
+        content: `Giáo viên ${
+          request.candidateTeachers.find(
+            (c) => c.teacher._id.toString() === teacherId.toString()
+          )?.teacher.name || ""
+        } đã từ chối dạy thay cho tiết ${
+          request.lesson.subject.subjectName
+        } lớp ${request.lesson.class.className} vào ngày ${new Date(
+          request.lesson.scheduledDate
+        ).toLocaleDateString("vi-VN")} (Tiết ${
+          request.lesson.timeSlot.period
+        }).`,
+        sender: teacherId,
+        receiverScope: {
+          type: "user",
+          ids: [request.requestingTeacher._id.toString()],
+        },
+        relatedObject: { id: request._id, requestType: "substitute_request" },
+      });
+      // ======================================
       return await this.getSubstituteRequestById(requestId);
     } catch (error) {
       console.error("Error rejecting substitute request:", error);
@@ -279,362 +441,6 @@ class SubstituteRequestService {
       );
     } catch (error) {
       console.error("Error cancelling other teacher requests:", error);
-      // Don't throw error to avoid breaking the main approve flow
-    }
-  }
-
-  // Send initial request emails
-  async sendRequestEmails(requestId) {
-    try {
-      const request = await this.getSubstituteRequestById(requestId);
-
-      // Get manager emails
-      const managers = await User.find({
-        role: { $in: ["manager", "admin"] },
-      }).select("email");
-
-      const managerEmails = managers.map((m) => m.email);
-
-      // Email to candidate teachers
-      const candidateEmails = request.candidateTeachers.map(
-        (c) => c.teacher.email
-      );
-
-      const lessonDate = new Date(
-        request.lesson.scheduledDate
-      ).toLocaleDateString("vi-VN");
-      const lessonTime = `${request.lesson.timeSlot.startTime} - ${request.lesson.timeSlot.endTime}`;
-
-      const candidateEmailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2c3e50;">Yêu cầu dạy thay - DigiSchool</h2>
-          <p>Xin chào,</p>
-          <p>Bạn đã được đề xuất để dạy thay cho tiết học sau:</p>
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
-            <h3 style="color: #e74c3c; margin-top: 0;">Thông tin tiết học</h3>
-            <p><strong>Môn học:</strong> ${request.lesson.subject.subjectName}</p>
-            <p><strong>Lớp:</strong> ${request.lesson.class.className}</p>
-            <p><strong>Ngày:</strong> ${lessonDate}</p>
-            <p><strong>Tiết:</strong> ${request.lesson.timeSlot.period}</p>
-            <p><strong>Thời gian:</strong> ${lessonTime}</p>
-            <p><strong>Giáo viên yêu cầu:</strong> ${request.requestingTeacher.name}</p>
-            <p><strong>Lý do:</strong> ${request.reason}</p>
-          </div>
-          <p>Vui lòng phản hồi yêu cầu này bằng cách truy cập hệ thống DigiSchool.</p>
-          <p><strong>Lưu ý:</strong> Bạn sẽ thay thế giáo viên chính để dạy tiết học này.</p>
-          <hr style="margin: 30px 0;">
-          <p style="color: #7f8c8d; font-size: 12px;">Email này được gửi tự động từ hệ thống DigiSchool.</p>
-        </div>
-      `;
-
-      // Email to managers
-      const managerEmailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2c3e50;">Thông báo yêu cầu dạy thay - DigiSchool</h2>
-          <p>Có yêu cầu dạy thay mới từ giáo viên:</p>
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
-            <h3 style="color: #e74c3c; margin-top: 0;">Thông tin yêu cầu</h3>
-            <p><strong>Mã yêu cầu:</strong> ${request.requestId}</p>
-            <p><strong>Giáo viên yêu cầu:</strong> ${
-              request.requestingTeacher.name
-            }</p>
-            <p><strong>Môn học:</strong> ${
-              request.lesson.subject.subjectName
-            }</p>
-            <p><strong>Lớp:</strong> ${request.lesson.class.className}</p>
-            <p><strong>Ngày:</strong> ${lessonDate}</p>
-            <p><strong>Tiết:</strong> ${request.lesson.timeSlot.period}</p>
-            <p><strong>Thời gian:</strong> ${lessonTime}</p>
-            <p><strong>Lý do:</strong> ${request.reason}</p>
-            <p><strong>Giáo viên được đề xuất:</strong> ${request.candidateTeachers
-              .map((c) => c.teacher.name)
-              .join(", ")}</p>
-          </div>
-          <hr style="margin: 30px 0;">
-          <p style="color: #7f8c8d; font-size: 12px;">Email này được gửi tự động từ hệ thống DigiSchool.</p>
-        </div>
-      `;
-
-      // Send emails
-      await Promise.all([
-        ...candidateEmails.map((email) =>
-          emailService.sendEmail(
-            email,
-            "Yêu cầu dạy thay - DigiSchool",
-            candidateEmailHtml
-          )
-        ),
-        ...managerEmails.map((email) =>
-          emailService.sendEmail(
-            email,
-            "Thông báo yêu cầu dạy thay - DigiSchool",
-            managerEmailHtml
-          )
-        ),
-      ]);
-
-      // Record sent emails
-      await LessonRequest.findByIdAndUpdate(requestId, {
-        $push: {
-          emailsSent: {
-            type: "request",
-            recipients: [...candidateEmails, ...managerEmails],
-            subject: "Yêu cầu dạy thay - DigiSchool",
-          },
-        },
-      });
-    } catch (error) {
-      console.error("Error sending request emails:", error);
-      // Don't throw error to avoid breaking the main flow
-    }
-  }
-
-  // Send approval emails
-  async sendApprovalEmails(requestId) {
-    try {
-      const request = await this.getSubstituteRequestById(requestId);
-
-      // Get manager emails
-      const managers = await User.find({
-        role: { $in: ["manager", "admin"] },
-      }).select("email");
-
-      const managerEmails = managers.map((m) => m.email);
-
-      const lessonDate = new Date(
-        request.lesson.scheduledDate
-      ).toLocaleDateString("vi-VN");
-      const lessonTime = `${request.lesson.timeSlot.startTime} - ${request.lesson.timeSlot.endTime}`;
-
-      // Email to requesting teacher
-      const requestingTeacherEmailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #27ae60;">Yêu cầu dạy thay đã được chấp nhận - DigiSchool</h2>
-          <p>Xin chào ${request.requestingTeacher.name},</p>
-          <p>Yêu cầu dạy thay của bạn đã được chấp nhận:</p>
-          <div style="background-color: #d4edda; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #27ae60;">
-            <h3 style="color: #155724; margin-top: 0;">Thông tin tiết học</h3>
-            <p><strong>Môn học:</strong> ${request.lesson.subject.subjectName}</p>
-            <p><strong>Lớp:</strong> ${request.lesson.class.className}</p>
-            <p><strong>Ngày:</strong> ${lessonDate}</p>
-            <p><strong>Tiết:</strong> ${request.lesson.timeSlot.period}</p>
-            <p><strong>Thời gian:</strong> ${lessonTime}</p>
-            <p><strong>Giáo viên dạy thay:</strong> ${request.approvedTeacher.name}</p>
-            <p><strong>Lưu ý:</strong> Bạn vẫn là giáo viên chính, ${request.approvedTeacher.name} sẽ hỗ trợ dạy thay.</p>
-          </div>
-          <hr style="margin: 30px 0;">
-          <p style="color: #7f8c8d; font-size: 12px;">Email này được gửi tự động từ hệ thống DigiSchool.</p>
-        </div>
-      `;
-
-      // Email to managers and remaining candidates
-      const otherCandidates = request.candidateTeachers.filter(
-        (c) =>
-          c.teacher._id.toString() !== request.approvedTeacher._id.toString()
-      );
-
-      const notificationEmailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2c3e50;">Thông báo yêu cầu dạy thay đã được chấp nhận - DigiSchool</h2>
-          <p>Yêu cầu dạy thay sau đã được chấp nhận:</p>
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
-            <h3 style="color: #e74c3c; margin-top: 0;">Thông tin</h3>
-            <p><strong>Mã yêu cầu:</strong> ${request.requestId}</p>
-            <p><strong>Giáo viên yêu cầu:</strong> ${request.requestingTeacher.name}</p>
-            <p><strong>Môn học:</strong> ${request.lesson.subject.subjectName}</p>
-            <p><strong>Lớp:</strong> ${request.lesson.class.className}</p>
-            <p><strong>Ngày:</strong> ${lessonDate}</p>
-            <p><strong>Tiết:</strong> ${request.lesson.timeSlot.period}</p>
-            <p><strong>Giáo viên dạy thay:</strong> ${request.approvedTeacher.name}</p>
-            <p><strong>Lưu ý:</strong> Giáo viên ${request.requestingTeacher.name} vẫn là giáo viên chính, ${request.approvedTeacher.name} sẽ hỗ trợ dạy thay.</p>
-          </div>
-          <hr style="margin: 30px 0;">
-          <p style="color: #7f8c8d; font-size: 12px;">Email này được gửi tự động từ hệ thống DigiSchool.</p>
-        </div>
-      `;
-
-      // Send emails
-      const allRecipients = [
-        request.requestingTeacher.email,
-        ...managerEmails,
-        ...otherCandidates.map((c) => c.teacher.email),
-      ];
-
-      await Promise.all(
-        allRecipients.map((email) =>
-          emailService.sendEmail(
-            email,
-            "Yêu cầu dạy thay đã được chấp nhận - DigiSchool",
-            email === request.requestingTeacher.email
-              ? requestingTeacherEmailHtml
-              : notificationEmailHtml
-          )
-        )
-      );
-
-      // Record sent emails
-      await LessonRequest.findByIdAndUpdate(requestId, {
-        $push: {
-          emailsSent: {
-            type: "approval",
-            recipients: allRecipients,
-            subject: "Yêu cầu dạy thay đã được chấp nhận - DigiSchool",
-          },
-        },
-      });
-    } catch (error) {
-      console.error("Error sending approval emails:", error);
-    }
-  }
-
-  // Send rejection emails
-  async sendRejectionEmails(requestId, rejectingTeacherId) {
-    try {
-      const request = await this.getSubstituteRequestById(requestId);
-      const rejectingTeacher = await User.findById(rejectingTeacherId).select(
-        "name"
-      );
-
-      const lessonDate = new Date(
-        request.lesson.scheduledDate
-      ).toLocaleDateString("vi-VN");
-      const lessonTime = `${request.lesson.timeSlot.startTime} - ${request.lesson.timeSlot.endTime}`;
-
-      // Email to requesting teacher
-      const rejectionEmailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #e74c3c;">Yêu cầu dạy thay bị từ chối - DigiSchool</h2>
-          <p>Xin chào ${request.requestingTeacher.name},</p>
-          <p>Giáo viên ${
-            rejectingTeacher.name
-          } đã từ chối yêu cầu dạy thay của bạn:</p>
-          <div style="background-color: #f8d7da; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #e74c3c;">
-            <h3 style="color: #721c24; margin-top: 0;">Thông tin tiết học</h3>
-            <p><strong>Môn học:</strong> ${
-              request.lesson.subject.subjectName
-            }</p>
-            <p><strong>Lớp:</strong> ${request.lesson.class.className}</p>
-            <p><strong>Ngày:</strong> ${lessonDate}</p>
-            <p><strong>Tiết:</strong> ${request.lesson.timeSlot.period}</p>
-            <p><strong>Thời gian:</strong> ${lessonTime}</p>
-            <p><strong>Lý do từ chối:</strong> Không có lý do cụ thể</p>
-          </div>
-          ${
-            request.status === "pending"
-              ? "<p>Yêu cầu vẫn đang chờ phản hồi từ các giáo viên khác.</p>"
-              : "<p><strong>Lưu ý:</strong> Tất cả giáo viên đều đã từ chối yêu cầu này.</p>"
-          }
-          <hr style="margin: 30px 0;">
-          <p style="color: #7f8c8d; font-size: 12px;">Email này được gửi tự động từ hệ thống DigiSchool.</p>
-        </div>
-      `;
-
-      await emailService.sendEmail(
-        request.requestingTeacher.email,
-        "Yêu cầu dạy thay bị từ chối - DigiSchool",
-        rejectionEmailHtml
-      );
-
-      // Record sent email
-      await LessonRequest.findByIdAndUpdate(requestId, {
-        $push: {
-          emailsSent: {
-            type: "rejection",
-            recipients: [request.requestingTeacher.email],
-            subject: "Yêu cầu dạy thay bị từ chối - DigiSchool",
-          },
-        },
-      });
-    } catch (error) {
-      console.error("Error sending rejection emails:", error);
-    }
-  }
-
-  // Send notification emails to students about teacher change
-  async sendStudentNotificationEmails(requestId) {
-    try {
-      const request = await this.getSubstituteRequestById(requestId);
-
-      // Get students in the class
-      const Class = require("../../classes/models/class.model");
-      const classInfo = await Class.findById(request.lesson.class._id);
-
-      if (!classInfo) {
-        console.log("Class not found");
-        return;
-      }
-
-      // Get students using the class method
-      const students = await classInfo.getStudents();
-
-      if (!students || students.length === 0) {
-        console.log("No students found for class");
-        return;
-      }
-
-      const studentEmails = students
-        .filter((student) => student.email)
-        .map((student) => student.email);
-
-      if (studentEmails.length === 0) {
-        console.log("No student emails found");
-        return;
-      }
-
-      const lessonDate = new Date(
-        request.lesson.scheduledDate
-      ).toLocaleDateString("vi-VN");
-      const lessonTime = `${request.lesson.timeSlot.startTime} - ${request.lesson.timeSlot.endTime}`;
-
-      const studentEmailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2c3e50;">Thông báo có giáo viên dạy thay - DigiSchool</h2>
-          <p>Xin chào các em học sinh lớp ${request.lesson.class.className},</p>
-          <p>Có giáo viên dạy thay cho tiết học sau:</p>
-          <div style="background-color: #e8f4fd; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #3498db;">
-            <h3 style="color: #2980b9; margin-top: 0;">Thông tin tiết học</h3>
-            <p><strong>Môn học:</strong> ${request.lesson.subject.subjectName}</p>
-            <p><strong>Lớp:</strong> ${request.lesson.class.className}</p>
-            <p><strong>Ngày:</strong> ${lessonDate}</p>
-            <p><strong>Tiết:</strong> ${request.lesson.timeSlot.period}</p>
-            <p><strong>Thời gian:</strong> ${lessonTime}</p>
-                      <p><strong>Giáo viên gốc:</strong> ${request.requestingTeacher.name}</p>
-          <p><strong>Giáo viên dạy thay:</strong> ${request.approvedTeacher.name}</p>
-          </div>
-          <p>Các em vui lòng chuẩn bị bài học và đến lớp đúng giờ như thường lệ.</p>
-          <p><strong>Lưu ý:</strong> Giáo viên ${request.approvedTeacher.name} sẽ thay thế giáo viên ${request.requestingTeacher.name} để dạy tiết học này.</p>
-          <hr style="margin: 30px 0;">
-          <p style="color: #7f8c8d; font-size: 12px;">Email này được gửi tự động từ hệ thống DigiSchool.</p>
-        </div>
-      `;
-
-      // Send emails to all students
-      await Promise.all(
-        studentEmails.map((email) =>
-          emailService.sendEmail(
-            email,
-            "Thông báo thay đổi giáo viên - DigiSchool",
-            studentEmailHtml
-          )
-        )
-      );
-
-      // Record sent emails
-      await LessonRequest.findByIdAndUpdate(requestId, {
-        $push: {
-          emailsSent: {
-            type: "notification",
-            recipients: studentEmails,
-            subject: "Thông báo thay đổi giáo viên - DigiSchool",
-          },
-        },
-      });
-
-      console.log(
-        `Sent teacher change notification to ${studentEmails.length} students`
-      );
-    } catch (error) {
-      console.error("Error sending student notification emails:", error);
       // Don't throw error to avoid breaking the main approve flow
     }
   }
