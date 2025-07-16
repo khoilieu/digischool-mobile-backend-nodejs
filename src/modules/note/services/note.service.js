@@ -63,7 +63,7 @@ class NoteService {
       const updatedNote = await Note.findOneAndUpdate(
         { _id: noteId, user },
         updateData,
-        { new: true }
+        { new: true, strict: false }
       );
 
       if (updatedNote) {

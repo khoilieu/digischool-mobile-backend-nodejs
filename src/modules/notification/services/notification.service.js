@@ -25,7 +25,6 @@ class NotificationService {
           relatedObject.id &&
           relatedObject.type
         ) {
-          // Trường hợp cũ: type => requestType
           finalRelatedObject = {
             id: relatedObject.id,
             requestType: relatedObject.type,
@@ -95,6 +94,45 @@ class NotificationService {
             id: sender._id,
             name: sender.name,
             gender: sender.gender,
+          };
+        }
+        // Bổ sung lấy status của relatedObject nếu có
+        if (
+          notification.relatedObject &&
+          notification.relatedObject.id &&
+          notification.relatedObject.requestType
+        ) {
+          let status = null;
+          try {
+            const reqType = notification.relatedObject.requestType;
+            const reqId = notification.relatedObject.id;
+            if (reqType === "student_leave_request") {
+              const StudentLeaveRequest = require("../../leave-requests/models/student-leave-request.model");
+              const doc = await StudentLeaveRequest.findById(reqId).select(
+                "status"
+              );
+              status = doc ? doc.status : null;
+            } else if (reqType === "teacher_leave_request") {
+              const TeacherLeaveRequest = require("../../leave-requests/models/teacher-leave-request.model");
+              const doc = await TeacherLeaveRequest.findById(reqId).select(
+                "status"
+              );
+              status = doc ? doc.status : null;
+            } else if (["swap_request", "makeup_request", "substitute_request"].includes(reqType)) {
+              const LessonRequest = require("../../schedules/models/lesson-request.model");
+              const doc = await LessonRequest.findById(reqId).select("status");
+              status = doc ? doc.status : null;
+            } else if (reqType === "test_info") {
+              const TestInfo = require("../../schedules/models/test-info.model");
+              const doc = await TestInfo.findById(reqId).select("status");
+              status = doc ? doc.status : null;
+            }
+          } catch (err) {
+            status = null;
+          }
+          notification.relatedObject = {
+            ...notification.relatedObject,
+            status,
           };
         }
       }

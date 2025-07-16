@@ -178,31 +178,15 @@ class SubstituteRequestService {
           request.lesson.scheduledDate
         ).toLocaleDateString("vi-VN")} (Tiết ${
           request.lesson.timeSlot.period
-        }) đã được giáo viên ${request.approvedTeacher.name} chấp nhận.`,
+        }) đã được giáo viên ${
+          request.candidateTeachers.find(
+            (c) => c.teacher._id.toString() === teacherId.toString()
+          )?.teacher.name || ""
+        } chấp nhận.`,
         sender: teacherId,
         receiverScope: {
           type: "user",
           ids: [request.requestingTeacher._id.toString()],
-        },
-        relatedObject: { id: request._id, requestType: "substitute_request" },
-      });
-      // 2. Gửi notification cho các manager
-      const managers = await User.find({ role: { $in: ["manager", "admin"] } });
-      const managerIds = managers.map((m) => m._id.toString());
-      await notificationService.createNotification({
-        type: "activity",
-        title: "Thông báo yêu cầu dạy thay đã được chấp nhận",
-        content: `Yêu cầu dạy thay cho tiết ${
-          request.lesson.subject.subjectName
-        } lớp ${request.lesson.class.className} vào ngày ${new Date(
-          request.lesson.scheduledDate
-        ).toLocaleDateString("vi-VN")} (Tiết ${
-          request.lesson.timeSlot.period
-        }) đã được giáo viên ${request.approvedTeacher.name} chấp nhận.`,
-        sender: teacherId,
-        receiverScope: {
-          type: "user",
-          ids: managerIds,
         },
         relatedObject: { id: request._id, requestType: "substitute_request" },
       });
@@ -246,8 +230,10 @@ class SubstituteRequestService {
             ).toLocaleDateString("vi-VN")} (Tiết ${
               request.lesson.timeSlot.period
             }) sẽ được giáo viên ${
-              request.approvedTeacher.name
-            } dạy thay cho giáo viên ${request.requestingTeacher.name}.`,
+              request.candidateTeachers.find(
+                (c) => c.teacher._id.toString() === teacherId.toString()
+              )?.teacher.name || ""
+            } dạy thay cho giáo viên ${await User.findById(request.requestingTeacher).then(user => user.name)}.`,
             sender: teacherId,
             receiverScope: {
               type: "user",

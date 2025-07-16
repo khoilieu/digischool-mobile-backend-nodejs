@@ -1,6 +1,6 @@
 # Note API Guide
 
-Module này cho phép học sinh và giáo viên tạo, xem, cập nhật, xóa ghi chú cá nhân cho từng tiết học. Ghi chú có thể đặt thời gian nhắc nhở dựa trên thời gian tiết học cộng với số phút nhập từ form.
+Module này cho phép học sinh và giáo viên tạo, xem, cập nhật, xóa ghi chú cá nhân cho từng tiết học. Ghi chú có thể đặt thời gian nhắc nhở trước tiết học dựa trên số phút nhập từ form (remindMinutes).
 
 ## Authentication
 
@@ -18,7 +18,7 @@ Tất cả các endpoint đều yêu cầu xác thực (Bearer Token).
   "title": "string (bắt buộc)",
   "content": "string (bắt buộc)",
   "lesson": "lessonId (bắt buộc)",
-  "remindMinutes": 10
+  "remindMinutes": 10 // (tùy chọn, số phút nhắc nhở trước tiết học)
 }
 ```
 
@@ -36,7 +36,7 @@ curl -X POST http://localhost:3000/api/notes \
   }'
 ```
 
-- **Response:**
+- **Response (có remindMinutes):**
 
 ```json
 {
@@ -45,7 +45,21 @@ curl -X POST http://localhost:3000/api/notes \
   "content": "...",
   "user": "...",
   "lesson": "...",
-  "remindAt": "2024-06-01T08:10:00.000Z",
+  "remindAt": "2024-06-01T07:20:00.000Z", // Thời gian bắt đầu lesson - remindMinutes
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+- **Response (không có remindMinutes):**
+
+```json
+{
+  "_id": "...",
+  "title": "...",
+  "content": "...",
+  "user": "...",
+  "lesson": "...",
   "createdAt": "...",
   "updatedAt": "..."
 }
@@ -69,7 +83,7 @@ curl -X GET "http://localhost:3000/api/notes?lesson=<LESSON_ID>" \
     "_id": "...",
     "title": "...",
     "content": "...",
-    "remindAt": "...",
+    "remindAt": "...", // Có thể không có nếu không đặt nhắc nhở
     "createdAt": "...",
     "updatedAt": "..."
   }
@@ -85,7 +99,7 @@ curl -X GET "http://localhost:3000/api/notes?lesson=<LESSON_ID>" \
 {
   "title": "string (tùy chọn)",
   "content": "string (tùy chọn)",
-  "remindMinutes": 15
+  "remindMinutes": 15 // (tùy chọn)
 }
 ```
 
@@ -101,14 +115,26 @@ curl -X PATCH http://localhost:3000/api/notes/<NOTE_ID> \
   }'
 ```
 
-- **Response:**
+- **Response (có remindMinutes):**
 
 ```json
 {
   "_id": "...",
   "title": "...",
   "content": "...",
-  "remindAt": "...",
+  "remindAt": "2024-06-01T07:15:00.000Z",
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+- **Response (không có remindMinutes):**
+
+```json
+{
+  "_id": "...",
+  "title": "...",
+  "content": "...",
   "createdAt": "...",
   "updatedAt": "..."
 }
@@ -147,4 +173,4 @@ Bạn có thể sử dụng cú pháp Markdown trong nội dung ghi chú:
 ## Lưu ý
 
 - Chỉ user tạo ghi chú mới có thể xem/sửa/xóa ghi chú của mình.
-- Thời gian nhắc nhở sẽ được tính từ thời gian bắt đầu tiết học cộng với số phút bạn nhập.
+- Thời gian nhắc nhở sẽ được tính bằng: **thời gian bắt đầu tiết học trừ đi remindMinutes** (nếu có remindMinutes). Nếu không nhập remindMinutes thì ghi chú sẽ không có nhắc nhở.
