@@ -4,6 +4,7 @@ const Class = require("../../classes/models/class.model");
 const Subject = require("../../subjects/models/subject.model");
 const User = require("../../auth/models/user.model");
 const mongoose = require("mongoose");
+const notificationService = require("../../notification/services/notification.service");
 
 class TeacherLeaveRequestService {
   // Tạo đơn xin nghỉ cho nhiều tiết học của giáo viên
@@ -123,21 +124,26 @@ class TeacherLeaveRequestService {
             `✅ Created teacher leave request for ${lesson.subject.subjectName} - Period ${period}`
           );
 
-          // Gửi email thông báo cho manager (async, không chờ kết quả)
-          this.sendNewTeacherLeaveRequestNotificationToManager(
-            teacherLeaveRequest
-          )
-            .then(() => {
-              console.log(
-                `📧 Email notification sent to managers for teacher leave request ${teacherLeaveRequest._id}`
-              );
-            })
-            .catch((error) => {
-              console.error(
-                `❌ Failed to send email notification to managers for teacher leave request ${teacherLeaveRequest._id}:`,
-                error.message
-              );
-            });
+          // Gửi notification cho manager (role: manager hoặc admin)
+          const managers = await User.find(
+            { role: { $in: ["manager", "admin"] } },
+            "_id"
+          );
+          await notificationService.createNotification({
+            type: "teacher_leave_request",
+            title: `Đơn xin nghỉ mới từ giáo viên - ${teacher.name}`,
+            content: `Giáo viên ${teacher.name} xin nghỉ tiết ${
+              lesson.subject.subjectName
+            } lớp ${lesson.class.className} ngày ${new Date(
+              lesson.scheduledDate
+            ).toLocaleDateString("vi-VN")}. Lý do: ${reason}`,
+            sender: teacherId,
+            receiverScope: { type: "user", ids: managers.map((m) => m._id) },
+            relatedObject: {
+              id: teacherLeaveRequest._id,
+              requestType: "teacher_leave_request",
+            },
+          });
         } catch (lessonError) {
           console.error(
             `❌ Error processing lesson ${lessonId}:`,
@@ -300,15 +306,22 @@ class TeacherLeaveRequestService {
         `✅ Teacher leave request approved by manager ${managerId} for teacher ${request.teacherId.name}`
       );
 
-      // Gửi email thông báo cho giáo viên
-      try {
-        await this.sendTeacherLeaveRequestNotification(request, "approved");
-      } catch (emailError) {
-        console.error(
-          "❌ Failed to send email notification to teacher:",
-          emailError.message
-        );
-      }
+      // Gửi notification cho giáo viên
+      await notificationService.createNotification({
+        type: "teacher_leave_request_result",
+        title: `Đơn xin nghỉ đã được duyệt - ${request.subjectId.subjectName}`,
+        content: `Đơn xin nghỉ của bạn cho tiết ${
+          request.subjectId.subjectName
+        } lớp ${request.classId.className} ngày ${new Date(
+          request.lessonId.scheduledDate
+        ).toLocaleDateString("vi-VN")} đã được duyệt.`,
+        sender: managerId,
+        receiverScope: { type: "user", ids: [request.teacherId._id] },
+        relatedObject: {
+          id: request._id,
+          requestType: "teacher_leave_request",
+        },
+      });
 
       // Cập nhật lesson status thành absent
       try {
@@ -376,15 +389,22 @@ class TeacherLeaveRequestService {
         `❌ Teacher leave request rejected by manager ${managerId} for teacher ${request.teacherId.name}`
       );
 
-      // Gửi email thông báo cho giáo viên
-      try {
-        await this.sendTeacherLeaveRequestNotification(request, "rejected");
-      } catch (emailError) {
-        console.error(
-          "❌ Failed to send email notification to teacher:",
-          emailError.message
-        );
-      }
+      // Gửi notification cho giáo viên
+      await notificationService.createNotification({
+        type: "teacher_leave_request_result",
+        title: `Đơn xin nghỉ đã bị từ chối - ${request.subjectId.subjectName}`,
+        content: `Đơn xin nghỉ của bạn cho tiết ${
+          request.subjectId.subjectName
+        } lớp ${request.classId.className} ngày ${new Date(
+          request.lessonId.scheduledDate
+        ).toLocaleDateString("vi-VN")} đã bị từ chối.`,
+        sender: managerId,
+        receiverScope: { type: "user", ids: [request.teacherId._id] },
+        relatedObject: {
+          id: request._id,
+          requestType: "teacher_leave_request",
+        },
+      });
 
       return {
         success: true,
@@ -511,222 +531,6 @@ class TeacherLeaveRequestService {
       throw new Error(
         `Failed to get available lessons for teacher: ${error.message}`
       );
-    }
-  }
-
-  // Gửi email thông báo cho manager khi có đơn mới
-  async sendNewTeacherLeaveRequestNotificationToManager(request) {
-    try {
-      const emailService = require("../../auth/services/email.service");
-
-      // Get managers and admins
-      const managers = await User.find({
-        role: { $in: ["manager", "admin"] },
-      }).select("name email");
-
-      if (managers.length === 0) {
-        console.log("⚠️ No managers found to notify");
-        return;
-      }
-
-      const teacherName = request.teacherId.fullName || request.teacherId.name;
-      const subjectName = request.subjectId.subjectName;
-      const className = request.classId.className;
-      const lessonDate = new Date(request.date).toLocaleDateString("vi-VN");
-      const period = request.period;
-
-      const subject = `📢 Đơn xin nghỉ mới - ${teacherName}`;
-
-      const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-            <h1 style="margin: 0; font-size: 24px;">🏫 EcoSchool</h1>
-            <p style="margin: 10px 0 0 0; opacity: 0.9;">Hệ thống quản lý học tập</p>
-          </div>
-          
-          <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
-            <div style="background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-              <h2 style="color: #fd7e14; margin-top: 0; text-align: center;">
-                📢 Đơn xin nghỉ mới từ giáo viên
-              </h2>
-              
-              <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <h3 style="color: #856404; margin-top: 0;">👨‍🏫 Thông tin giáo viên:</h3>
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px 0; color: #856404; width: 120px;"><strong>Giáo viên:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">${teacherName}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #856404;"><strong>Môn học:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">${subjectName}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #856404;"><strong>Lớp:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">${className}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #856404;"><strong>Ngày dạy:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">${lessonDate}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #856404;"><strong>Tiết:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">Tiết ${period}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #856404;"><strong>Lý do xin nghỉ:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">${
-                      request.reason
-                    }</td>
-                  </tr>
-                </table>
-              </div>
-              
-              <div style="background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                <h4 style="margin-top: 0; color: #0c5460;">📝 Hành động cần thiết:</h4>
-                <ul style="margin-bottom: 0; padding-left: 20px;">
-                  <li>Vui lòng xem xét và duyệt/từ chối đơn xin nghỉ này</li>
-                  <li>Đơn xin nghỉ sẽ ảnh hưởng đến học sinh trong lớp</li>
-                  <li>Cần đảm bảo có kế hoạch dạy bù phù hợp</li>
-                </ul>
-              </div>
-            </div>
-            
-            <div style="text-align: center; margin-top: 20px; color: #6c757d; font-size: 14px;">
-              <p>📧 Email này được gửi tự động từ hệ thống EcoSchool</p>
-              <p>🕒 Thời gian: ${new Date().toLocaleString("vi-VN")}</p>
-            </div>
-          </div>
-        </div>
-      `;
-
-      // Send email to all managers
-      const emailPromises = managers.map((manager) =>
-        emailService.sendEmail(manager.email, subject, html)
-      );
-
-      await Promise.allSettled(emailPromises);
-
-      console.log(
-        `📧 Email notification sent to ${managers.length} managers for new teacher leave request`
-      );
-    } catch (error) {
-      console.error(
-        "❌ Error sending new teacher leave request notification:",
-        error.message
-      );
-      throw error;
-    }
-  }
-
-  // Gửi email thông báo kết quả cho giáo viên
-  async sendTeacherLeaveRequestNotification(request, status) {
-    try {
-      const emailService = require("../../auth/services/email.service");
-
-      const teacherEmail = request.teacherId.email;
-      const teacherName = request.teacherId.fullName || request.teacherId.name;
-      const subjectName = request.subjectId.subjectName;
-      const className = request.classId.className;
-      const lessonDate = new Date(request.date).toLocaleDateString("vi-VN");
-      const period = request.period;
-
-      const statusText =
-        status === "approved" ? "được chấp thuận" : "bị từ chối";
-      const statusIcon = status === "approved" ? "✅" : "❌";
-      const statusColor = status === "approved" ? "#28a745" : "#dc3545";
-
-      const subject = `${statusIcon} Đơn xin nghỉ đã ${statusText}`;
-
-      const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-            <h1 style="margin: 0; font-size: 24px;">🏫 EcoSchool</h1>
-            <p style="margin: 10px 0 0 0; opacity: 0.9;">Hệ thống quản lý học tập</p>
-          </div>
-          
-          <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
-            <div style="background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-              <h2 style="color: ${statusColor}; margin-top: 0; text-align: center;">
-                ${statusIcon} Đơn xin nghỉ của bạn đã ${statusText}
-              </h2>
-              
-              <div style="background: #f1f3f4; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <h3 style="color: #333; margin-top: 0;">📋 Thông tin đơn xin nghỉ:</h3>
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px 0; color: #666; width: 120px;"><strong>Giáo viên:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">${teacherName}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #666;"><strong>Môn học:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">${subjectName}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #666;"><strong>Lớp:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">${className}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #666;"><strong>Ngày dạy:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">${lessonDate}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #666;"><strong>Tiết:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">Tiết ${period}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #666;"><strong>Lý do xin nghỉ:</strong></td>
-                    <td style="padding: 8px 0; color: #333;">${
-                      request.reason
-                    }</td>
-                  </tr>
-                </table>
-              </div>
-              
-              ${
-                status === "approved"
-                  ? `
-                <div style="background: #d1ecf1; border: 1px solid #bee5eb; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                  <h4 style="margin-top: 0; color: #0c5460;">📝 Lưu ý quan trọng:</h4>
-                  <ul style="margin-bottom: 0; padding-left: 20px;">
-                    <li>Đơn xin nghỉ của bạn đã được chấp thuận</li>
-                    <li>Tiết học sẽ được đánh dấu là vắng mặt</li>
-                    <li>Vui lòng sắp xếp bài học bù nếu cần thiết</li>
-                  </ul>
-                </div>
-              `
-                  : `
-                <div style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                  <h4 style="margin-top: 0; color: #721c24;">📝 Lưu ý quan trọng:</h4>
-                  <ul style="margin-bottom: 0; padding-left: 20px;">
-                    <li>Đơn xin nghỉ của bạn đã bị từ chối</li>
-                    <li>Bạn cần có mặt đầy đủ trong tiết dạy này</li>
-                    <li>Nếu có thắc mắc, vui lòng liên hệ với quản lý</li>
-                  </ul>
-                </div>
-              `
-              }
-            </div>
-            
-            <div style="text-align: center; margin-top: 20px; color: #6c757d; font-size: 14px;">
-              <p>📧 Email này được gửi tự động từ hệ thống EcoSchool</p>
-              <p>🕒 Thời gian: ${new Date().toLocaleString("vi-VN")}</p>
-            </div>
-          </div>
-        </div>
-      `;
-
-      await emailService.sendEmail(teacherEmail, subject, html);
-
-      console.log(
-        `📧 Email notification sent to ${teacherEmail} for ${status} teacher leave request`
-      );
-    } catch (error) {
-      console.error(
-        "❌ Error sending teacher leave request notification:",
-        error.message
-      );
-      throw error;
     }
   }
 

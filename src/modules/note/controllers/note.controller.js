@@ -1,4 +1,3 @@
-
 const noteService = require("../services/note.service");
 const LessonModel = require("../../schedules/models/lesson.model");
 const NoteModel = require("../models/note.model");
@@ -37,8 +36,8 @@ class NoteController {
       }
 
       let remindAt;
-
-      // Nếu có remindMinutes, tính dựa trên lesson time
+      let time;
+      // Nếu có remindMinutes, tính remindAt trước lesson
       if (
         remindMinutes !== undefined &&
         remindMinutes !== null &&
@@ -49,26 +48,23 @@ class NoteController {
           .map(Number);
         const scheduledDate = new Date(lessonDoc.scheduledDate);
         scheduledDate.setHours(hour, minute, 0, 0);
-        remindAt = new Date(scheduledDate.getTime() + remindMinutes * 60000);
-
+        remindAt = new Date(scheduledDate.getTime() - remindMinutes * 60000);
+        time = remindMinutes;
         if (isNaN(remindAt.getTime())) {
           return res.status(400).json({
             success: false,
             message: "Invalid remindAt date",
           });
         }
-      } else {
-        // Nếu không có remindMinutes, lấy thời gian hiện tại
-        remindAt = new Date();
       }
-
+      // Gọi service, chỉ truyền remindAt và time nếu có remindMinutes
       const note = await noteService.createNote({
         title,
         content,
         user,
         lesson,
-        remindAt,
-        time: remindMinutes,
+        ...(remindAt && { remindAt }),
+        ...(time && { time }),
       });
 
       res.status(201).json({
