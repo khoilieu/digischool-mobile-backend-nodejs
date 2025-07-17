@@ -464,7 +464,6 @@ class SwapRequestService {
       };
       await lessonRequest.save();
 
-      // ==== Gửi notification thay cho email ====
       // 1. Gửi notification cho giáo viên yêu cầu
       await notificationService.createNotification({
         type: "activity",
