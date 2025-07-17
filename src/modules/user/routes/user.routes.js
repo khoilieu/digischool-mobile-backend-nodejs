@@ -16,7 +16,7 @@ router.post(
 router.get(
   '/',
   protect,
-  authorize('admin', 'manager'),
+  // authorize('admin', 'manager'),
   userController.getUsers
 );
 

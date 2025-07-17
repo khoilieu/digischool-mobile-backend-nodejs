@@ -14,6 +14,7 @@ const teacherLeaveRequestRoutes = require("../modules/leave-requests/routes/teac
 
 const noteRoutes = require("../modules/note/routes/note.routes");
 const newsRoutes = require("../modules/news/routes/news.routes");
+const chatRoutes = require("../modules/chat/routes/chat.routes");
 const notificationRoutes = require("../modules/notification/routes/notification.routes");
 
 // Health check route
@@ -46,6 +47,7 @@ router.use("/teacher-leave-requests", teacherLeaveRequestRoutes);
 router.use("/notes", noteRoutes);
 // /api/news
 router.use("/news", newsRoutes);
+router.use("/chat", chatRoutes);
 // /api/notifications
 router.use("/notifications", notificationRoutes);
 
