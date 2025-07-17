@@ -102,8 +102,8 @@ class MakeupRequestService {
 
       // Gửi notification cho manager
       await notificationService.createNotification({
-        type: "makeup_request",
-        title: `Yêu cầu dạy bù mới - ${populatedRequest.requestId}`,
+        type: "activity",
+        title: `Yêu cầu dạy bù mới`,
         content: `Giáo viên ${
           populatedRequest.requestingTeacher.fullName ||
           populatedRequest.requestingTeacher.name

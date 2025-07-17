@@ -469,10 +469,9 @@ class SwapRequestService {
       await notificationService.createNotification({
         type: "activity",
         title: "Yêu cầu đổi tiết bị từ chối",
-        content: `Yêu cầu đổi tiết của bạn đã bị giáo viên ${
-          lessonRequest.swapInfo.replacementTeacher.fullName ||
-          lessonRequest.swapInfo.replacementTeacher.name
-        } từ chối.`,
+        content: `Yêu cầu đổi tiết của bạn đã bị giáo viên ${await User.findById(
+          lessonRequest.swapInfo.replacementTeacher
+        ).then((user) => user.name)} từ chối.`,
         sender: replacementTeacherId,
         receiverScope: {
           type: "user",
@@ -484,10 +483,9 @@ class SwapRequestService {
       await notificationService.createNotification({
         type: "activity",
         title: "Bạn đã từ chối đổi tiết",
-        content: `Bạn đã từ chối đổi tiết với giáo viên ${
-          lessonRequest.requestingTeacher.fullName ||
-          lessonRequest.requestingTeacher.name
-        }.`,
+        content: `Bạn đã từ chối đổi tiết với giáo viên ${await User.findById(
+          lessonRequest.requestingTeacher
+        ).then((user) => user.name)}.`,
         sender: replacementTeacherId,
         receiverScope: {
           type: "user",
