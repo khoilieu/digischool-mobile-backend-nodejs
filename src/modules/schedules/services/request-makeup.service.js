@@ -5,8 +5,8 @@ const Subject = require("../../subjects/models/subject.model");
 const User = require("../../auth/models/user.model");
 const AcademicYear = require("../models/academic-year.model");
 const TimeSlot = require("../models/time-slot.model");
-const emailService = require("../../auth/services/email.service");
 const lessonReferenceSwapper = require("./lesson-reference-swapper.service");
+const notificationService = require("../../notification/services/notification.service");
 
 class MakeupRequestService {
   // Helper function to calculate week range from a date
@@ -100,24 +100,28 @@ class MakeupRequestService {
         .populate("additionalInfo.subjectInfo", "subjectName subjectCode")
         .populate("additionalInfo.academicYear", "name startDate endDate");
 
-      // Gửi email thông báo cho manager
-      const managerEmails = await this.sendNewMakeupRequestToManager(
-        populatedRequest
-      );
-
-      // Cập nhật emailsSent với danh sách email thực tế
-      if (managerEmails && managerEmails.length > 0) {
-        await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
-          $push: {
-            emailsSent: {
-              type: "request",
-              recipients: managerEmails,
-              sentAt: new Date(),
-              subject: `Yêu cầu dạy bù mới - ${lessonRequest.requestId}`,
-            },
-          },
-        });
-      }
+      // Gửi notification cho manager
+      await notificationService.createNotification({
+        type: "activity",
+        title: `Yêu cầu dạy bù mới`,
+        content: `Giáo viên ${
+          populatedRequest.requestingTeacher.fullName ||
+          populatedRequest.requestingTeacher.name
+        } đã tạo yêu cầu dạy bù cho lớp ${
+          populatedRequest.additionalInfo.classInfo.className
+        }, môn ${
+          populatedRequest.additionalInfo.subjectInfo.subjectName
+        }. Lý do: ${populatedRequest.reason}`,
+        sender: data.teacherId,
+        receiverScope: {
+          type: "user",
+          ids: (await User.find({ role: "manager" }, "_id")).map((u) => u._id),
+        },
+        relatedObject: {
+          id: populatedRequest._id,
+          requestType: "makeup_request",
+        },
+      });
 
       console.log(`✅ Created makeup request: ${lessonRequest.requestId}`);
 
@@ -142,91 +146,6 @@ class MakeupRequestService {
     }
 
     return periodText;
-  }
-
-  // Gửi email thông báo yêu cầu dạy bù mới cho manager
-  async sendNewMakeupRequestToManager(lessonRequest) {
-    try {
-      // Tìm managers
-      const managers = await User.find({ role: "manager" }).lean();
-
-      if (managers.length === 0) {
-        console.log("⚠️ No managers found to send notification");
-        return [];
-      }
-
-      // Tạo email content
-      const subject = `Yêu cầu dạy bù mới - ${lessonRequest.requestId}`;
-
-      const emailContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2c3e50;">Yêu cầu dạy bù mới</h2>
-          
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <h3 style="color: #34495e; margin-top: 0;">Thông tin yêu cầu</h3>
-            <p><strong>Mã yêu cầu:</strong> ${lessonRequest.requestId}</p>
-            <p><strong>Loại yêu cầu:</strong> Dạy bù</p>
-            <p><strong>Giáo viên:</strong> ${
-              lessonRequest.requestingTeacher.fullName ||
-              lessonRequest.requestingTeacher.name
-            }</p>
-            <p><strong>Lớp:</strong> ${
-              lessonRequest.additionalInfo.classInfo.className
-            }</p>
-            <p><strong>Môn học:</strong> ${
-              lessonRequest.additionalInfo.subjectInfo.subjectName
-            }</p>
-            <p><strong>Lý do:</strong> ${lessonRequest.reason}</p>
-          </div>
-          
-          <div style="background-color: #e8f4f8; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <h3 style="color: #2980b9; margin-top: 0;">Thông tin tiết học</h3>
-            <div style="display: flex; justify-content: space-between;">
-              <div style="flex: 1; margin-right: 20px;">
-                <h4 style="color: #e74c3c;">Tiết absent:</h4>
-                <p>Ngày: ${new Date(
-                  lessonRequest.originalLesson.scheduledDate
-                ).toLocaleDateString("vi-VN")}</p>
-                <p>${this.formatLessonInfo(lessonRequest.originalLesson)}</p>
-                <p>Trạng thái: ${lessonRequest.originalLesson.status}</p>
-              </div>
-              <div style="flex: 1;">
-                <h4 style="color: #27ae60;">Tiết dạy bù:</h4>
-                <p>Ngày: ${new Date(
-                  lessonRequest.replacementLesson.scheduledDate
-                ).toLocaleDateString("vi-VN")}</p>
-                <p>${this.formatLessonInfo(lessonRequest.replacementLesson)}</p>
-                <p>Trạng thái: ${lessonRequest.replacementLesson.status}</p>
-              </div>
-            </div>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <p style="color: #7f8c8d;">Vui lòng đăng nhập vào hệ thống để xem chi tiết và xử lý yêu cầu này.</p>
-          </div>
-          
-          <div style="border-top: 1px solid #bdc3c7; padding-top: 20px; text-align: center; color: #95a5a6; font-size: 12px;">
-            <p>Email này được gửi tự động từ hệ thống quản lý lịch học EcoSchool.</p>
-          </div>
-        </div>
-      `;
-
-      // Gửi email cho từng manager
-      const sentEmails = [];
-      for (const manager of managers) {
-        await emailService.sendEmail(manager.email, subject, emailContent);
-        sentEmails.push(manager.email);
-      }
-
-      console.log(
-        `📧 Sent makeup request notification to ${managers.length} managers`
-      );
-      return sentEmails;
-    } catch (error) {
-      console.error("❌ Error sending email notification:", error.message);
-      // Không throw error để không làm gián đoạn flow chính
-      return [];
-    }
   }
 
   // Hàm generic để swap lesson fields cho makeup (chuyển từ tiết gốc sang tiết trống)
@@ -395,11 +314,43 @@ class MakeupRequestService {
 
       await lessonRequest.save();
 
-      // Gửi email thông báo cho giáo viên
-      await this.sendMakeupRequestNotifications(lessonRequest, "approved");
-
-      // Gửi email thông báo cho học sinh
-      await this.sendStudentNotifications(lessonRequest, "approved");
+      // Gửi notification cho giáo viên
+      await notificationService.createNotification({
+        type: "makeup_request_result",
+        title: `Yêu cầu dạy bù đã được duyệt - ${lessonRequest.requestId}`,
+        content: `Yêu cầu dạy bù của bạn cho lớp ${lessonRequest.additionalInfo.classInfo.className}, môn ${lessonRequest.additionalInfo.subjectInfo.subjectName} đã được duyệt.`,
+        sender: managerId,
+        receiverScope: {
+          type: "user",
+          ids: [lessonRequest.requestingTeacher._id],
+        },
+        relatedObject: { id: lessonRequest._id, requestType: "makeup_request" },
+      });
+      // Gửi notification cho học sinh trong lớp
+      const classId = lessonRequest.additionalInfo.classInfo._id;
+      const students = await User.find(
+        { role: "student", class_id: classId },
+        "_id"
+      );
+      if (students.length > 0) {
+        await notificationService.createNotification({
+          type: "makeup_lesson",
+          title: `Thông báo dạy bù lớp ${lessonRequest.additionalInfo.classInfo.className}`,
+          content: `Lớp ${
+            lessonRequest.additionalInfo.classInfo.className
+          } sẽ có tiết dạy bù môn ${
+            lessonRequest.additionalInfo.subjectInfo.subjectName
+          } vào ngày ${new Date(
+            replacementLesson.scheduledDate
+          ).toLocaleDateString("vi-VN")}.`,
+          sender: managerId,
+          receiverScope: { type: "user", ids: students.map((s) => s._id) },
+          relatedObject: {
+            id: lessonRequest._id,
+            requestType: "makeup_request",
+          },
+        });
+      }
 
       console.log(`✅ Approved makeup request: ${requestId}`);
 
@@ -461,8 +412,18 @@ class MakeupRequestService {
 
       await lessonRequest.save();
 
-      // Gửi email thông báo
-      await this.sendMakeupRequestNotifications(lessonRequest, "rejected");
+      // Gửi notification cho giáo viên
+      await notificationService.createNotification({
+        type: "makeup_request_result",
+        title: `Yêu cầu dạy bù đã bị từ chối - ${lessonRequest.requestId}`,
+        content: `Yêu cầu dạy bù của bạn cho lớp ${lessonRequest.additionalInfo.classInfo.className}, môn ${lessonRequest.additionalInfo.subjectInfo.subjectName} đã bị từ chối.`,
+        sender: managerId,
+        receiverScope: {
+          type: "user",
+          ids: [lessonRequest.requestingTeacher._id],
+        },
+        relatedObject: { id: lessonRequest._id, requestType: "makeup_request" },
+      });
 
       console.log(`❌ Rejected makeup request: ${requestId}`);
 
@@ -475,165 +436,6 @@ class MakeupRequestService {
       console.error("❌ Error rejecting makeup request:", error.message);
       throw new Error(`Failed to reject makeup request: ${error.message}`);
     }
-  }
-
-  // Gửi email thông báo kết quả xử lý dạy bù
-  async sendMakeupRequestNotifications(lessonRequest, status) {
-    try {
-      const statusText =
-        status === "approved" ? "đã được duyệt" : "đã bị từ chối";
-      const statusColor = status === "approved" ? "#27ae60" : "#e74c3c";
-
-      const subject = `Yêu cầu dạy bù ${statusText} - ${lessonRequest.requestId}`;
-
-      const emailContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: ${statusColor};">Yêu cầu dạy bù ${statusText}</h2>
-          
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <h3 style="color: #34495e; margin-top: 0;">Thông tin yêu cầu</h3>
-            <p><strong>Mã yêu cầu:</strong> ${lessonRequest.requestId}</p>
-            <p><strong>Loại yêu cầu:</strong> Dạy bù</p>
-            <p><strong>Lớp:</strong> ${
-              lessonRequest.additionalInfo.classInfo.className
-            }</p>
-            <p><strong>Môn học:</strong> ${
-              lessonRequest.additionalInfo.subjectInfo.subjectName
-            }</p>
-            <p><strong>Trạng thái:</strong> <span style="color: ${statusColor}; font-weight: bold;">${statusText.toUpperCase()}</span></p>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <p style="color: #7f8c8d;">Vui lòng đăng nhập vào hệ thống để xem chi tiết.</p>
-          </div>
-          
-          <div style="border-top: 1px solid #bdc3c7; padding-top: 20px; text-align: center; color: #95a5a6; font-size: 12px;">
-            <p>Email này được gửi tự động từ hệ thống quản lý lịch học EcoSchool.</p>
-          </div>
-        </div>
-      `;
-
-      // Gửi email cho giáo viên
-      await emailService.sendEmail(
-        lessonRequest.requestingTeacher.email,
-        subject,
-        emailContent
-      );
-
-      console.log(`📧 Sent makeup ${status} notification to teacher`);
-    } catch (error) {
-      console.error("❌ Error sending notification email:", error.message);
-      // Không throw error để không làm gián đoạn flow chính
-    }
-  }
-
-  // Gửi email thông báo cho học sinh khi yêu cầu dạy bù được approve
-  async sendStudentNotifications(lessonRequest, status) {
-    try {
-      console.log(`📧 Sending student notifications for makeup ${status}`);
-
-      // Lấy danh sách học sinh trong lớp
-      const students = await User.find({
-        role: "student",
-        class_id: lessonRequest.additionalInfo.classInfo._id,
-      })
-        .select("email name fullName class_id")
-        .lean();
-
-      if (students.length === 0) {
-        console.log("⚠️ No students found in class");
-        return;
-      }
-
-      const subject = `Thông báo dạy bù - ${lessonRequest.additionalInfo.classInfo.className}`;
-
-      // Tạo email content cho thông báo dạy bù
-      const emailContent = this.createMakeupNotificationEmail(lessonRequest);
-
-      // Gửi email cho từng học sinh
-      for (const student of students) {
-        await emailService.sendEmail(student.email, subject, emailContent);
-      }
-
-      console.log(`📧 Sent makeup notification to ${students.length} students`);
-    } catch (error) {
-      console.error("❌ Error sending student notifications:", error.message);
-      // Không throw error để không làm gián đoạn flow chính
-    }
-  }
-
-  // Tạo email content cho thông báo dạy bù
-  createMakeupNotificationEmail(lessonRequest) {
-    const originalLesson = lessonRequest.originalLesson;
-    const replacementLesson = lessonRequest.replacementLesson;
-
-    return `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #27ae60;">Thông báo dạy bù - ${
-          lessonRequest.additionalInfo.classInfo.className
-        }</h2>
-        
-        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-          <h3 style="color: #34495e; margin-top: 0;">Thông tin môn học</h3>
-          <p><strong>Môn học:</strong> ${
-            lessonRequest.additionalInfo.subjectInfo.subjectName
-          }</p>
-          <p><strong>Giáo viên:</strong> ${
-            lessonRequest.requestingTeacher.fullName ||
-            lessonRequest.requestingTeacher.name
-          }</p>
-          <p><strong>Lớp:</strong> ${
-            lessonRequest.additionalInfo.classInfo.className
-          }</p>
-        </div>
-        
-        <div style="background-color: #d1ecf1; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #17a2b8;">
-          <h3 style="color: #0c5460; margin-top: 0;">📚 Thông tin tiết dạy bù</h3>
-          
-          <div style="margin: 20px 0;">
-            <div style="padding: 15px; background-color: #f8d7da; border-radius: 5px; margin-bottom: 15px;">
-              <h4 style="color: #721c24; margin-top: 0;">📅 Tiết học bị vắng:</h4>
-              <p><strong>Ngày:</strong> ${new Date(
-                originalLesson.scheduledDate
-              ).toLocaleDateString("vi-VN")}</p>
-              <p><strong>Tiết:</strong> ${this.formatLessonInfo(
-                originalLesson
-              )}</p>
-              <p><strong>Chủ đề:</strong> ${
-                originalLesson.topic || "Chưa có"
-              }</p>
-              <p><strong>Lý do:</strong> ${lessonRequest.reason}</p>
-            </div>
-            
-            <div style="padding: 15px; background-color: #d4edda; border-radius: 5px;">
-              <h4 style="color: #155724; margin-top: 0;">✅ Tiết dạy bù:</h4>
-              <p><strong>Ngày:</strong> ${new Date(
-                replacementLesson.scheduledDate
-              ).toLocaleDateString("vi-VN")}</p>
-              <p><strong>Tiết:</strong> ${this.formatLessonInfo(
-                replacementLesson
-              )}</p>
-              <p><strong>Nội dung:</strong> Dạy bù tiết học ngày ${new Date(
-                originalLesson.scheduledDate
-              ).toLocaleDateString("vi-VN")}</p>
-            </div>
-          </div>
-        </div>
-        
-        <div style="background-color: #e8f4f8; padding: 20px; border-radius: 8px; margin: 20px 0;">
-          <h3 style="color: #2980b9; margin-top: 0;">📝 Lý do dạy bù</h3>
-          <p style="color: #2c3e50;">${lessonRequest.reason}</p>
-        </div>
-        
-        <div style="text-align: center; margin: 30px 0;">
-          <p style="color: #27ae60; font-weight: bold;">📚 Vui lòng tham gia đầy đủ tiết dạy bù để không bị thiếu kiến thức!</p>
-        </div>
-        
-        <div style="border-top: 1px solid #bdc3c7; padding-top: 20px; text-align: center; color: #95a5a6; font-size: 12px;">
-          <p>Thông báo này được gửi tự động từ hệ thống quản lý lịch học EcoSchool.</p>
-        </div>
-      </div>
-    `;
   }
 
   // Huỷ yêu cầu dạy bù (makeup) - chỉ giáo viên tạo request được huỷ
@@ -664,6 +466,21 @@ class MakeupRequestService {
       lessonRequest.cancelledAt = new Date();
       lessonRequest.lastModifiedBy = teacherId;
       await lessonRequest.save();
+
+      // Gửi notification cho manager về việc huỷ yêu cầu
+      const managers = await User.find({ role: "manager" }, "_id");
+      await notificationService.createNotification({
+        type: "makeup_request_cancelled",
+        title: `Yêu cầu dạy bù đã bị huỷ - ${lessonRequest.requestId}`,
+        content: `Yêu cầu dạy bù cho lớp ${
+          lessonRequest.additionalInfo?.classInfo?.className || ""
+        }, môn ${
+          lessonRequest.additionalInfo?.subjectInfo?.subjectName || ""
+        } đã bị huỷ bởi giáo viên.`,
+        sender: teacherId,
+        receiverScope: { type: "user", ids: managers.map((m) => m._id) },
+        relatedObject: { id: lessonRequest._id, requestType: "makeup_request" },
+      });
 
       return {
         success: true,

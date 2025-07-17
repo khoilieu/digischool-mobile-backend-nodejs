@@ -1,4 +1,3 @@
-
 const noteService = require("../services/note.service");
 const LessonModel = require("../../schedules/models/lesson.model");
 const NoteModel = require("../models/note.model");
@@ -37,8 +36,8 @@ class NoteController {
       }
 
       let remindAt;
-
-      // Nếu có remindMinutes, tính dựa trên lesson time
+      let time;
+      // Nếu có remindMinutes, tính remindAt trước lesson
       if (
         remindMinutes !== undefined &&
         remindMinutes !== null &&
@@ -49,26 +48,23 @@ class NoteController {
           .map(Number);
         const scheduledDate = new Date(lessonDoc.scheduledDate);
         scheduledDate.setHours(hour, minute, 0, 0);
-        remindAt = new Date(scheduledDate.getTime() + remindMinutes * 60000);
-
+        remindAt = new Date(scheduledDate.getTime() - remindMinutes * 60000);
+        time = remindMinutes;
         if (isNaN(remindAt.getTime())) {
           return res.status(400).json({
             success: false,
             message: "Invalid remindAt date",
           });
         }
-      } else {
-        // Nếu không có remindMinutes, lấy thời gian hiện tại
-        remindAt = new Date();
       }
-
+      // Gọi service, chỉ truyền remindAt và time nếu có remindMinutes
       const note = await noteService.createNote({
         title,
         content,
         user,
         lesson,
-        remindAt,
-        time: remindMinutes,
+        ...(remindAt && { remindAt }),
+        ...(time && { time }),
       });
 
       res.status(201).json({
@@ -115,6 +111,11 @@ class NoteController {
       const { id } = req.params;
       const updateData = req.body;
 
+      let updatePayload = {};
+      let unsetData = {};
+      let setData = {};
+      Object.assign(setData, updateData); // copy các trường update
+
       if (updateData.remindMinutes !== undefined) {
         const note = await NoteModel.findById(id);
         if (!note || String(note.user) !== String(user)) {
@@ -134,27 +135,53 @@ class NoteController {
           });
         }
 
-        // Luôn set remindAt và time
         if (updateData.remindMinutes && updateData.remindMinutes > 0) {
-          // Tính remindAt dựa trên lesson time
+          // Tính remindAt trước lesson
           const [hour, minute] = lessonDoc.timeSlot.startTime
             .split(":")
             .map(Number);
           const scheduledDate = new Date(lessonDoc.scheduledDate);
           scheduledDate.setHours(hour, minute, 0, 0);
-          updateData.remindAt = new Date(
-            scheduledDate.getTime() + updateData.remindMinutes * 60000
+          setData.remindAt = new Date(
+            scheduledDate.getTime() - updateData.remindMinutes * 60000
           );
-          updateData.time = updateData.remindMinutes; // Cập nhật trường time
+          setData.time = updateData.remindMinutes;
+          if (isNaN(setData.remindAt.getTime())) {
+            return res.status(400).json({
+              success: false,
+              message: "Invalid remindAt date",
+            });
+          }
         } else {
-          // Nếu không có remindMinutes, lấy thời gian hiện tại
-          updateData.remindAt = new Date();
-          updateData.time = 0; // Set time = 0 nếu không có remindMinutes
+          // Nếu remindMinutes = 0 hoặc null, xóa remindAt và time
+          unsetData.remindAt = "";
+          unsetData.time = "";
+          delete setData.remindAt;
+          delete setData.time;
         }
-        delete updateData.remindMinutes;
+        delete setData.remindMinutes;
+      } else {
+        // Nếu không gửi remindMinutes, xóa remindAt và time
+        unsetData.remindAt = "";
+        unsetData.time = "";
       }
 
-      const updated = await noteService.updateNote(id, user, updateData);
+      // Chỉ truyền $unset nếu có trường cần xóa
+      if (Object.keys(unsetData).length > 0) {
+        // Nếu có trường khác ngoài remindAt/time thì truyền $set
+        const setFields = { ...setData };
+        delete setFields.remindAt;
+        delete setFields.time;
+        if (Object.keys(setFields).length > 0) {
+          updatePayload = { $set: setFields, $unset: unsetData };
+        } else {
+          updatePayload = { $unset: unsetData };
+        }
+      } else {
+        updatePayload = setData;
+      }
+      
+      const updated = await noteService.updateNote(id, user, updatePayload);
       if (!updated) {
         return res.status(404).json({
           success: false,

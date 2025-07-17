@@ -1,4 +1,3 @@
-
 const Note = require("../models/note.model");
 
 class NoteService {
@@ -18,9 +17,9 @@ class NoteService {
         content,
         user,
         lesson,
-        time,
-        remindAt: remindAt || new Date(), // Luôn có remindAt
       };
+      if (remindAt !== undefined) noteData.remindAt = remindAt;
+      if (time !== undefined) noteData.time = time;
 
       const note = await Note.create(noteData);
 
@@ -64,7 +63,7 @@ class NoteService {
       const updatedNote = await Note.findOneAndUpdate(
         { _id: noteId, user },
         updateData,
-        { new: true }
+        { new: true, strict: false }
       );
 
       if (updatedNote) {

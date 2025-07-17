@@ -66,7 +66,7 @@ class SubjectController {
   // Get all subjects with pagination and filters
   async getAllSubjects(req, res, next) {
     try {
-      const { page = 1, limit = 10, ...filters } = req.query;
+      const { page = 1, limit = 20, ...filters } = req.query;
       const result = await subjectService.getAllSubjects(page, limit, filters);
       
       res.status(200).json({
