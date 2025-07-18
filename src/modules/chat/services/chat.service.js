@@ -1,11 +1,26 @@
 const mongoose = require("mongoose");
 const Message = require("../models/message.model");
 const User = require("../../auth/models/user.model");
+const bucket = require("../../../config/gcs");
+const { v4: uuidv4 } = require("uuid");
 
 // Gửi tin nhắn
-async function sendMessage({ sender, receiver, content, type = "text", mediaUrl }) {
+async function sendMessage({
+  sender,
+  receiver,
+  content,
+  type = "text",
+  mediaUrl,
+}) {
   // TODO: kiểm tra trạng thái realtime qua socket, tạm thời luôn là 'sent'
-  const message = await Message.create({ sender, receiver, content, type, mediaUrl, status: "sent" });
+  const message = await Message.create({
+    sender,
+    receiver,
+    content,
+    type,
+    mediaUrl,
+    status: "sent",
+  });
   return message;
 }
 
@@ -13,7 +28,11 @@ async function sendMessage({ sender, receiver, content, type = "text", mediaUrl 
 async function getMessages({ user1, user2, limit = 50, skip = 0 }) {
   // Mark tất cả tin nhắn gửi tới user1 từ user2 là đã xem
   await Message.updateMany(
-    { sender: new mongoose.Types.ObjectId(user2), receiver: new mongoose.Types.ObjectId(user1), status: { $ne: "read" } },
+    {
+      sender: new mongoose.Types.ObjectId(user2),
+      receiver: new mongoose.Types.ObjectId(user1),
+      status: { $ne: "read" },
+    },
     { $set: { status: "read" } }
   );
   // Lấy lịch sử chat
@@ -44,7 +63,7 @@ async function getConversations(userId, activeChatMap = {}) {
       },
     },
     {
-      $sort: { createdAt: -1 }
+      $sort: { createdAt: -1 },
     },
     {
       $group: {
@@ -52,8 +71,8 @@ async function getConversations(userId, activeChatMap = {}) {
           $cond: [
             { $eq: ["$sender", new mongoose.Types.ObjectId(userId)] },
             "$receiver",
-            "$sender"
-          ]
+            "$sender",
+          ],
         },
         lastMessage: { $first: "$content" },
         lastMessageType: { $first: "$type" },
@@ -66,26 +85,26 @@ async function getConversations(userId, activeChatMap = {}) {
               {
                 $and: [
                   { $eq: ["$receiver", new mongoose.Types.ObjectId(userId)] },
-                  { $eq: ["$status", "sent"] }
-                ]
+                  { $eq: ["$status", "sent"] },
+                ],
               },
               { sender: "$sender", receiver: "$receiver", status: "$status" },
-              null
-            ]
-          }
-        }
-      }
+              null,
+            ],
+          },
+        },
+      },
     },
     {
       $lookup: {
         from: "users",
         localField: "_id",
         foreignField: "_id",
-        as: "userInfo"
-      }
+        as: "userInfo",
+      },
     },
     {
-      $unwind: "$userInfo"
+      $unwind: "$userInfo",
     },
     {
       $project: {
@@ -97,25 +116,27 @@ async function getConversations(userId, activeChatMap = {}) {
         lastMessageStatus: 1,
         lastMessageTime: 1,
         lastMessageSender: 1,
-        unreadMessages: 1
-      }
+        unreadMessages: 1,
+      },
     },
-    { $sort: { lastMessageTime: -1 } }
+    { $sort: { lastMessageTime: -1 } },
   ];
   let conversations = await Message.aggregate(pipeline);
 
   // Tính unreadCount ngoài pipeline để lấy đúng trạng thái activeChatMap
-  conversations = conversations.map(conv => {
+  conversations = conversations.map((conv) => {
     const otherUserId = String(conv.userId);
     const userActiveWith = activeChatMap[String(userId)];
     let unreadCount = 0;
     // Nếu user hiện tại KHÔNG mở đoạn chat với người kia thì đếm số chưa đọc
     if (userActiveWith !== otherUserId) {
-      unreadCount = (conv.unreadMessages || []).filter(m => m && m.status === "sent").length;
+      unreadCount = (conv.unreadMessages || []).filter(
+        (m) => m && m.status === "sent"
+      ).length;
     }
     return {
       ...conv,
-      unreadCount
+      unreadCount,
     };
   });
   // Xóa unreadMessages khỏi kết quả trả về
@@ -130,28 +151,21 @@ async function updateMessageStatus(messageId, status) {
 
 // Upload media (ảnh, video, file)
 async function uploadMedia(file) {
-  const cloudinary = require("cloudinary").v2;
-  // Xác định resource_type
-  let resource_type = "image";
-  if (file.mimetype.startsWith("video/")) resource_type = "video";
-  else if (!file.mimetype.startsWith("image/")) resource_type = "auto";
+  // Xác định folder và tên file
+  let folder = "chat-media";
+  let ext = file.originalname.split(".").pop();
+  let filename = `${folder}/${uuidv4()}_${Date.now()}.${ext}`;
 
-  // Upload file buffer lên Cloudinary
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        resource_type,
-        folder: "chat-media",
-        public_id: file.originalname.replace(/\.[^/.]+$/, "") + "-" + Date.now(),
-        overwrite: false,
-      },
-      (error, result) => {
-        if (error) return reject(error);
-        resolve({ url: result.secure_url });
-      }
-    );
-    stream.end(file.buffer);
+  const gcsFile = bucket.file(filename);
+
+  // Upload file buffer lên GCS
+  await gcsFile.save(file.buffer, {
+    contentType: file.mimetype,
+    public: true,
   });
+
+  // Trả về URL public
+  return { url: `https://storage.googleapis.com/${bucket.name}/${filename}` };
 }
 
 module.exports = {
@@ -160,4 +174,4 @@ module.exports = {
   updateMessageStatus,
   getConversations,
   uploadMedia,
-}; 
+};
