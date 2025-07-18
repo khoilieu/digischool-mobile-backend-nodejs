@@ -8,7 +8,7 @@ const startServer = async () => {
   try {
     if (process.env.MONGODB_URI) {
       await connectDB();
-      console.log("MongoDB Connected!");
+      console.log("MongoDB Connected");
     } else {
       console.log("MONGODB_URI not set");
     }
