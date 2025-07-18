@@ -24,7 +24,7 @@ router.get(
 router.get(
   '/:id',
   protect,
-  authorize('admin', 'manager'),
+  // authorize('admin', 'manager'),
   userController.getUserById
 );
 
