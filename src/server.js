@@ -50,7 +50,9 @@ const startServer = async () => {
             { sender: to, receiver: from, status: { $ne: "read" } },
             { $set: { status: "read" } }
           );
-        } catch (e) { console.error(e); }
+        } catch (e) {
+          console.error(e);
+        }
         // Gửi event cho người còn lại để cập nhật trạng thái đã xem
         io.to(to).emit("message_read", { from });
         // Cập nhật lại danh sách đoạn chat cho cả hai
@@ -74,10 +76,16 @@ const startServer = async () => {
           try {
             const Message = require("./modules/chat/models/message.model");
             await Message.updateMany(
-              { sender: data.sender, receiver: data.receiver, status: { $ne: "read" } },
+              {
+                sender: data.sender,
+                receiver: data.receiver,
+                status: { $ne: "read" },
+              },
               { $set: { status: "read" } }
             );
-          } catch (e) { console.error(e); }
+          } catch (e) {
+            console.error(e);
+          }
           // Gửi event đã xem cho người gửi
           io.to(data.sender).emit("message_read", { from: data.receiver });
         }

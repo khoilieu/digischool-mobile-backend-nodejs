@@ -1,8 +1,8 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const connectDB = async () => {
   try {
-    const DB_NAME = process.env.DB_NAME || 'Ecoschool-app-dev';
+    const DB_NAME = process.env.DB_NAME || "Ecoschool-app-dev";
     const MONGODB_URI = process.env.MONGODB_URI;
 
     const conn = await mongoose.connect(MONGODB_URI, {
@@ -18,4 +18,4 @@ const connectDB = async () => {
   }
 };
 
-module.exports = connectDB; 
+module.exports = connectDB;
