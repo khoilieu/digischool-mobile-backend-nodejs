@@ -6,15 +6,23 @@ const PORT = process.env.PORT || 8080;
 
 const startServer = async () => {
   try {
+    console.log("🚀 Starting server...");
+    console.log(`📊 Environment: ${process.env.NODE_ENV}`);
+    console.log(`🔌 Port: ${PORT}`);
+
     if (process.env.MONGODB_URI) {
+      console.log("📦 Connecting to MongoDB...");
       await connectDB();
-      console.log("MongoDB Connected");
+      console.log("✅ MongoDB Connected");
     } else {
-      console.log("MONGODB_URI not set");
+      console.log("⚠️  MONGODB_URI not set - running without database");
     }
 
-    const server = app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+    const server = app.listen(PORT, "0.0.0.0", () => {
+      console.log(`✅ Server running on port ${PORT}`);
+      console.log(
+        `🌐 Health check available at: http://localhost:${PORT}/api/health`
+      );
     });
 
     // Socket.IO
@@ -106,19 +114,35 @@ const startServer = async () => {
 
     module.exports.io = io;
 
+    // Graceful shutdown
     process.on("SIGTERM", () => {
+      console.log("🛑 SIGTERM received, shutting down gracefully...");
       server.close(() => {
+        console.log("✅ Server closed");
         process.exit(0);
       });
     });
 
     process.on("SIGINT", () => {
+      console.log("🛑 SIGINT received, shutting down gracefully...");
       server.close(() => {
+        console.log("✅ Server closed");
         process.exit(0);
       });
     });
+
+    // Error handling
+    process.on("uncaughtException", (error) => {
+      console.error("💥 Uncaught Exception:", error);
+      process.exit(1);
+    });
+
+    process.on("unhandledRejection", (reason, promise) => {
+      console.error("💥 Unhandled Rejection at:", promise, "reason:", reason);
+      process.exit(1);
+    });
   } catch (error) {
-    console.error("Failed to start server:", error);
+    console.error("❌ Failed to start server:", error);
     process.exit(1);
   }
 };

@@ -60,10 +60,12 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --port 8080 \
-            --timeout 300 \
-            --memory 512Mi \
-            --cpu 1 \
+            --timeout 600 \
+            --memory 1Gi \
+            --cpu 2 \
             --max-instances 10 \
+            --min-instances 0 \
+            --concurrency 80 \
             --set-env-vars "${{ steps.envvars.outputs.ENV_VARS }}" \
             --quiet
       - name: Gửi email thông báo khi deploy thành công
