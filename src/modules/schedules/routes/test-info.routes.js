@@ -11,6 +11,7 @@ router.use(authMiddleware.protect);
 router.use(authMiddleware.authorize("teacher", "homeroom_teacher"));
 
 // Tạo thông tin kiểm tra cho tiết học ✅
+// Body: { testType, content, reminder }
 router.post(
   "/lessons/:lessonId",
   testInfoValidation.createTestInfoValidation(),
@@ -18,7 +19,7 @@ router.post(
 );
 
 // Lấy danh sách thông tin kiểm tra của giáo viên ✅
-// Query params: status, priority, testType, startDate, endDate, page, limit
+// Query params: testType, page, limit
 router.get(
   "/",
   testInfoValidation.queryValidation(),
@@ -26,6 +27,7 @@ router.get(
 );
 
 // Cập nhật thông tin kiểm tra ✅
+// Body: { testType?, content?, reminder? }
 router.put(
   "/:testInfoId",
   testInfoValidation.updateTestInfoValidation(),
@@ -37,20 +39,6 @@ router.delete(
   "/:testInfoId",
   testInfoValidation.paramIdValidation(),
   testInfoController.deleteTestInfo
-);
-
-// Gửi lại email thông tin kiểm tra ✅
-router.post(
-  "/:testInfoId/resend-email",
-  testInfoValidation.paramIdValidation(),
-  testInfoController.resendTestInfoEmail
-);
-
-// Test gửi email ✅
-router.post(
-  "/:testInfoId/test-email",
-  testInfoValidation.paramIdValidation(),
-  testInfoController.testTestInfoEmail
 );
 
 module.exports = router;

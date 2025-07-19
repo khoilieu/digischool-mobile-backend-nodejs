@@ -1,472 +1,158 @@
-const { body, query, param, validationResult } = require("express-validator");
+const { body, param, query } = require("express-validator");
+const { validationResult } = require("express-validator");
 
 class ScheduleValidation {
-  // Middleware để handle validation errors
   handleValidationErrors(req, res, next) {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: "Validation failed",
-        errors: errors.array().map((error) => ({
-          field: error.path,
-          message: error.msg,
-          value: error.value,
-        })),
+        message: "Validation error",
+        errors: errors.array(),
       });
     }
     next();
   }
 
-  // Validation cho khởi tạo thời khóa biểu cho tất cả lớp trong năm học
-  validateInitializeSchedule() {
+  validateCreateSchedule() {
     return [
       body("academicYear")
+        .trim()
         .notEmpty()
-        .withMessage("Academic year is required")
-        .matches(/^\d{4}-\d{4}$/)
-        .withMessage(
-          "Academic year must be in format YYYY-YYYY (e.g., 2023-2024)"
-        )
-        .custom((value) => {
-          const [startYear, endYear] = value.split("-").map(Number);
-          if (endYear - startYear !== 1) {
-            throw new Error("Academic year must be consecutive years");
-          }
-          return true;
-        }),
+        .withMessage("Academic year is required"),
 
       body("gradeLevel")
-        .optional({ nullable: true, checkFalsy: true })
-        .custom((value) => {
-          if (value !== undefined && value !== null && value !== "") {
-            if (
-              !Number.isInteger(Number(value)) ||
-              Number(value) < 1 ||
-              Number(value) > 12
-            ) {
-              throw new Error("Grade level must be between 1 and 12");
-            }
-          }
-          return true;
-        }),
-
-      body("semester")
-        .optional({ nullable: true, checkFalsy: true })
-        .custom((value) => {
-          if (value !== undefined && value !== null && value !== "") {
-            if (
-              !Number.isInteger(Number(value)) ||
-              Number(value) < 1 ||
-              Number(value) > 2
-            ) {
-              throw new Error("Semester must be 1 or 2");
-            }
-          }
-          return true;
-        }),
-
-      this.handleValidationErrors,
-    ];
-  }
-
-  // Validation cho khởi tạo thời khóa biểu cho một lớp cụ thể
-  validateInitializeClassSchedule() {
-    return [
-      body("classId")
+        .trim()
         .notEmpty()
-        .withMessage("Class ID is required")
-        .isMongoId()
-        .withMessage("Class ID must be a valid MongoDB ObjectId"),
-
-      body("academicYear")
-        .notEmpty()
-        .withMessage("Academic year is required")
-        .matches(/^\d{4}-\d{4}$/)
-        .withMessage(
-          "Academic year must be in format YYYY-YYYY (e.g., 2023-2024)"
-        )
-        .custom((value) => {
-          const [startYear, endYear] = value.split("-").map(Number);
-          if (endYear - startYear !== 1) {
-            throw new Error("Academic year must be consecutive years");
-          }
-          return true;
-        }),
-
-      body("semester")
-        .optional()
-        .isInt({ min: 1, max: 2 })
-        .withMessage("Semester must be 1 or 2"),
-
-      this.handleValidationErrors,
-    ];
-  }
-
-  // Validation cho xem thời khóa biểu lớp
-  validateGetClassSchedule() {
-    return [
-      query("className")
-        .notEmpty()
-        .withMessage("Class name is required")
-        .isLength({ min: 2, max: 10 })
-        .withMessage("Class name must be between 2-10 characters")
-        .matches(/^[0-9]{1,2}[A-Z][0-9]*$/)
-        .withMessage("Class name must be in format like 12A1, 11B2, etc."),
-
-      query("academicYear")
-        .notEmpty()
-        .withMessage("Academic year is required")
-        .matches(/^\d{4}-\d{4}$/)
-        .withMessage(
-          "Academic year must be in format YYYY-YYYY (e.g., 2023-2024)"
-        ),
-
-      query("weekNumber")
-        .optional()
-        .isInt({ min: 1, max: 52 })
-        .withMessage("Week number must be between 1 and 52"),
-
-      query("startOfWeek")
-        .optional()
-        .isISO8601()
-        .withMessage("Start of week must be a valid date (YYYY-MM-DD)"),
-
-      query("endOfWeek")
-        .optional()
-        .isISO8601()
-        .withMessage("End of week must be a valid date (YYYY-MM-DD)")
-        .custom((value, { req }) => {
-          if (value && req.query.startOfWeek) {
-            const start = new Date(req.query.startOfWeek);
-            const end = new Date(value);
-            if (end <= start) {
-              throw new Error("End of week must be after start of week");
-            }
-            // Kiểm tra không quá 7 ngày
-            const diffDays = (end - start) / (1000 * 60 * 60 * 24);
-            if (diffDays > 7) {
-              throw new Error("Date range cannot exceed 7 days");
-            }
-          }
-          return true;
-        }),
-
-      // Validation logic: phải có weekNumber HOẶC (startOfWeek VÀ endOfWeek)
-      query().custom((value, { req }) => {
-        const hasWeekNumber = req.query.weekNumber;
-        const hasDateRange = req.query.startOfWeek && req.query.endOfWeek;
-
-        if (!hasWeekNumber && !hasDateRange) {
-          throw new Error(
-            "Either weekNumber or both startOfWeek and endOfWeek are required"
-          );
-        }
-
-        if (hasWeekNumber && hasDateRange) {
-          throw new Error(
-            "Cannot use both weekNumber and date range parameters at the same time"
-          );
-        }
-
-        return true;
-      }),
-
-      this.handleValidationErrors,
-    ];
-  }
-
-  // Validation cho cập nhật trạng thái
-  validateUpdateStatus() {
-    return [
-      param("id").isMongoId().withMessage("Invalid schedule ID"),
-
-      body("status")
-        .isIn(["draft", "active", "archived"])
-        .withMessage("Status must be one of: draft, active, archived"),
-
-      this.handleValidationErrors,
-    ];
-  }
-
-  // Validation cho tạo/cập nhật thời khóa biểu
-  validateScheduleData() {
-    return [
-      body("class").optional().isMongoId().withMessage("Invalid class ID"),
-
-      body("academicYear")
-        .optional()
-        .matches(/^\d{4}-\d{4}$/)
-        .withMessage("Academic year must be in format YYYY-YYYY"),
-
-      body("semester")
-        .optional()
-        .isInt({ min: 1, max: 2 })
-        .withMessage("Semester must be 1 or 2"),
+        .withMessage("Grade level is required"),
 
       body("weekNumber")
         .optional()
         .isInt({ min: 1, max: 52 })
         .withMessage("Week number must be between 1 and 52"),
 
-      body("totalPeriodsPerWeek")
+      body("scheduleType")
         .optional()
-        .isInt({ min: 30, max: 35 })
-        .withMessage("Total periods per week must be between 30 and 35"),
-
-      body("schedule")
-        .optional()
-        .isArray()
-        .withMessage("Schedule must be an array"),
-
-      body("schedule.*.dayOfWeek")
-        .optional()
-        .isInt({ min: 2, max: 7 })
-        .withMessage("Day of week must be between 2 (Monday) and 7 (Saturday)"),
-
-      body("schedule.*.dayName")
-        .optional()
-        .isIn([
-          "Monday",
-          "Tuesday",
-          "Wednesday",
-          "Thursday",
-          "Friday",
-          "Saturday",
-        ])
-        .withMessage("Day name must be a valid weekday"),
-
-      body("schedule.*.periods")
-        .optional()
-        .isArray()
-        .withMessage("Periods must be an array"),
-
-      body("schedule.*.periods.*.periodNumber")
-        .optional()
-        .isInt({ min: 1, max: 7 })
-        .withMessage("Period number must be between 1 and 7"),
-
-      body("schedule.*.periods.*.subject")
-        .optional()
-        .isMongoId()
-        .withMessage("Invalid subject ID"),
-
-      body("schedule.*.periods.*.teacher")
-        .optional()
-        .isMongoId()
-        .withMessage("Invalid teacher ID"),
-
-      body("schedule.*.periods.*.session")
-        .optional()
-        .isIn(["morning", "afternoon"])
-        .withMessage("Session must be morning or afternoon"),
-
-      body("schedule.*.periods.*.timeStart")
-        .optional()
-        .matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/)
-        .withMessage("Time start must be in HH:MM format"),
-
-      body("schedule.*.periods.*.timeEnd")
-        .optional()
-        .matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/)
-        .withMessage("Time end must be in HH:MM format"),
-
-      body("notes")
-        .optional()
-        .isLength({ max: 500 })
-        .withMessage("Notes cannot exceed 500 characters"),
-
-      this.handleValidationErrors,
-    ];
-  }
-
-  // Validation cho query parameters chung
-  validateCommonQuery() {
-    return [
-      query("page")
-        .optional()
-        .isInt({ min: 1 })
-        .withMessage("Page must be a positive integer"),
-
-      query("limit")
-        .optional()
-        .isInt({ min: 1, max: 100 })
-        .withMessage("Limit must be between 1 and 100"),
-
-      query("academicYear")
-        .optional()
-        .matches(/^\d{4}-\d{4}$/)
-        .withMessage("Academic year must be in format YYYY-YYYY"),
-
-      query("gradeLevel")
-        .optional()
-        .isInt({ min: 1, max: 12 })
-        .withMessage("Grade level must be between 1 and 12"),
-
-      query("status")
-        .optional()
-        .isIn(["draft", "active", "archived"])
-        .withMessage("Status must be one of: draft, active, archived"),
-
-      query("semester")
-        .optional()
-        .isInt({ min: 1, max: 2 })
-        .withMessage("Semester must be 1 or 2"),
-
-      query("className")
-        .optional()
-        .matches(/^[0-9]{1,2}[A-Z][0-9]*$/)
-        .withMessage("Class name must be in format like 12A1, 11B2, etc."),
-
-      this.handleValidationErrors,
-    ];
-  }
-
-  // Validation cho MongoDB ObjectId parameters
-  validateObjectId() {
-    return [
-      param("id").isMongoId().withMessage("Invalid ID format"),
-      this.handleValidationErrors,
-    ];
-  }
-
-  // Validation cho checkClassExists API
-  validateCheckClassExists() {
-    return [
-      query("className")
-        .notEmpty()
-        .withMessage("Class name is required")
-        .isLength({ min: 2, max: 10 })
-        .withMessage("Class name must be between 2-10 characters")
-        .matches(/^[0-9]{1,2}[A-Z][0-9]*$/)
-        .withMessage("Class name must be in format like 12A1, 11B2, etc."),
-
-      query("academicYear")
-        .notEmpty()
-        .withMessage("Academic year is required")
-        .matches(/^\d{4}-\d{4}$/)
+        .isIn(["MONDAY_TO_SATURDAY", "MONDAY_TO_FRIDAY"])
         .withMessage(
-          "Academic year must be in format YYYY-YYYY (e.g., 2023-2024)"
+          "Schedule type must be MONDAY_TO_SATURDAY or MONDAY_TO_FRIDAY"
         ),
 
+      body("startDate")
+        .optional()
+        .isISO8601()
+        .withMessage("Start date must be a valid ISO date"),
+
+      body("endDate")
+        .optional()
+        .isISO8601()
+        .withMessage("End date must be a valid ISO date"),
+
+      (req, res, next) => {
+        const { startDate, endDate } = req.body;
+
+        if (startDate && !endDate) {
+          return res.status(400).json({
+            success: false,
+            message: "If startDate is provided, endDate is required",
+          });
+        }
+
+        if (!startDate && endDate) {
+          return res.status(400).json({
+            success: false,
+            message: "If endDate is provided, startDate is required",
+          });
+        }
+
+        if (startDate && endDate) {
+          const start = new Date(startDate);
+          const end = new Date(endDate);
+
+          if (end <= start) {
+            return res.status(400).json({
+              success: false,
+              message: "End date must be after start date",
+            });
+          }
+
+          const diffDays = (end - start) / (1000 * 60 * 60 * 24);
+          if (diffDays > 7) {
+            return res.status(400).json({
+              success: false,
+              message: "Date range cannot exceed 7 days",
+            });
+          }
+        }
+
+        next();
+      },
+
       this.handleValidationErrors,
     ];
   }
 
-  // Validation cho getTeacherSchedule API
+  validateGetWeeklySchedule() {
+    return [
+      param("className")
+        .trim()
+        .notEmpty()
+        .withMessage("Class name is required"),
+
+      param("academicYear")
+        .trim()
+        .notEmpty()
+        .withMessage("Academic year is required"),
+
+      param("weekNumber")
+        .isInt({ min: 1, max: 52 })
+        .withMessage("Week number must be between 1 and 52"),
+
+      this.handleValidationErrors,
+    ];
+  }
+
   validateGetTeacherSchedule() {
     return [
-      query("teacherId")
-        .notEmpty()
-        .withMessage("Teacher ID is required")
+      param("teacherId")
         .isMongoId()
-        .withMessage("Teacher ID must be a valid MongoDB ObjectId"),
+        .withMessage("Teacher ID must be a valid MongoDB ID"),
 
-      query("academicYear")
+      param("academicYear")
+        .trim()
         .notEmpty()
-        .withMessage("Academic year is required")
-        .matches(/^\d{4}-\d{4}$/)
-        .withMessage(
-          "Academic year must be in format YYYY-YYYY (e.g., 2023-2024)"
-        ),
+        .withMessage("Academic year is required"),
 
-      query("startOfWeek")
-        .notEmpty()
-        .withMessage("Start of week is required")
-        .isISO8601()
-        .withMessage("Start of week must be a valid date (YYYY-MM-DD)"),
-
-      query("endOfWeek")
-        .notEmpty()
-        .withMessage("End of week is required")
-        .isISO8601()
-        .withMessage("End of week must be a valid date (YYYY-MM-DD)")
-        .custom((value, { req }) => {
-          if (value && req.query.startOfWeek) {
-            const start = new Date(req.query.startOfWeek);
-            const end = new Date(value);
-            if (end <= start) {
-              throw new Error("End of week must be after start of week");
-            }
-            // Kiểm tra không quá 7 ngày
-            const diffDays = (end - start) / (1000 * 60 * 60 * 24);
-            if (diffDays > 7) {
-              throw new Error("Date range cannot exceed 7 days");
-            }
-          }
-          return true;
-        }),
+      param("weekNumber")
+        .isInt({ min: 1, max: 52 })
+        .withMessage("Week number must be between 1 and 52"),
 
       this.handleValidationErrors,
     ];
   }
 
-  // Validation cho getLessonDetail API
   validateGetLessonDetail() {
     return [
       param("lessonId")
-        .notEmpty()
-        .withMessage("Lesson ID is required")
         .isMongoId()
-        .withMessage("Lesson ID must be a valid MongoDB ObjectId"),
+        .withMessage("Lesson ID must be a valid MongoDB ID"),
 
       this.handleValidationErrors,
     ];
   }
 
-  // Validation cho getLessonStudents API
-  validateGetLessonStudents() {
-    return [
-      param("lessonId")
-        .notEmpty()
-        .withMessage("Lesson ID is required")
-        .isMongoId()
-        .withMessage("Lesson ID must be a valid MongoDB ObjectId"),
-
-      this.handleValidationErrors,
-    ];
-  }
-
-  // Validation cho completeLessonById API
-  validateCompleteLesson() {
-    return [
-      param("lessonId")
-        .notEmpty()
-        .withMessage("Lesson ID is required")
-        .isMongoId()
-        .withMessage("Lesson ID must be a valid MongoDB ObjectId"),
-
-      this.handleValidationErrors,
-    ];
-  }
-
-  // Validation cho updateLessonDescription API
   validateUpdateLessonDescription() {
     return [
       param("lessonId")
-        .notEmpty()
-        .withMessage("Lesson ID is required")
         .isMongoId()
-        .withMessage("Lesson ID must be a valid MongoDB ObjectId"),
+        .withMessage("Lesson ID must be a valid MongoDB ID"),
 
       body("description")
+        .trim()
         .notEmpty()
         .withMessage("Description is required")
-        .isLength({ min: 1, max: 1000 })
-        .withMessage("Description must be between 1 and 1000 characters"),
-
-      this.handleValidationErrors,
-    ];
-  }
-
-  // Validation cho deleteLessonDescription API
-  validateDeleteLessonDescription() {
-    return [
-      param("lessonId")
-        .notEmpty()
-        .withMessage("Lesson ID is required")
-        .isMongoId()
-        .withMessage("Lesson ID must be a valid MongoDB ObjectId"),
+        .isLength({ max: 1000 })
+        .withMessage("Description cannot exceed 1000 characters"),
 
       this.handleValidationErrors,
     ];

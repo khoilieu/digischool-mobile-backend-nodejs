@@ -118,7 +118,11 @@ class NotificationService {
                 "status"
               );
               status = doc ? doc.status : null;
-            } else if (["swap_request", "makeup_request", "substitute_request"].includes(reqType)) {
+            } else if (
+              ["swap_request", "makeup_request", "substitute_request"].includes(
+                reqType
+              )
+            ) {
               const LessonRequest = require("../../schedules/models/lesson-request.model");
               const doc = await LessonRequest.findById(reqId).select("status");
               status = doc ? doc.status : null;
@@ -204,7 +208,7 @@ class NotificationService {
         case "class": {
           // Lấy toàn bộ user thuộc các lớp
           const users = await User.find(
-            { class: { $in: receiverScope.ids } },
+            { class_id: { $in: receiverScope.ids } },
             "_id"
           );
           return users.map((u) => u._id);

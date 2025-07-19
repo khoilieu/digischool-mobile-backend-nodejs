@@ -47,29 +47,6 @@ class TestInfoController {
       next(error);
     }
   }
-  async resendTestInfoEmail(req, res, next) {
-    try {
-      const result = await testInfoService.resendTestInfoEmail({
-        user: req.user,
-        params: req.params,
-      });
-      res.status(result.status).json(result.body);
-    } catch (error) {
-      next(error);
-    }
-  }
-  async testTestInfoEmail(req, res, next) {
-    try {
-      const result = await testInfoService.testTestInfoEmail({
-        user: req.user,
-        params: req.params,
-        body: req.body,
-      });
-      res.status(result.status).json(result.body);
-    } catch (error) {
-      next(error);
-    }
-  }
 }
 
 module.exports = new TestInfoController();

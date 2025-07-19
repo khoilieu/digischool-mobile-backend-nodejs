@@ -1,7 +1,13 @@
 const mongoose = require("mongoose");
 
+/**
+ * Lesson Schema
+ * Định nghĩa cấu trúc dữ liệu cho một tiết học
+ */
 const lessonSchema = new mongoose.Schema(
   {
+    // ===== CORE FIELDS =====
+
     // Unique identifier cho lesson
     lessonId: {
       type: String,
@@ -9,13 +15,18 @@ const lessonSchema = new mongoose.Schema(
       unique: true,
     },
 
-    // References
+    // ===== REFERENCES =====
+
+    // Lớp học
     class: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Class",
-      required: true,
+      required: function () {
+        return this.type !== "empty";
+      },
     },
 
+    // Môn học
     subject: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Subject",
@@ -24,6 +35,7 @@ const lessonSchema = new mongoose.Schema(
       },
     },
 
+    // Giáo viên chính
     teacher: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -36,36 +48,38 @@ const lessonSchema = new mongoose.Schema(
     substituteTeacher: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      default: null,
+      default: undefined,
+      sparse: true, // Chỉ lưu khi có giá trị
     },
 
+    // Năm học
     academicYear: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "AcademicYear",
       required: true,
     },
 
+    // Khung giờ
     timeSlot: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "TimeSlot",
       required: true,
     },
 
-    // Thông tin thời gian
+    // ===== TIME INFORMATION =====
+
+    // Ngày học
     scheduledDate: {
       type: Date,
       required: true,
     },
 
-    actualDate: {
-      type: Date,
-      default: null,
-    },
+    // ===== LESSON PROPERTIES =====
 
     // Loại lesson
     type: {
       type: String,
-      enum: ["regular", "makeup", "extracurricular", "fixed", "empty"],
+      enum: ["regular", "makeup", "empty", "fixed"],
       default: "regular",
     },
 
@@ -76,92 +90,28 @@ const lessonSchema = new mongoose.Schema(
       default: "scheduled",
     },
 
-    // Thông tin chi tiết
+    // ===== CONTENT FIELDS =====
+
+    // Chủ đề bài học
     topic: {
       type: String,
       maxlength: 200,
     },
 
+    // Mô tả chi tiết
     description: {
       type: String,
       maxlength: 1000,
       trim: true,
     },
 
-    notes: {
-      type: String,
-      maxlength: 500,
-    },
+    // ===== METADATA =====
 
-    // Thông tin attendance
-    attendance: {
-      totalStudents: {
-        type: Number,
-        default: 0,
-      },
-      presentStudents: {
-        type: Number,
-        default: 0,
-      },
-      absentStudents: [
-        {
-          student: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "User",
-          },
-          reason: String,
-        },
-      ],
-    },
-
-    // Thông tin makeup lesson
-    makeupInfo: {
-      originalLesson: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Lesson",
-      },
-      reason: String,
-      originalDate: Date,
-    },
-
-    // Thông tin extracurricular
-    extracurricularInfo: {
-      activityName: String,
-      activityType: {
-        type: String,
-        enum: [
-          "club",
-          "sport",
-          "art",
-          "science",
-          "community_service",
-          "competition",
-          "other",
-        ],
-      },
-      location: String,
-      maxParticipants: Number,
-    },
-
-    // Thông tin fixed lesson
-    fixedInfo: {
-      type: {
-        type: String,
-        enum: ["flag_ceremony", "class_meeting", "assembly", "break", "other"],
-      },
-      description: String,
-    },
-
-    // Metadata
+    // Người tạo
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-    },
-
-    lastModifiedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
     },
   },
   {
@@ -169,7 +119,8 @@ const lessonSchema = new mongoose.Schema(
   }
 );
 
-// Indexes
+// ===== INDEXES =====
+
 lessonSchema.index({ lessonId: 1 }, { unique: true });
 lessonSchema.index({ class: 1, scheduledDate: 1 });
 lessonSchema.index({ teacher: 1, scheduledDate: 1, timeSlot: 1 });
@@ -178,7 +129,11 @@ lessonSchema.index({ type: 1, status: 1 });
 lessonSchema.index({ scheduledDate: 1, timeSlot: 1 });
 lessonSchema.index({ academicYear: 1, class: 1 });
 
-// Pre-save middleware để tự động tạo lessonId
+// ===== MIDDLEWARE =====
+
+/**
+ * Pre-save middleware để tự động tạo lessonId
+ */
 lessonSchema.pre("save", function (next) {
   if (!this.lessonId && this.class && this.scheduledDate && this.timeSlot) {
     const classId = this.class.toString().slice(-6);
@@ -193,7 +148,11 @@ lessonSchema.pre("save", function (next) {
   next();
 });
 
-// Virtual để lấy thông tin đầy đủ
+// ===== VIRTUALS =====
+
+/**
+ * Virtual để lấy thông tin đầy đủ
+ */
 lessonSchema.virtual("fullInfo").get(function () {
   return {
     id: this._id,
@@ -201,49 +160,35 @@ lessonSchema.virtual("fullInfo").get(function () {
     type: this.type,
     status: this.status,
     scheduledDate: this.scheduledDate,
-    actualDate: this.actualDate,
     topic: this.topic,
     description: this.description,
-    notes: this.notes,
   };
 });
 
-// Method để cập nhật attendance
-lessonSchema.methods.updateAttendance = function (
-  presentStudents,
-  absentStudents = []
-) {
-  this.attendance.presentStudents = presentStudents;
-  this.attendance.absentStudents = absentStudents;
-  this.attendance.totalStudents = presentStudents + absentStudents.length;
-  return this.save();
-};
+// ===== INSTANCE METHODS =====
 
-// Method để đánh giá lesson
-lessonSchema.methods.evaluate = function (evaluation) {
-  this.evaluation = {
-    ...this.evaluation,
-    ...evaluation,
-  };
-  return this.save();
-};
-
-// Method để complete lesson
-lessonSchema.methods.complete = function (actualDate = null, notes = null) {
+/**
+ * Method để complete lesson
+ */
+lessonSchema.methods.complete = function () {
   this.status = "completed";
-  this.actualDate = actualDate || new Date();
-  if (notes) this.notes = notes;
   return this.save();
 };
 
-// Method để cancel lesson
+/**
+ * Method để cancel lesson
+ */
 lessonSchema.methods.cancel = function (reason) {
-  this.status = "cancelled";
-  this.notes = reason;
+  this.status = "absent";
+  this.description = reason;
   return this.save();
 };
 
-// Static method để kiểm tra conflict
+// ===== STATIC METHODS =====
+
+/**
+ * Static method để kiểm tra conflict
+ */
 lessonSchema.statics.checkConflict = async function (
   teacherId,
   scheduledDate,
@@ -264,7 +209,9 @@ lessonSchema.statics.checkConflict = async function (
   return !!conflict;
 };
 
-// Static method để lấy lessons theo teacher và date range
+/**
+ * Static method để lấy lessons theo teacher và date range
+ */
 lessonSchema.statics.getTeacherLessons = function (
   teacherId,
   startDate,
@@ -273,7 +220,7 @@ lessonSchema.statics.getTeacherLessons = function (
   return this.find({
     $or: [{ teacher: teacherId }, { substituteTeacher: teacherId }],
     scheduledDate: { $gte: startDate, $lte: endDate },
-    status: { $ne: "cancelled" },
+    status: { $ne: "absent" },
   })
     .populate("class", "className")
     .populate("subject", "subjectName subjectCode")
@@ -283,7 +230,9 @@ lessonSchema.statics.getTeacherLessons = function (
     .sort({ scheduledDate: 1, "timeSlot.period": 1 });
 };
 
-// Static method để lấy lessons theo class và date range
+/**
+ * Static method để lấy lessons theo class và date range
+ */
 lessonSchema.statics.getClassLessons = function (classId, startDate, endDate) {
   return this.find({
     class: classId,
@@ -296,7 +245,9 @@ lessonSchema.statics.getClassLessons = function (classId, startDate, endDate) {
     .sort({ scheduledDate: 1, "timeSlot.period": 1 });
 };
 
-// Static method để lấy statistics
+/**
+ * Static method để lấy statistics
+ */
 lessonSchema.statics.getStatistics = async function (classId, academicYearId) {
   const stats = await this.aggregate([
     {
@@ -322,8 +273,6 @@ lessonSchema.statics.getStatistics = async function (classId, academicYearId) {
     byType: {
       regular: 0,
       makeup: 0,
-      extracurricular: 0,
-      fixed: 0,
     },
   };
 
@@ -339,6 +288,8 @@ lessonSchema.statics.getStatistics = async function (classId, academicYearId) {
 
   return result;
 };
+
+// ===== MODEL EXPORT =====
 
 const Lesson = mongoose.model("Lesson", lessonSchema);
 
