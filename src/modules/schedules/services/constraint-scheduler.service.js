@@ -282,6 +282,12 @@ class ConstraintSchedulerService {
       weekStartDate.getDate() + scheduleConfig.classMeetingDay
     );
 
+    // Đảm bảo có homeroom teacher
+    if (!homeroomTeacher) {
+      console.log(`⚠️ Lớp không có giáo viên chủ nhiệm, bỏ qua tiết cố định`);
+      return;
+    }
+
     // Tiết Chào cờ (Thứ 2, tiết 1)
     const chaoCoLesson = await this.createLesson({
       lessonId: `${constraints.classId.toString().slice(-6)}_${firstDay
@@ -289,8 +295,8 @@ class ConstraintSchedulerService {
         .slice(0, 10)
         .replace(/-/g, "")}_T1`,
       class: constraints.classId,
-      subject: null,
-      teacher: homeroomTeacher?._id || null,
+      subject: undefined,
+      teacher: homeroomTeacher._id,
       academicYear: academicYearId,
       timeSlot: timeSlots[0]?._id,
       scheduledDate: firstDay,
@@ -307,8 +313,8 @@ class ConstraintSchedulerService {
         .slice(0, 10)
         .replace(/-/g, "")}_T${scheduleConfig.classMeetingPeriod}`,
       class: constraints.classId,
-      subject: null,
-      teacher: homeroomTeacher?._id || null,
+      subject: undefined,
+      teacher: homeroomTeacher._id,
       academicYear: academicYearId,
       timeSlot: timeSlots[scheduleConfig.classMeetingPeriod - 1]?._id,
       scheduledDate: classMeetingDay,
@@ -327,8 +333,8 @@ class ConstraintSchedulerService {
     // Cập nhật lịch giáo viên
     if (homeroomTeacher) {
       this.bookTeacherSlot(constraints, homeroomTeacher._id.toString(), 0, 0);
-    this.bookTeacherSlot(
-      constraints,
+      this.bookTeacherSlot(
+        constraints,
         homeroomTeacher._id.toString(),
         scheduleConfig.classMeetingDay,
         scheduleConfig.classMeetingPeriod - 1
@@ -364,6 +370,12 @@ class ConstraintSchedulerService {
       const doublePeriodsNeeded =
         requirement.doublePeriods - requirement.scheduledDoublePeriods;
 
+      // Bỏ qua nếu không có teacher
+      if (!teacher) {
+        console.log(`⚠️ Bỏ qua ${subject.subjectName} - không có giáo viên`);
+        continue;
+      }
+
       for (let i = 0; i < doublePeriodsNeeded; i++) {
         const bestSlot = this.findBestDoubleSlot(constraints, subject, teacher);
 
@@ -395,7 +407,7 @@ class ConstraintSchedulerService {
    * Giai đoạn 3: Xếp các tiết đơn
    */
   async scheduleSinglePeriods(
-            constraints,
+    constraints,
     weekStartDate,
     timeSlots,
     createdBy,
@@ -417,20 +429,26 @@ class ConstraintSchedulerService {
       const remainingHours =
         requirement.weeklyHours - requirement.scheduledHours;
 
+      // Bỏ qua nếu không có teacher
+      if (!teacher) {
+        console.log(`⚠️ Bỏ qua ${subject.subjectName} - không có giáo viên`);
+        continue;
+      }
+
       for (let i = 0; i < remainingHours; i++) {
         const bestSlot = this.findBestSingleSlot(constraints, subject, teacher);
 
         if (bestSlot) {
           await this.scheduleSingleLesson(
-    constraints,
-    subject,
-    teacher,
+            constraints,
+            subject,
+            teacher,
             bestSlot.dayIndex,
             bestSlot.period,
-    weekStartDate,
-    timeSlots,
-    createdBy,
-    academicYearId
+            weekStartDate,
+            timeSlots,
+            createdBy,
+            academicYearId
           );
           singlePeriodsScheduled++;
           requirement.scheduledHours++;
@@ -472,13 +490,13 @@ class ConstraintSchedulerService {
 
     if (coreSlotsNeeded.length > 0) {
       await this.createSupplementarySubjectsForCorePeriods(
-      constraints,
+        constraints,
         coreSlotsNeeded,
-      weekStartDate,
-      timeSlots,
-      createdBy,
-      academicYearId
-    );
+        weekStartDate,
+        timeSlots,
+        createdBy,
+        academicYearId
+      );
     }
 
     console.log(`✅ Đã đảm bảo ${coreSlotsNeeded.length} tiết cốt lõi`);
@@ -488,11 +506,11 @@ class ConstraintSchedulerService {
    * Đảm bảo số ngày học kéo dài tối thiểu
    */
   async ensureMinimumExtendedDays(
-        constraints,
-          weekStartDate,
-          timeSlots,
-          createdBy,
-          academicYearId
+    constraints,
+    weekStartDate,
+    timeSlots,
+    createdBy,
+    academicYearId
   ) {
     console.log("\n🎯 GIAI ĐOẠN 5: Đảm bảo ngày học kéo dài");
 
@@ -514,7 +532,7 @@ class ConstraintSchedulerService {
       const bestDay = this.findBestDayForExtraLesson(constraints);
       if (bestDay !== -1) {
         await this.addExtraLessonsToDay(
-        constraints,
+          constraints,
           bestDay,
           weekStartDate,
           timeSlots,
@@ -567,7 +585,7 @@ class ConstraintSchedulerService {
             ),
             type: "empty",
             status: "scheduled",
-          createdBy,
+            createdBy,
           });
 
           constraints.schedule[dayIndex][period] = emptyLesson;
@@ -841,17 +859,17 @@ class ConstraintSchedulerService {
       for (let period = 0; period < 9; period++) {
         if (
           this.canScheduleDoubleSlot(
-                constraints,
+            constraints,
             teacher?._id.toString(),
-                dayIndex,
+            dayIndex,
             period,
             period + 1
-              )
-            ) {
+          )
+        ) {
           const score = this.calculateDoubleSlotScore(
-                constraints,
-                dayIndex,
-                period,
+            constraints,
+            dayIndex,
+            period,
             subject
           );
           if (score > bestScore) {
@@ -951,20 +969,20 @@ class ConstraintSchedulerService {
 
     for (const dayIndex of scheduleConfig.days) {
       for (let period = 0; period < 10; period++) {
-            if (
-              this.canScheduleSingleSlot(
-                constraints,
-                subject,
+        if (
+          this.canScheduleSingleSlot(
+            constraints,
+            subject,
             teacher?._id.toString(),
-                dayIndex,
-                period
-              )
-            ) {
+            dayIndex,
+            period
+          )
+        ) {
           const score = this.calculateSlotScore(
-                constraints,
-                subject,
-                teacher,
-                dayIndex,
+            constraints,
+            subject,
+            teacher,
+            dayIndex,
             period
           );
           if (score > bestScore) {
@@ -1102,13 +1120,13 @@ class ConstraintSchedulerService {
         .replace(/-/g, "")}_T${startPeriod + 1}`,
       class: constraints.classId,
       subject: subject._id,
-      teacher: teacher?._id || null,
+      teacher: teacher._id,
       academicYear: academicYearId,
       timeSlot: timeSlots[startPeriod]?._id,
       scheduledDate: scheduledDate,
       type: "double",
       status: "scheduled",
-            createdBy,
+      createdBy,
     });
 
     // Tạo lesson cho tiết 2
@@ -1119,13 +1137,13 @@ class ConstraintSchedulerService {
         .replace(/-/g, "")}_T${startPeriod + 2}`,
       class: constraints.classId,
       subject: subject._id,
-      teacher: teacher?._id || null,
+      teacher: teacher._id,
       academicYear: academicYearId,
       timeSlot: timeSlots[startPeriod + 1]?._id,
       scheduledDate: scheduledDate,
       type: "double",
       status: "scheduled",
-              createdBy,
+      createdBy,
     });
 
     // Cập nhật ma trận lịch
@@ -1166,11 +1184,11 @@ class ConstraintSchedulerService {
     constraints,
     subject,
     teacher,
-            dayIndex,
-            period,
+    dayIndex,
+    period,
     weekStartDate,
     timeSlots,
-            createdBy,
+    createdBy,
     academicYearId
   ) {
     const scheduledDate = new Date(
@@ -1236,7 +1254,7 @@ class ConstraintSchedulerService {
         slot.dayIndex,
         slot.period
       );
-      if (subject) {
+      if (subject && subject.teacher) {
         const scheduledDate = new Date(
           weekStartDate.getTime() + slot.dayIndex * 24 * 60 * 60 * 1000
         );
@@ -1248,7 +1266,7 @@ class ConstraintSchedulerService {
             .replace(/-/g, "")}_T${slot.period}`,
           class: constraints.classId,
           subject: subject._id,
-          teacher: subject.teacher?._id || null,
+          teacher: subject.teacher._id,
           academicYear: academicYearId,
           timeSlot: timeSlots[slot.period - 1]?._id,
           scheduledDate: scheduledDate,
@@ -1259,14 +1277,12 @@ class ConstraintSchedulerService {
 
         constraints.schedule[slot.dayIndex][slot.period - 1] = lesson;
 
-        if (subject.teacher) {
-          this.bookTeacherSlot(
-            constraints,
-            subject.teacher._id.toString(),
-            slot.dayIndex,
-            slot.period - 1
-          );
-        }
+        this.bookTeacherSlot(
+          constraints,
+          subject.teacher._id.toString(),
+          slot.dayIndex,
+          slot.period - 1
+        );
       }
     }
   }
@@ -1275,7 +1291,7 @@ class ConstraintSchedulerService {
    * Tìm môn học cho tiết cốt lõi
    */
   findSubjectForCorePeriod(constraints, dayIndex, period) {
-    // Tìm môn học chưa đủ tiết
+    // Tìm môn học chưa đủ tiết và có teacher
     for (const [subjectId, requirement] of constraints.subjectRequirements) {
       if (requirement.scheduledHours < requirement.weeklyHours) {
         const subject = requirement.subject;
@@ -1332,7 +1348,7 @@ class ConstraintSchedulerService {
     for (let period = 5; period < 10; period++) {
       if (!constraints.schedule[dayIndex][period]) {
         const subject = this.findSubjectForExtraLesson(constraints);
-        if (subject) {
+        if (subject && subject.teacher) {
           const scheduledDate = new Date(
             weekStartDate.getTime() + dayIndex * 24 * 60 * 60 * 1000
           );
@@ -1346,7 +1362,7 @@ class ConstraintSchedulerService {
               .replace(/-/g, "")}_T${period + 1}`,
             class: constraints.classId,
             subject: subject._id,
-            teacher: subject.teacher?._id || null,
+            teacher: subject.teacher._id,
             academicYear: academicYearId,
             timeSlot: timeSlots[period]?._id,
             scheduledDate: scheduledDate,
@@ -1357,16 +1373,14 @@ class ConstraintSchedulerService {
 
           constraints.schedule[dayIndex][period] = lesson;
 
-          if (subject.teacher) {
-            this.bookTeacherSlot(
-              constraints,
-              subject.teacher._id.toString(),
-              dayIndex,
-              period
-            );
-          }
+          this.bookTeacherSlot(
+            constraints,
+            subject.teacher._id.toString(),
+            dayIndex,
+            period
+          );
 
-      console.log(
+          console.log(
             `✅ Đã thêm tiết ${subject.subjectName} ngày ${
               dayIndex + 1
             }, tiết ${period + 1}`
@@ -1381,10 +1395,13 @@ class ConstraintSchedulerService {
    * Tìm môn học cho tiết phụ
    */
   findSubjectForExtraLesson(constraints) {
-    // Tìm môn học chưa đủ tiết
+    // Tìm môn học chưa đủ tiết và có teacher
     for (const [subjectId, requirement] of constraints.subjectRequirements) {
       if (requirement.scheduledHours < requirement.weeklyHours) {
-        return requirement.subject;
+        const subject = requirement.subject;
+        if (subject.teacher) {
+          return subject;
+        }
       }
     }
     return null;

@@ -453,10 +453,7 @@ class StudentEvaluationService {
       const notEvaluated = !evaluatedLessonIds.some(
         (id) => id.toString() === lesson._id.toString()
       );
-      const wasPresent = !lesson.attendance.absentStudents.some(
-        (absent) => absent.student.toString() === studentId
-      );
-      return notEvaluated && wasPresent;
+      return notEvaluated;
     });
     const totalQuery = await Lesson.countDocuments(lessonQuery);
     const totalPages = Math.ceil(totalQuery / parseInt(limit));

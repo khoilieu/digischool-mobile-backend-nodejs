@@ -61,21 +61,17 @@ class MakeupRequestService {
         originalLesson: data.originalLessonId,
         replacementLesson: data.replacementLessonId,
         reason: data.reason,
-        additionalInfo: {
-          classInfo: originalLesson.class._id,
-          subjectInfo: originalLesson.subject._id,
-          academicYear: originalLesson.academicYear._id,
-          weekInfo: {
-            startOfWeek: originalWeek.startOfWeek,
-            endOfWeek: originalWeek.endOfWeek,
-          },
-        },
         createdBy: data.teacherId,
       };
 
       // Tạo request
       const lessonRequest = new LessonRequest(lessonRequestData);
       await lessonRequest.save();
+
+      // Xóa trường candidateTeachers khỏi document
+      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
+        $unset: { candidateTeachers: "" },
+      });
 
       // Populate thông tin chi tiết
       const populatedRequest = await LessonRequest.findById(lessonRequest._id)
@@ -95,10 +91,7 @@ class MakeupRequestService {
             select: "period name startTime endTime",
           },
         })
-        .populate("requestingTeacher", "name email fullName")
-        .populate("additionalInfo.classInfo", "className gradeLevel")
-        .populate("additionalInfo.subjectInfo", "subjectName subjectCode")
-        .populate("additionalInfo.academicYear", "name startDate endDate");
+        .populate("requestingTeacher", "name email fullName");
 
       // Gửi notification cho manager
       await notificationService.createNotification({
@@ -107,11 +100,7 @@ class MakeupRequestService {
         content: `Giáo viên ${
           populatedRequest.requestingTeacher.fullName ||
           populatedRequest.requestingTeacher.name
-        } đã tạo yêu cầu dạy bù cho lớp ${
-          populatedRequest.additionalInfo.classInfo.className
-        }, môn ${
-          populatedRequest.additionalInfo.subjectInfo.subjectName
-        }. Lý do: ${populatedRequest.reason}`,
+        } đã tạo yêu cầu dạy bù. Lý do: ${populatedRequest.reason}`,
         sender: data.teacherId,
         receiverScope: {
           type: "user",
@@ -264,9 +253,7 @@ class MakeupRequestService {
             select: "period name startTime endTime",
           },
         })
-        .populate("requestingTeacher", "name email fullName")
-        .populate("additionalInfo.classInfo", "className gradeLevel")
-        .populate("additionalInfo.subjectInfo", "subjectName subjectCode");
+        .populate("requestingTeacher", "name email fullName");
 
       if (!lessonRequest) {
         throw new Error("Makeup request not found");
@@ -309,16 +296,19 @@ class MakeupRequestService {
       // Cập nhật trạng thái request
       lessonRequest.status = "approved";
       lessonRequest.processedBy = managerId;
-      lessonRequest.processedAt = new Date();
-      lessonRequest.lastModifiedBy = managerId;
 
       await lessonRequest.save();
+
+      // Xóa trường candidateTeachers khỏi document
+      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
+        $unset: { candidateTeachers: "" },
+      });
 
       // Gửi notification cho giáo viên
       await notificationService.createNotification({
         type: "makeup_request_result",
         title: `Yêu cầu dạy bù đã được duyệt - ${lessonRequest.requestId}`,
-        content: `Yêu cầu dạy bù của bạn cho lớp ${lessonRequest.additionalInfo.classInfo.className}, môn ${lessonRequest.additionalInfo.subjectInfo.subjectName} đã được duyệt.`,
+        content: `Yêu cầu dạy bù của bạn đã được duyệt.`,
         sender: managerId,
         receiverScope: {
           type: "user",
@@ -327,7 +317,7 @@ class MakeupRequestService {
         relatedObject: { id: lessonRequest._id, requestType: "makeup_request" },
       });
       // Gửi notification cho học sinh trong lớp
-      const classId = lessonRequest.additionalInfo.classInfo._id;
+      const classId = originalLesson.class;
       const students = await User.find(
         { role: "student", class_id: classId },
         "_id"
@@ -335,12 +325,8 @@ class MakeupRequestService {
       if (students.length > 0) {
         await notificationService.createNotification({
           type: "makeup_lesson",
-          title: `Thông báo dạy bù lớp ${lessonRequest.additionalInfo.classInfo.className}`,
-          content: `Lớp ${
-            lessonRequest.additionalInfo.classInfo.className
-          } sẽ có tiết dạy bù môn ${
-            lessonRequest.additionalInfo.subjectInfo.subjectName
-          } vào ngày ${new Date(
+          title: `Thông báo dạy bù lớp`,
+          content: `Lớp sẽ có tiết dạy bù vào ngày ${new Date(
             replacementLesson.scheduledDate
           ).toLocaleDateString("vi-VN")}.`,
           sender: managerId,
@@ -388,9 +374,7 @@ class MakeupRequestService {
             select: "period name startTime endTime",
           },
         })
-        .populate("requestingTeacher", "name email fullName")
-        .populate("additionalInfo.classInfo", "className gradeLevel")
-        .populate("additionalInfo.subjectInfo", "subjectName subjectCode");
+        .populate("requestingTeacher", "name email fullName");
 
       if (!lessonRequest) {
         throw new Error("Makeup request not found");
@@ -407,16 +391,19 @@ class MakeupRequestService {
       // Cập nhật trạng thái request
       lessonRequest.status = "rejected";
       lessonRequest.processedBy = managerId;
-      lessonRequest.processedAt = new Date();
-      lessonRequest.lastModifiedBy = managerId;
 
       await lessonRequest.save();
+
+      // Xóa trường candidateTeachers khỏi document
+      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
+        $unset: { candidateTeachers: "" },
+      });
 
       // Gửi notification cho giáo viên
       await notificationService.createNotification({
         type: "makeup_request_result",
         title: `Yêu cầu dạy bù đã bị từ chối - ${lessonRequest.requestId}`,
-        content: `Yêu cầu dạy bù của bạn cho lớp ${lessonRequest.additionalInfo.classInfo.className}, môn ${lessonRequest.additionalInfo.subjectInfo.subjectName} đã bị từ chối.`,
+        content: `Yêu cầu dạy bù của bạn đã bị từ chối.`,
         sender: managerId,
         receiverScope: {
           type: "user",
@@ -462,21 +449,19 @@ class MakeupRequestService {
       }
 
       lessonRequest.status = "cancelled";
-      lessonRequest.cancelledBy = teacherId;
-      lessonRequest.cancelledAt = new Date();
-      lessonRequest.lastModifiedBy = teacherId;
       await lessonRequest.save();
+
+      // Xóa trường candidateTeachers khỏi document
+      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
+        $unset: { candidateTeachers: "" },
+      });
 
       // Gửi notification cho manager về việc huỷ yêu cầu
       const managers = await User.find({ role: "manager" }, "_id");
       await notificationService.createNotification({
         type: "makeup_request_cancelled",
         title: `Yêu cầu dạy bù đã bị huỷ - ${lessonRequest.requestId}`,
-        content: `Yêu cầu dạy bù cho lớp ${
-          lessonRequest.additionalInfo?.classInfo?.className || ""
-        }, môn ${
-          lessonRequest.additionalInfo?.subjectInfo?.subjectName || ""
-        } đã bị huỷ bởi giáo viên.`,
+        content: `Yêu cầu dạy bù đã bị huỷ bởi giáo viên.`,
         sender: teacherId,
         receiverScope: { type: "user", ids: managers.map((m) => m._id) },
         relatedObject: { id: lessonRequest._id, requestType: "makeup_request" },

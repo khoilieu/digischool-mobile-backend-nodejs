@@ -64,25 +64,18 @@ class SwapRequestService {
         originalLesson: data.originalLessonId,
         replacementLesson: data.replacementLessonId,
         reason: data.reason,
-        additionalInfo: {
-          classInfo: originalLesson.class._id,
-          subjectInfo: originalLesson.subject._id,
-          academicYear: originalLesson.academicYear._id,
-          weekInfo: {
-            startOfWeek: originalWeek.startOfWeek,
-            endOfWeek: originalWeek.endOfWeek,
-          },
-        },
-        swapInfo: {
-          replacementTeacher: replacementLesson.teacher._id,
-          hasConflict: false, // Sẽ được check sau
-        },
+        replacementTeacher: replacementLesson.teacher._id,
         createdBy: data.teacherId,
       };
 
       // Tạo request
       const lessonRequest = new LessonRequest(lessonRequestData);
       await lessonRequest.save();
+
+      // Xóa trường candidateTeachers khỏi document
+      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
+        $unset: { candidateTeachers: "" },
+      });
 
       // Populate thông tin chi tiết
       const populatedRequest = await LessonRequest.findById(lessonRequest._id)
@@ -103,10 +96,7 @@ class SwapRequestService {
           },
         })
         .populate("requestingTeacher", "name email fullName")
-        .populate("swapInfo.replacementTeacher", "name email fullName")
-        .populate("additionalInfo.classInfo", "className gradeLevel")
-        .populate("additionalInfo.subjectInfo", "subjectName subjectCode")
-        .populate("additionalInfo.academicYear", "name startDate endDate");
+        .populate("replacementTeacher", "name email fullName");
 
       // ==== Gửi notification thay cho email ====
       // Gửi notification cho manager
@@ -118,8 +108,8 @@ class SwapRequestService {
         content: `Có yêu cầu đổi tiết mới từ giáo viên ${
           populatedRequest.requestingTeacher.fullName ||
           populatedRequest.requestingTeacher.name
-        } cho lớp ${populatedRequest.additionalInfo.classInfo.className}, môn ${
-          populatedRequest.additionalInfo.subjectInfo.subjectName
+        } cho lớp ${originalLesson.class.className}, môn ${
+          originalLesson.subject.subjectName
         }.`,
         sender: data.teacherId,
         receiverScope: {
@@ -138,13 +128,13 @@ class SwapRequestService {
         content: `Bạn được đề xuất đổi tiết với giáo viên ${
           populatedRequest.requestingTeacher.fullName ||
           populatedRequest.requestingTeacher.name
-        } cho lớp ${populatedRequest.additionalInfo.classInfo.className}, môn ${
-          populatedRequest.additionalInfo.subjectInfo.subjectName
+        } cho lớp ${originalLesson.class.className}, môn ${
+          originalLesson.subject.subjectName
         }.`,
         sender: data.teacherId,
         receiverScope: {
           type: "user",
-          ids: [populatedRequest.swapInfo.replacementTeacher._id.toString()],
+          ids: [populatedRequest.replacementTeacher._id.toString()],
         },
         relatedObject: {
           id: populatedRequest._id,
@@ -250,7 +240,7 @@ class SwapRequestService {
     await this.swapLessonFields(
       originalLesson,
       replacementLesson,
-      lessonRequest.processedBy
+      lessonRequest.requestingTeacher
     );
   }
 
@@ -279,9 +269,7 @@ class SwapRequestService {
           },
         })
         .populate("requestingTeacher", "name email fullName")
-        .populate("swapInfo.replacementTeacher", "name email fullName")
-        .populate("additionalInfo.classInfo", "className gradeLevel")
-        .populate("additionalInfo.subjectInfo", "subjectName subjectCode");
+        .populate("replacementTeacher", "name email fullName");
 
       if (!lessonRequest) {
         throw new Error("Swap request not found");
@@ -297,7 +285,7 @@ class SwapRequestService {
 
       // Kiểm tra xem giáo viên có phải là replacement teacher không
       if (
-        lessonRequest.swapInfo.replacementTeacher._id.toString() !==
+        lessonRequest.replacementTeacher._id.toString() !==
         replacementTeacherId.toString()
       ) {
         throw new Error(
@@ -334,13 +322,12 @@ class SwapRequestService {
       // Cập nhật trạng thái request
       lessonRequest.status = "approved";
       lessonRequest.processedBy = replacementTeacherId;
-      lessonRequest.processedAt = new Date();
-      lessonRequest.lastModifiedBy = replacementTeacherId;
-      lessonRequest.swapInfo.replacementTeacherResponse = {
-        status: "approved",
-        responseDate: new Date(),
-      };
       await lessonRequest.save();
+
+      // Xóa trường candidateTeachers khỏi document
+      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
+        $unset: { candidateTeachers: "" },
+      });
 
       // ==== Gửi notification thay cho email ====
       // 1. Gửi notification cho giáo viên yêu cầu
@@ -348,8 +335,8 @@ class SwapRequestService {
         type: "activity",
         title: "Yêu cầu đổi tiết đã được chấp nhận",
         content: `Yêu cầu đổi tiết của bạn đã được giáo viên ${
-          lessonRequest.swapInfo.replacementTeacher.fullName ||
-          lessonRequest.swapInfo.replacementTeacher.name
+          lessonRequest.replacementTeacher.fullName ||
+          lessonRequest.replacementTeacher.name
         } chấp nhận.`,
         sender: replacementTeacherId,
         receiverScope: {
@@ -358,31 +345,16 @@ class SwapRequestService {
         },
         relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
       });
-      // 2. Gửi notification cho giáo viên replacement
-      await notificationService.createNotification({
-        type: "activity",
-        title: "Bạn đã chấp nhận đổi tiết",
-        content: `Bạn đã chấp nhận đổi tiết với giáo viên ${
-          lessonRequest.requestingTeacher.fullName ||
-          lessonRequest.requestingTeacher.name
-        }.`,
-        sender: replacementTeacherId,
-        receiverScope: {
-          type: "user",
-          ids: [replacementTeacherId.toString()],
-        },
-        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
-      });
       // 3. Gửi notification cho học sinh lớp đó
       const students = await User.find({
         role: "student",
-        class_id: lessonRequest.additionalInfo.classInfo._id,
+        class_id: originalLesson.class._id,
       }).select("_id");
       if (students.length > 0) {
         await notificationService.createNotification({
           type: "activity",
           title: "Thông báo đổi tiết",
-          content: `Lịch học lớp ${lessonRequest.additionalInfo.classInfo.className} đã được đổi tiết theo yêu cầu. Vui lòng kiểm tra lại lịch học mới.`,
+          content: `Lịch học lớp ${originalLesson.class.className} đã được đổi tiết theo yêu cầu. Vui lòng kiểm tra lại lịch học mới.`,
           sender: replacementTeacherId,
           receiverScope: {
             type: "user",
@@ -428,8 +400,7 @@ class SwapRequestService {
           },
         })
         .populate("requestingTeacher", "name email fullName")
-        .populate("additionalInfo.classInfo", "className gradeLevel")
-        .populate("additionalInfo.subjectInfo", "subjectName subjectCode");
+        .populate("replacementTeacher", "name email fullName");
 
       if (!lessonRequest) {
         throw new Error("Swap request not found");
@@ -445,7 +416,7 @@ class SwapRequestService {
 
       // Kiểm tra xem giáo viên có phải là replacement teacher không
       if (
-        lessonRequest.swapInfo.replacementTeacher.toString() !==
+        lessonRequest.replacementTeacher._id.toString() !==
         replacementTeacherId.toString()
       ) {
         throw new Error(
@@ -456,39 +427,25 @@ class SwapRequestService {
       // Cập nhật trạng thái request
       lessonRequest.status = "rejected";
       lessonRequest.processedBy = replacementTeacherId;
-      lessonRequest.processedAt = new Date();
-      lessonRequest.lastModifiedBy = replacementTeacherId;
-      lessonRequest.swapInfo.replacementTeacherResponse = {
-        status: "rejected",
-        responseDate: new Date(),
-      };
       await lessonRequest.save();
+
+      // Xóa trường candidateTeachers khỏi document
+      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
+        $unset: { candidateTeachers: "" },
+      });
 
       // 1. Gửi notification cho giáo viên yêu cầu
       await notificationService.createNotification({
         type: "activity",
         title: "Yêu cầu đổi tiết bị từ chối",
-        content: `Yêu cầu đổi tiết của bạn đã bị giáo viên ${await User.findById(
-          lessonRequest.swapInfo.replacementTeacher
-        ).then((user) => user.name)} từ chối.`,
+        content: `Yêu cầu đổi tiết của bạn đã bị giáo viên ${
+          lessonRequest.replacementTeacher.fullName ||
+          lessonRequest.replacementTeacher.name
+        } từ chối.`,
         sender: replacementTeacherId,
         receiverScope: {
           type: "user",
           ids: [lessonRequest.requestingTeacher._id.toString()],
-        },
-        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
-      });
-      // 2. Gửi notification cho giáo viên replacement
-      await notificationService.createNotification({
-        type: "activity",
-        title: "Bạn đã từ chối đổi tiết",
-        content: `Bạn đã từ chối đổi tiết với giáo viên ${await User.findById(
-          lessonRequest.requestingTeacher
-        ).then((user) => user.name)}.`,
-        sender: replacementTeacherId,
-        receiverScope: {
-          type: "user",
-          ids: [replacementTeacherId.toString()],
         },
         relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
       });
@@ -529,9 +486,7 @@ class SwapRequestService {
           },
         })
         .populate("requestingTeacher", "name email fullName")
-        .populate("swapInfo.replacementTeacher", "name email fullName")
-        .populate("additionalInfo.classInfo", "className gradeLevel")
-        .populate("additionalInfo.subjectInfo", "subjectName subjectCode");
+        .populate("replacementTeacher", "name email fullName");
 
       if (!lessonRequest) {
         throw new Error("Swap request not found");
@@ -557,10 +512,12 @@ class SwapRequestService {
 
       // Cập nhật trạng thái request
       lessonRequest.status = "cancelled";
-      lessonRequest.processedBy = requestingTeacherId;
-      lessonRequest.processedAt = new Date();
-      lessonRequest.lastModifiedBy = requestingTeacherId;
       await lessonRequest.save();
+
+      // Xóa trường candidateTeachers khỏi document
+      await LessonRequest.findByIdAndUpdate(lessonRequest._id, {
+        $unset: { candidateTeachers: "" },
+      });
 
       // ==== Gửi notification thay cho email ====
       // 1. Gửi notification cho giáo viên replacement
@@ -568,28 +525,13 @@ class SwapRequestService {
         type: "activity",
         title: "Yêu cầu đổi tiết đã bị hủy",
         content: `Yêu cầu đổi tiết với giáo viên ${
-          lessonRequest.swapInfo.replacementTeacher.fullName ||
-          lessonRequest.swapInfo.replacementTeacher.name
-        } đã bị hủy bởi giáo viên yêu cầu.`,
+          lessonRequest.replacementTeacher.fullName ||
+          lessonRequest.replacementTeacher.name
+        } đã bị hủy`,
         sender: requestingTeacherId,
         receiverScope: {
           type: "user",
-          ids: [lessonRequest.swapInfo.replacementTeacher._id.toString()],
-        },
-        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
-      });
-      // 2. Gửi notification cho giáo viên yêu cầu
-      await notificationService.createNotification({
-        type: "activity",
-        title: "Bạn đã hủy yêu cầu đổi tiết",
-        content: `Bạn đã hủy yêu cầu đổi tiết với giáo viên ${
-          lessonRequest.swapInfo.replacementTeacher.fullName ||
-          lessonRequest.swapInfo.replacementTeacher.name
-        }.`,
-        sender: requestingTeacherId,
-        receiverScope: {
-          type: "user",
-          ids: [requestingTeacherId.toString()],
+          ids: [lessonRequest.replacementTeacher._id.toString()],
         },
         relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
       });
@@ -604,78 +546,6 @@ class SwapRequestService {
       console.error("❌ Error cancelling swap request:", error.message);
       throw new Error(`Failed to cancel swap request: ${error.message}`);
     }
-  }
-
-  // Tạo email content cho thông báo đổi tiết
-  createSwapNotificationEmail(lessonRequest) {
-    const originalLesson = lessonRequest.originalLesson;
-    const replacementLesson = lessonRequest.replacementLesson;
-
-    return `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #3498db;">Thông báo đổi tiết - ${
-          lessonRequest.additionalInfo.classInfo.className
-        }</h2>
-        
-        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-          <h3 style="color: #34495e; margin-top: 0;">Thông tin môn học</h3>
-          <p><strong>Môn học:</strong> ${
-            lessonRequest.additionalInfo.subjectInfo.subjectName
-          }</p>
-          <p><strong>Giáo viên:</strong> ${
-            lessonRequest.requestingTeacher.fullName ||
-            lessonRequest.requestingTeacher.name
-          }</p>
-          <p><strong>Lớp:</strong> ${
-            lessonRequest.additionalInfo.classInfo.className
-          }</p>
-        </div>
-        
-        <div style="background-color: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
-          <h3 style="color: #856404; margin-top: 0;">📅 Thay đổi lịch học</h3>
-          
-          <div style="display: flex; justify-content: space-between; margin: 20px 0;">
-            <div style="flex: 1; margin-right: 20px; padding: 15px; background-color: #f8d7da; border-radius: 5px;">
-              <h4 style="color: #721c24; margin-top: 0;">❌ Tiết bị hủy:</h4>
-              <p><strong>Ngày:</strong> ${new Date(
-                originalLesson.scheduledDate
-              ).toLocaleDateString("vi-VN")}</p>
-              <p><strong>Tiết:</strong> ${this.formatLessonInfo(
-                originalLesson
-              )}</p>
-              <p><strong>Chủ đề:</strong> ${
-                originalLesson.topic || "Chưa có"
-              }</p>
-            </div>
-            <div style="flex: 1; padding: 15px; background-color: #d4edda; border-radius: 5px;">
-              <h4 style="color: #155724; margin-top: 0;">✅ Tiết mới:</h4>
-              <p><strong>Ngày:</strong> ${new Date(
-                replacementLesson.scheduledDate
-              ).toLocaleDateString("vi-VN")}</p>
-              <p><strong>Tiết:</strong> ${this.formatLessonInfo(
-                replacementLesson
-              )}</p>
-              <p><strong>Chủ đề:</strong> ${
-                replacementLesson.topic || originalLesson.topic || "Chưa có"
-              }</p>
-            </div>
-          </div>
-        </div>
-        
-        <div style="background-color: #e8f4f8; padding: 20px; border-radius: 8px; margin: 20px 0;">
-          <h3 style="color: #2980b9; margin-top: 0;">📝 Lý do thay đổi</h3>
-          <p style="color: #2c3e50;">${lessonRequest.reason}</p>
-        </div>
-        
-        <div style="text-align: center; margin: 30px 0;">
-          <p style="color: #e74c3c; font-weight: bold;">⚠️ Vui lòng ghi nhớ thời gian học mới để không bị vắng mặt!</p>
-        </div>
-        
-        <div style="border-top: 1px solid #bdc3c7; padding-top: 20px; text-align: center; color: #95a5a6; font-size: 12px;">
-          <p>Thông báo này được gửi tự động từ hệ thống quản lý lịch học DigiSchool.</p>
-        </div>
-      </div>
-    `;
   }
 }
 

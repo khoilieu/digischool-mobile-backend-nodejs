@@ -117,14 +117,4 @@ router.post(
   lessonRequestController.rejectSwapRequest
 );
 
-// ================================ COMMON ROUTES ================================
-
-// GET /api/schedules/lesson-request/my-requests - Lấy danh sách yêu cầu của giáo viên (tất cả loại)
-router.get(
-  "/my-requests",
-  authMiddleware.authorize("teacher", "admin", "manager"),
-  lessonRequestValidation.validateTeacherRequestsQuery(),
-  lessonRequestController.getTeacherRequests
-);
-
 module.exports = router;

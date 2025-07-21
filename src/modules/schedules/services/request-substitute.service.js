@@ -118,8 +118,7 @@ class SubstituteRequestService {
         ],
       })
       .populate("requestingTeacher", "name email")
-      .populate("candidateTeachers.teacher", "name email")
-      .populate("approvedTeacher", "name email");
+      .populate("candidateTeachers.teacher", "name email");
 
     if (!request) {
       throw new Error("Substitute request not found");
@@ -150,7 +149,6 @@ class SubstituteRequestService {
       })
       .populate("requestingTeacher", "name email")
       .populate("candidateTeachers.teacher", "name email")
-      .populate("approvedTeacher", "name email")
       .sort({ createdAt: -1 });
   }
 
@@ -160,6 +158,9 @@ class SubstituteRequestService {
       const request = await this.getSubstituteRequestById(requestId);
       // Approve the request
       await request.approveByTeacher(teacherId);
+      // Lưu người xử lý
+      request.processedBy = teacherId;
+      await request.save();
       // Update the lesson by replacing the original teacher with substitute teacher
       await Lesson.findByIdAndUpdate(request.lesson._id, {
         teacher: teacherId, // Thay thế giáo viên gốc
@@ -193,7 +194,8 @@ class SubstituteRequestService {
       // 3. Gửi notification cho các candidate còn lại (trừ người đã nhận)
       const otherCandidates = request.candidateTeachers.filter(
         (c) =>
-          c.teacher._id.toString() !== request.approvedTeacher._id.toString()
+          c.teacher._id.toString() !== teacherId.toString() &&
+          c.status !== "approved"
       );
       if (otherCandidates.length > 0) {
         await notificationService.createNotification({
@@ -233,7 +235,7 @@ class SubstituteRequestService {
               request.candidateTeachers.find(
                 (c) => c.teacher._id.toString() === teacherId.toString()
               )?.teacher.name || ""
-            } dạy thay cho giáo viên ${await User.findById(request.requestingTeacher).then(user => user.name)}.`,
+            } dạy thay cho giáo viên ${request.requestingTeacher.name}.`,
             sender: teacherId,
             receiverScope: {
               type: "user",
@@ -260,6 +262,9 @@ class SubstituteRequestService {
       const request = await this.getSubstituteRequestById(requestId);
       // Reject the request
       await request.rejectByTeacher(teacherId);
+      // Lưu người xử lý
+      request.processedBy = teacherId;
+      await request.save();
       // ==== Gửi notification thay cho email ====
       await notificationService.createNotification({
         type: "activity",
@@ -295,6 +300,57 @@ class SubstituteRequestService {
     try {
       const request = await this.getSubstituteRequestById(requestId);
       await request.cancel();
+
+      // ==== Gửi notification thay cho email ====
+      // Gửi notification cho các candidate teachers
+      const candidateTeacherIds = request.candidateTeachers.map((c) =>
+        c.teacher._id.toString()
+      );
+
+      if (candidateTeacherIds.length > 0) {
+        await notificationService.createNotification({
+          type: "activity",
+          title: "Yêu cầu dạy thay đã bị hủy",
+          content: `Yêu cầu dạy thay cho tiết ${
+            request.lesson.subject.subjectName
+          } lớp ${request.lesson.class.className} vào ngày ${new Date(
+            request.lesson.scheduledDate
+          ).toLocaleDateString("vi-VN")} (Tiết ${
+            request.lesson.timeSlot.period
+          }) đã bị hủy bởi giáo viên yêu cầu.`,
+          sender: teacherId,
+          receiverScope: {
+            type: "user",
+            ids: candidateTeacherIds,
+          },
+          relatedObject: { id: request._id, requestType: "substitute_request" },
+        });
+      }
+
+      // Gửi notification cho managers
+      const managers = await User.find({ role: { $in: ["manager", "admin"] } });
+      const managerIds = managers.map((m) => m._id);
+
+      if (managerIds.length > 0) {
+        await notificationService.createNotification({
+          type: "activity",
+          title: "Thông báo hủy yêu cầu dạy thay",
+          content: `Yêu cầu dạy thay cho tiết ${
+            request.lesson.subject.subjectName
+          } lớp ${request.lesson.class.className} vào ngày ${new Date(
+            request.lesson.scheduledDate
+          ).toLocaleDateString("vi-VN")} (Tiết ${
+            request.lesson.timeSlot.period
+          }) đã bị hủy bởi giáo viên ${request.requestingTeacher.name}.`,
+          sender: teacherId,
+          receiverScope: {
+            type: "user",
+            ids: managerIds.map((id) => id.toString()),
+          },
+          relatedObject: { id: request._id, requestType: "substitute_request" },
+        });
+      }
+
       return await this.getSubstituteRequestById(requestId);
     } catch (error) {
       console.error("Error cancelling substitute request:", error);
@@ -417,6 +473,22 @@ class SubstituteRequestService {
         if (request.candidateTeachers.length === 0) {
           request.status = "cancelled";
           request.notes = "Automatically cancelled - no available candidates";
+
+          // Gửi notification cho requesting teacher khi tự động hủy
+          await notificationService.createNotification({
+            type: "activity",
+            title: "Yêu cầu dạy thay đã bị hủy tự động",
+            content: `Yêu cầu dạy thay của bạn đã bị hủy tự động vì không còn giáo viên nào có thể dạy thay.`,
+            sender: teacherId,
+            receiverScope: {
+              type: "user",
+              ids: [request.requestingTeacher.toString()],
+            },
+            relatedObject: {
+              id: request._id,
+              requestType: "substitute_request",
+            },
+          });
         }
 
         await request.save();
@@ -448,7 +520,6 @@ class SubstituteRequestService {
       })
       .populate("requestingTeacher", "name email")
       .populate("candidateTeachers.teacher", "name email")
-      .populate("approvedTeacher", "name email")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);

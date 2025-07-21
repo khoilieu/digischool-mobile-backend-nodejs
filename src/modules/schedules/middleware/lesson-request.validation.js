@@ -625,7 +625,7 @@ class LessonRequestValidation {
         // Tìm swap request
         const lessonRequest = await LessonRequest.findById(
           req.params.requestId
-        ).populate("swapInfo.replacementTeacher", "name email fullName");
+        ).populate("replacementTeacher", "name email fullName");
 
         if (!lessonRequest) {
           throw new Error("Swap request not found");
@@ -640,10 +640,7 @@ class LessonRequestValidation {
         }
 
         // Kiểm tra quyền - chỉ replacement teacher mới được approve
-        if (
-          lessonRequest.swapInfo.replacementTeacher._id.toString() !==
-          req.user.id
-        ) {
+        if (lessonRequest.replacementTeacher._id.toString() !== req.user.id) {
           throw new Error(
             "Only the replacement teacher can approve this swap request"
           );

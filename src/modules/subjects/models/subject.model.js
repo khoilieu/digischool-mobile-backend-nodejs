@@ -129,7 +129,10 @@ subjectSchema.methods.getTeachers = function () {
   return mongoose
     .model("User")
     .find({
-      subjects: this._id,
+      $or: [
+        { subjects: this._id }, // Tìm trong field subjects (array)
+        { subject: this._id }, // Tìm trong field subject (single)
+      ],
       role: { $in: ["teacher", "homeroom_teacher"] },
       active: true,
     })

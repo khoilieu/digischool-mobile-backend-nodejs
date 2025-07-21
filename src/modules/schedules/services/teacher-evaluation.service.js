@@ -12,7 +12,6 @@ class TeacherEvaluationService {
       rating,
       comments,
       evaluationDetails,
-      absentStudents,
       oralTests,
       violations,
     } = body;
@@ -99,21 +98,15 @@ class TeacherEvaluationService {
         comments: comments || "",
         details: evaluationDetails || {},
       },
-      absentStudents: absentStudents || [],
       oralTests: oralTests || [],
       violations: violations || [],
       status: "draft",
     });
-    if (lesson.attendance && lesson.attendance.totalStudents) {
-      evaluation.summary.totalPresent =
-        lesson.attendance.totalStudents - (absentStudents?.length || 0);
-    }
     await evaluation.save();
     await evaluation.populate([
       { path: "lesson", select: "lessonId scheduledDate actualDate topic" },
       { path: "class", select: "className" },
       { path: "subject", select: "subjectName subjectCode" },
-      { path: "absentStudents.student", select: "name studentId" },
       { path: "oralTests.student", select: "name studentId" },
       { path: "violations.student", select: "name studentId" },
     ]);
@@ -138,7 +131,6 @@ class TeacherEvaluationService {
           lessonContent: evaluation.lessonContent,
           evaluation: evaluation.evaluation,
           summary: evaluation.summary,
-          absentStudents: evaluation.absentStudents,
           oralTests: evaluation.oralTests,
           violations: evaluation.violations,
           status: evaluation.status,
@@ -157,7 +149,6 @@ class TeacherEvaluationService {
       rating,
       comments,
       evaluationDetails,
-      absentStudents,
       oralTests,
       violations,
     } = body;
@@ -214,8 +205,6 @@ class TeacherEvaluationService {
         ...evaluationDetails,
       };
     }
-    if (absentStudents !== undefined)
-      evaluation.absentStudents = absentStudents;
     if (oralTests !== undefined) evaluation.oralTests = oralTests;
     if (violations !== undefined) evaluation.violations = violations;
     await evaluation.save();
@@ -223,7 +212,6 @@ class TeacherEvaluationService {
       { path: "lesson", select: "lessonId scheduledDate actualDate topic" },
       { path: "class", select: "className" },
       { path: "subject", select: "subjectName subjectCode" },
-      { path: "absentStudents.student", select: "name studentId" },
       { path: "oralTests.student", select: "name studentId" },
       { path: "violations.student", select: "name studentId" },
     ]);
@@ -237,7 +225,6 @@ class TeacherEvaluationService {
           lessonContent: evaluation.lessonContent,
           evaluation: evaluation.evaluation,
           summary: evaluation.summary,
-          absentStudents: evaluation.absentStudents,
           oralTests: evaluation.oralTests,
           violations: evaluation.violations,
           status: evaluation.status,
@@ -333,7 +320,6 @@ class TeacherEvaluationService {
       .populate("class", "className academicYear")
       .populate("subject", "subjectName subjectCode")
       .populate("teacher", "name email")
-      .populate("absentStudents.student", "name studentId email")
       .populate("oralTests.student", "name studentId email")
       .populate("violations.student", "name studentId email");
     if (!evaluation) {
@@ -385,17 +371,6 @@ class TeacherEvaluationService {
           },
           lessonContent: evaluation.lessonContent,
           evaluation: evaluation.evaluation,
-          absentStudents: evaluation.absentStudents.map((absent) => ({
-            student: {
-              id: absent.student._id,
-              name: absent.student.name,
-              studentId: absent.student.studentId,
-              email: absent.student.email,
-            },
-            isExcused: absent.isExcused,
-            reason: absent.reason,
-            recordedAt: absent.recordedAt,
-          })),
           oralTests: evaluation.oralTests.map((test) => ({
             student: {
               id: test.student._id,
@@ -540,65 +515,6 @@ class TeacherEvaluationService {
           status: evaluation.status,
           completedAt: evaluation.completedAt,
           submittedAt: evaluation.submittedAt,
-        },
-      },
-    };
-  }
-
-  async addAbsentStudent({ user, params, body }) {
-    const { evaluationId } = params;
-    const { studentId, isExcused, reason } = body;
-    const teacherId = user._id;
-    if (!studentId) {
-      return {
-        status: 400,
-        body: {
-          success: false,
-          message: "Student ID is required",
-        },
-      };
-    }
-    const evaluation = await TeacherLessonEvaluation.findById(evaluationId);
-    if (!evaluation) {
-      return {
-        status: 404,
-        body: {
-          success: false,
-          message: "Evaluation not found",
-        },
-      };
-    }
-    if (evaluation.teacher.toString() !== teacherId.toString()) {
-      return {
-        status: 403,
-        body: {
-          success: false,
-          message: "You can only modify your own evaluations",
-        },
-      };
-    }
-    if (evaluation.status === "submitted") {
-      return {
-        status: 400,
-        body: {
-          success: false,
-          message: "Cannot modify submitted evaluation",
-        },
-      };
-    }
-    await evaluation.addAbsentStudent(
-      studentId,
-      isExcused || false,
-      reason || ""
-    );
-    return {
-      status: 200,
-      body: {
-        success: true,
-        message: "Thêm học sinh vắng thành công",
-        data: {
-          evaluationId: evaluation._id,
-          summary: evaluation.summary,
         },
       },
     };

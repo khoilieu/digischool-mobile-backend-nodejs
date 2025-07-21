@@ -7,6 +7,8 @@ const TimeSlot = require("../models/time-slot.model");
 const WeeklySchedule = require("../models/weekly-schedule.model");
 const Lesson = require("../models/lesson.model");
 const TestInfo = require("../models/test-info.model");
+const TeacherLessonEvaluation = require("../models/teacher-lesson-evaluation.model");
+const StudentLessonEvaluation = require("../models/student-lesson-evaluation.model");
 const MultiClassSchedulerService = require("./multi-class-scheduler.service");
 
 class ScheduleService {
@@ -128,16 +130,36 @@ class ScheduleService {
         "subjectName"
       );
 
-      console.log(
-        `📚 Found ${subjects.length} subjects and ${timeSlots.length} time slots`
+      // Populate subjects với teachers
+      const subjectsWithTeachers = await Promise.all(
+        subjects.map(async (subject) => {
+          const teachers = await subject.getTeachers();
+          return {
+            ...subject.toObject(),
+            teacher: teachers.length > 0 ? teachers[0] : null, // Lấy teacher đầu tiên
+            availableTeachers: teachers,
+          };
+        })
       );
 
-      if (subjects.length === 0) {
+      console.log(
+        `📚 Found ${subjectsWithTeachers.length} subjects and ${timeSlots.length} time slots`
+      );
+
+      if (subjectsWithTeachers.length === 0) {
         console.log("⚠️ No subjects found! Creating empty schedules...");
         const emptyLessons = [];
         for (let i = 0; i < classes.length; i++) {
           const classId = classes[i]._id;
           const weeklyScheduleId = weeklySchedules[i]._id;
+
+          // Đảm bảo có homeroom teacher
+          if (!homeroomTeachers[i]) {
+            console.log(
+              `⚠️ Lớp ${classes[i].className} không có giáo viên chủ nhiệm, bỏ qua`
+            );
+            continue;
+          }
 
           const chaoCoLesson = new Lesson({
             lessonId: `${classId.toString().slice(-6)}_${startDate
@@ -145,8 +167,8 @@ class ScheduleService {
               .slice(0, 10)
               .replace(/-/g, "")}_T1`,
             class: classId,
-            subject: null,
-            teacher: homeroomTeachers[i]?._id || null,
+            subject: undefined,
+            teacher: homeroomTeachers[i]._id,
             academicYear: academicYearDoc._id,
             timeSlot: timeSlots[0]?._id,
             scheduledDate: startDate,
@@ -164,8 +186,8 @@ class ScheduleService {
               .slice(0, 10)
               .replace(/-/g, "")}_T5`,
             class: classId,
-            subject: null,
-            teacher: homeroomTeachers[i]?._id || null,
+            subject: undefined,
+            teacher: homeroomTeachers[i]._id,
             academicYear: academicYearDoc._id,
             timeSlot: timeSlots[4]?._id,
             scheduledDate: new Date(
@@ -219,7 +241,7 @@ class ScheduleService {
         weekNumber,
         startDate,
         timeSlots,
-        subjects,
+        subjectsWithTeachers,
         homeroomTeachers,
         currentUser._id
       );
@@ -286,6 +308,7 @@ class ScheduleService {
         path: "lessons",
         populate: [
           { path: "subject", select: "subjectName subjectCode" },
+          { path: "academicYear", select: "name" },
           { path: "teacher", select: "name email" },
           { path: "substituteTeacher", select: "name email" },
           { path: "timeSlot", select: "period startTime endTime type" },
@@ -319,6 +342,7 @@ class ScheduleService {
       });
 
       return {
+        academicYear: academicYearDoc.name,
         class: {
           className: classInfo.className,
           gradeLevel: classInfo.gradeLevel,
@@ -448,7 +472,15 @@ class ScheduleService {
       }
 
       // Tìm testInfo liên kết với lesson này
-      const testInfo = await TestInfo.findOne({ lesson: lessonId })
+      const testInfo = await TestInfo.findOne({ lesson: lessonId });
+
+      const teacherLessonEvaluation = await TeacherLessonEvaluation.findOne({
+        lesson: lessonId,
+      });
+
+      const studentLessonEvaluation = await StudentLessonEvaluation.findOne({ 
+        lesson: lessonId,
+      });
 
       const lessonObj = lesson.toObject();
       const scheduledDate = new Date(lesson.scheduledDate);
@@ -474,6 +506,20 @@ class ScheduleService {
           content: testInfo.content,
           reminder: testInfo.reminder,
         };
+      }
+
+      if (teacherLessonEvaluation) {
+        lessonObj.teacherEvaluation = {
+          teacherLessonEvaluationId: teacherLessonEvaluation._id,
+          rating: teacherLessonEvaluation.evaluation.rating,
+        };
+      }
+
+      if (studentLessonEvaluation) {
+        lessonObj.studentEvaluation = {
+          studentLessonEvaluationId: studentLessonEvaluation._id,
+          comments: studentLessonEvaluation.comments,
+        }
       }
 
       return lessonObj;

@@ -49,22 +49,6 @@ class TeacherEvaluationValidation {
         .optional()
         .isObject()
         .withMessage("Evaluation details must be an object"),
-      body("absentStudents")
-        .optional()
-        .isArray()
-        .withMessage("Absent students must be an array"),
-      body("absentStudents.*.student")
-        .optional()
-        .isMongoId()
-        .withMessage("Student ID must be a valid MongoDB ObjectId"),
-      body("absentStudents.*.isExcused")
-        .optional()
-        .isBoolean()
-        .withMessage("Is excused must be a boolean"),
-      body("absentStudents.*.reason")
-        .optional()
-        .isLength({ max: 200 })
-        .withMessage("Reason must not exceed 200 characters"),
       body("oralTests")
         .optional()
         .isArray()
@@ -125,10 +109,6 @@ class TeacherEvaluationValidation {
         .optional()
         .isObject()
         .withMessage("Evaluation details must be an object"),
-      body("absentStudents")
-        .optional()
-        .isArray()
-        .withMessage("Absent students must be an array"),
       body("oralTests")
         .optional()
         .isArray()

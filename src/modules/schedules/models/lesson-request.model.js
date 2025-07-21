@@ -60,6 +60,7 @@ const lessonRequestSchema = new mongoose.Schema(
     // Danh sách giáo viên được đề xuất dạy thay
     candidateTeachers: [
       {
+        _id: false, // Bỏ trường _id tự động của MongoDB
         teacher: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "User",
@@ -78,13 +79,6 @@ const lessonRequestSchema = new mongoose.Schema(
       },
     ],
 
-    // Giáo viên được chấp nhận dạy thay
-    approvedTeacher: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
-    },
-
     // ================================ COMMON FIELDS ================================
 
     // Lý do yêu cầu
@@ -101,44 +95,6 @@ const lessonRequestSchema = new mongoose.Schema(
       default: "pending",
     },
 
-    // Thông tin manager xử lý (chỉ cho swap & makeup)
-    processedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-    },
-
-    // Thời gian xử lý
-    processedAt: {
-      type: Date,
-    },
-
-    // Thông tin bổ sung (chỉ cho swap & makeup)
-    additionalInfo: {
-      // Thông tin lớp học
-      classInfo: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Class",
-      },
-
-      // Thông tin môn học
-      subjectInfo: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Subject",
-      },
-
-      // Thông tin năm học
-      academicYear: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "AcademicYear",
-      },
-
-      // Tuần học
-      weekInfo: {
-        startOfWeek: Date,
-        endOfWeek: Date,
-      },
-    },
-
     // Thông tin đặc biệt cho makeup
     makeupInfo: {
       // Ngày gốc của tiết absent
@@ -150,46 +106,17 @@ const lessonRequestSchema = new mongoose.Schema(
       },
     },
 
-    // Thông tin đặc biệt cho swap
-    swapInfo: {
-      // Giáo viên của tiết replacement (để tracking)
-      replacementTeacher: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
-      // Trạng thái phản hồi của giáo viên replacement
-      replacementTeacherResponse: {
-        status: {
-          type: String,
-          enum: ["pending", "approved", "rejected"],
-        },
-        responseDate: Date,
-      },
-      // Thông tin về conflict check
-      hasConflict: {
-        type: Boolean,
-      },
-      conflictDetails: {
-        type: String,
-        maxlength: 500,
-      },
+    // Giáo viên của tiết replacement (chỉ cho swap)
+    replacementTeacher: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
 
-    // Lịch sử email đã gửi
-    emailsSent: [
-      {
-        type: {
-          type: String,
-          enum: ["request", "approval", "rejection", "notification"],
-        },
-        recipients: [String],
-        sentAt: {
-          type: Date,
-          default: Date.now,
-        },
-        subject: String,
-      },
-    ],
+    // Người xử lý yêu cầu (approve/reject)
+    processedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
 
     // Ghi chú
     notes: {
@@ -202,11 +129,6 @@ const lessonRequestSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-    },
-
-    lastModifiedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
     },
   },
   {
@@ -221,12 +143,13 @@ lessonRequestSchema.index({ originalLesson: 1 });
 lessonRequestSchema.index({ replacementLesson: 1 });
 lessonRequestSchema.index({ status: 1, createdAt: -1 });
 lessonRequestSchema.index({ requestType: 1, status: 1 });
-lessonRequestSchema.index({ "additionalInfo.classInfo": 1 });
-lessonRequestSchema.index({ "additionalInfo.academicYear": 1 });
 
 // Indexes cho substitute
 lessonRequestSchema.index({ lesson: 1 });
 lessonRequestSchema.index({ "candidateTeachers.teacher": 1 });
+
+// Indexes cho swap
+lessonRequestSchema.index({ replacementTeacher: 1 });
 
 // Virtual để lấy thông tin chi tiết
 lessonRequestSchema.virtual("originalLessonDetails", {
@@ -301,14 +224,7 @@ lessonRequestSchema.statics.findByTeacher = function (teacherId, options = {}) {
       },
     })
     .populate("requestingTeacher", "name email fullName")
-    .populate("processedBy", "name email fullName")
-    .populate("additionalInfo.classInfo", "className gradeLevel")
-    .populate("additionalInfo.subjectInfo", "subjectName subjectCode")
-    .populate("additionalInfo.academicYear", "name startDate endDate")
-    .populate(
-      "makeupInfo.createdMakeupLesson",
-      "lessonId scheduledDate timeSlot status"
-    )
+    .populate("replacementTeacher", "name email fullName")
     .sort({ createdAt: -1 });
 };
 
@@ -320,9 +236,8 @@ lessonRequestSchema.statics.findPendingRequests = function (options = {}) {
   };
 
   if (options.requestType) query.requestType = options.requestType;
-  if (options.academicYear)
-    query["additionalInfo.academicYear"] = options.academicYear;
-  if (options.classId) query["additionalInfo.classInfo"] = options.classId;
+  if (options.academicYear);
+  if (options.classId);
 
   return this.find(query)
     .populate({
@@ -342,13 +257,7 @@ lessonRequestSchema.statics.findPendingRequests = function (options = {}) {
       },
     })
     .populate("requestingTeacher", "name email fullName")
-    .populate("additionalInfo.classInfo", "className gradeLevel")
-    .populate("additionalInfo.subjectInfo", "subjectName subjectCode")
-    .populate("additionalInfo.academicYear", "name startDate endDate")
-    .populate(
-      "makeupInfo.createdMakeupLesson",
-      "lessonId scheduledDate timeSlot status"
-    )
+    .populate("replacementTeacher", "name email fullName")
     .sort({ createdAt: -1 });
 };
 
@@ -436,7 +345,6 @@ lessonRequestSchema.statics.getTeacherRequests = function (
     .populate("lesson.timeSlot", "period startTime endTime")
     .populate("requestingTeacher", "name email")
     .populate("candidateTeachers.teacher", "name email")
-    .populate("approvedTeacher", "name email")
     .sort({ createdAt: -1 });
 };
 
@@ -463,8 +371,6 @@ lessonRequestSchema.methods.approveByTeacher = async function (teacherId) {
   candidate.status = "approved";
   candidate.responseDate = new Date();
   this.status = "approved";
-  this.approvedTeacher = teacherId;
-  this.approvalDate = new Date();
   this.candidateTeachers.forEach((c) => {
     const candidateId = c.teacher._id
       ? c.teacher._id.toString()
@@ -477,6 +383,7 @@ lessonRequestSchema.methods.approveByTeacher = async function (teacherId) {
       c.responseDate = new Date();
     }
   });
+
   await this.save();
   return this;
 };
