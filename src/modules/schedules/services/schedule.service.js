@@ -478,7 +478,7 @@ class ScheduleService {
         lesson: lessonId,
       });
 
-      const studentLessonEvaluation = await StudentLessonEvaluation.findOne({ 
+      const studentLessonEvaluation = await StudentLessonEvaluation.findOne({
         lesson: lessonId,
       });
 
@@ -519,7 +519,7 @@ class ScheduleService {
         lessonObj.studentEvaluation = {
           studentLessonEvaluationId: studentLessonEvaluation._id,
           comments: studentLessonEvaluation.comments,
-        }
+        };
       }
 
       return lessonObj;

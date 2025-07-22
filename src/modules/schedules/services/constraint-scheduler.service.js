@@ -1,14 +1,46 @@
 const Lesson = require("../models/lesson.model");
 const WeeklySchedule = require("../models/weekly-schedule.model");
 const User = require("../../auth/models/user.model");
+const fs = require("fs");
 
 /**
  * Constraint Scheduler Service
  * Xử lý tạo thời khóa biểu với các ràng buộc phức tạp
  */
 class ConstraintSchedulerService {
-  constructor() {
+  constructor(assignmentByClassAndSubject) {
     // ===== CONFIGURATION CONSTANTS =====
+
+    // Phân loại môn học
+    this.FIXED_SUBJECTS = ["Chào cờ", "Sinh hoạt lớp"];
+    this.MAIN_SUBJECTS = [
+      "Ngữ văn",
+      "Toán",
+      "Ngoại ngữ",
+      "English",
+      "Mathematics",
+      "Literature",
+    ];
+    this.SEMI_MAIN_SUBJECTS = [
+      "Vật lý",
+      "Hóa học",
+      "Sinh học",
+      "Lịch sử",
+      "Địa lý",
+      "Physics",
+      "Chemistry",
+      "Biology",
+      "History",
+      "Geography",
+    ];
+    this.MINOR_SUBJECTS = [
+      "GDCD",
+      "Thể dục",
+      "GDQP",
+      "Tin học",
+      "Physical Education",
+      "Arts",
+    ];
 
     // Môn học ưu tiên cần có tiết đôi
     this.PRIORITY_SUBJECTS = ["Mathematics", "Literature", "English"];
@@ -51,6 +83,7 @@ class ConstraintSchedulerService {
     // Yêu cầu tối thiểu
     this.MINIMUM_EXTENDED_DAYS = 2; // Tối thiểu 2 ngày học >5 tiết
     this.CORE_PERIODS = [1, 2, 3, 4, 5]; // Tiết 1-5 phải là subject
+    this.assignmentByClassAndSubject = assignmentByClassAndSubject || null;
   }
 
   // ===== MAIN SCHEDULING METHOD =====
@@ -621,12 +654,73 @@ class ConstraintSchedulerService {
   /**
    * Tìm giáo viên chuyên môn
    */
-  async findSpecializedTeacher(subjectId) {
-    const User = require("../../auth/models/user.model");
-    return await User.findOne({
-      subjects: subjectId,
-      role: "teacher",
-    });
+  async findSpecializedTeacher(subjectId, classId) {
+    // Lấy giáo viên đúng từ assignmentByClassAndSubject nếu có
+    if (
+      this.assignmentByClassAndSubject &&
+      this.assignmentByClassAndSubject.has(subjectId.toString())
+    ) {
+      const classMap = this.assignmentByClassAndSubject.get(
+        subjectId.toString()
+      );
+      if (classMap && classMap.has((classId || this.classId).toString())) {
+        return classMap.get((classId || this.classId).toString());
+      }
+    }
+    // Nếu không có, trả về null (lesson sẽ không có teacher)
+    return null;
+  }
+
+  /**
+   * Kiểm tra slot hợp lý cho từng loại môn
+   */
+  checkSubjectSlotConstraint(subjectName, period) {
+    if (this.FIXED_SUBJECTS.includes(subjectName)) return true;
+    if (this.MAIN_SUBJECTS.includes(subjectName)) {
+      // Môn chính chỉ xếp tiết 1-5
+      return period >= 0 && period <= 4;
+    }
+    if (this.SEMI_MAIN_SUBJECTS.includes(subjectName)) {
+      // Môn cận chính ưu tiên sáng, nhưng có thể xếp chiều nếu hết slot
+      return period >= 0 && period <= 6;
+    }
+    if (this.MINOR_SUBJECTS.includes(subjectName)) {
+      // Môn phụ chỉ xếp tiết 6-10, không xếp tiết 1-3
+      return period >= 5 && period <= 9;
+    }
+    return true;
+  }
+
+  /**
+   * Kiểm tra giáo viên có bị trùng lịch không (toàn trường)
+   */
+  checkTeacherConflict(constraints, teacherId, dayIndex, period) {
+    if (!teacherId) return false;
+    for (const [_, teacherSchedule] of constraints.teacherSchedules) {
+      if (teacherSchedule.lessons) {
+        for (const lesson of teacherSchedule.lessons) {
+          if (lesson.dayIndex === dayIndex && lesson.period === period) {
+            if (lesson.teacher && lesson.teacher.toString() === teacherId) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Kiểm tra môn đã xuất hiện trong ngày chưa
+   */
+  checkSubjectInDay(constraints, subjectId, dayIndex) {
+    for (let period = 0; period < 10; period++) {
+      const lesson = constraints.schedule[dayIndex][period];
+      if (lesson && lesson.subject && lesson.subject.toString() === subjectId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // ===== VALIDATION METHODS =====
@@ -1111,6 +1205,22 @@ class ConstraintSchedulerService {
     const scheduledDate = new Date(
       weekStartDate.getTime() + dayIndex * 24 * 60 * 60 * 1000
     );
+    // Luôn lấy giáo viên từ assignmentByClassAndSubject
+    const assignedTeacher = await this.findSpecializedTeacher(
+      subject._id,
+      constraints.classId
+    );
+    subject.teacher = assignedTeacher;
+    fs.appendFileSync(
+      "lesson-log.txt",
+      `[Lesson] DOUBLE | ${subject.subjectName} | ${
+        assignedTeacher?.name
+      } | ${assignedTeacher?.role?.join(", ")} | Lớp: ${
+        constraints.classId
+      } | Ngày: ${dayIndex + 1} | Tiết: ${startPeriod + 1}, ${
+        startPeriod + 2
+      }\n`
+    );
 
     // Tạo lesson cho tiết 1
     const lesson1 = await this.createLesson({
@@ -1120,7 +1230,7 @@ class ConstraintSchedulerService {
         .replace(/-/g, "")}_T${startPeriod + 1}`,
       class: constraints.classId,
       subject: subject._id,
-      teacher: teacher._id,
+      teacher: assignedTeacher?._id,
       academicYear: academicYearId,
       timeSlot: timeSlots[startPeriod]?._id,
       scheduledDate: scheduledDate,
@@ -1137,7 +1247,7 @@ class ConstraintSchedulerService {
         .replace(/-/g, "")}_T${startPeriod + 2}`,
       class: constraints.classId,
       subject: subject._id,
-      teacher: teacher._id,
+      teacher: assignedTeacher?._id,
       academicYear: academicYearId,
       timeSlot: timeSlots[startPeriod + 1]?._id,
       scheduledDate: scheduledDate,
@@ -1151,16 +1261,16 @@ class ConstraintSchedulerService {
     constraints.schedule[dayIndex][startPeriod + 1] = lesson2;
 
     // Cập nhật lịch giáo viên
-    if (teacher) {
+    if (assignedTeacher) {
       this.bookTeacherSlot(
         constraints,
-        teacher._id.toString(),
+        assignedTeacher._id.toString(),
         dayIndex,
         startPeriod
       );
       this.bookTeacherSlot(
         constraints,
-        teacher._id.toString(),
+        assignedTeacher._id.toString(),
         dayIndex,
         startPeriod + 1
       );
@@ -1194,6 +1304,20 @@ class ConstraintSchedulerService {
     const scheduledDate = new Date(
       weekStartDate.getTime() + dayIndex * 24 * 60 * 60 * 1000
     );
+    // Luôn lấy giáo viên từ assignmentByClassAndSubject
+    const assignedTeacher = await this.findSpecializedTeacher(
+      subject._id,
+      constraints.classId
+    );
+    subject.teacher = assignedTeacher;
+    fs.appendFileSync(
+      "lesson-log.txt",
+      `[Lesson] SINGLE | ${subject.subjectName} | ${
+        assignedTeacher?.name
+      } | ${assignedTeacher?.role?.join(", ")} | Lớp: ${
+        constraints.classId
+      } | Ngày: ${dayIndex + 1} | Tiết: ${period + 1}\n`
+    );
 
     const lesson = await this.createLesson({
       lessonId: `${constraints.classId.toString().slice(-6)}_${scheduledDate
@@ -1202,7 +1326,7 @@ class ConstraintSchedulerService {
         .replace(/-/g, "")}_T${period + 1}`,
       class: constraints.classId,
       subject: subject._id,
-      teacher: teacher?._id || null,
+      teacher: assignedTeacher?._id,
       academicYear: academicYearId,
       timeSlot: timeSlots[period]?._id,
       scheduledDate: scheduledDate,
@@ -1215,10 +1339,10 @@ class ConstraintSchedulerService {
     constraints.schedule[dayIndex][period] = lesson;
 
     // Cập nhật lịch giáo viên
-    if (teacher) {
+    if (assignedTeacher) {
       this.bookTeacherSlot(
         constraints,
-        teacher._id.toString(),
+        assignedTeacher._id.toString(),
         dayIndex,
         period
       );
@@ -1254,7 +1378,22 @@ class ConstraintSchedulerService {
         slot.dayIndex,
         slot.period
       );
-      if (subject && subject.teacher) {
+      if (subject) {
+        // Luôn lấy giáo viên từ assignmentByClassAndSubject
+        const assignedTeacher = await this.findSpecializedTeacher(
+          subject._id,
+          constraints.classId
+        );
+        subject.teacher = assignedTeacher;
+        fs.appendFileSync(
+          "lesson-log.txt",
+          `[Lesson] SUPPLEMENT | ${subject.subjectName} | ${
+            assignedTeacher?.name
+          } | ${assignedTeacher?.role?.join(", ")} | Lớp: ${
+            constraints.classId
+          } | Ngày: ${slot.dayIndex + 1} | Tiết: ${slot.period}\n`
+        );
+
         const scheduledDate = new Date(
           weekStartDate.getTime() + slot.dayIndex * 24 * 60 * 60 * 1000
         );
@@ -1266,7 +1405,7 @@ class ConstraintSchedulerService {
             .replace(/-/g, "")}_T${slot.period}`,
           class: constraints.classId,
           subject: subject._id,
-          teacher: subject.teacher._id,
+          teacher: assignedTeacher?._id,
           academicYear: academicYearId,
           timeSlot: timeSlots[slot.period - 1]?._id,
           scheduledDate: scheduledDate,
@@ -1277,12 +1416,14 @@ class ConstraintSchedulerService {
 
         constraints.schedule[slot.dayIndex][slot.period - 1] = lesson;
 
-        this.bookTeacherSlot(
-          constraints,
-          subject.teacher._id.toString(),
-          slot.dayIndex,
-          slot.period - 1
-        );
+        if (assignedTeacher) {
+          this.bookTeacherSlot(
+            constraints,
+            assignedTeacher._id.toString(),
+            slot.dayIndex,
+            slot.period - 1
+          );
+        }
       }
     }
   }
