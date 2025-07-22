@@ -1,6 +1,5 @@
 const ConstraintSchedulerService = require("./constraint-scheduler.service");
 const User = require("../../auth/models/user.model");
-const fs = require("fs");
 
 class MultiClassSchedulerService {
   constructor() {
@@ -161,14 +160,6 @@ class MultiClassSchedulerService {
       const otherTeachers = teachers.filter(
         (t) => !Array.from(homeroomTeacherIds).includes(t._id.toString())
       );
-      const debugLine = `Môn: ${
-        subject.subjectName
-      }\nhomeroomTeacherIds: ${Array.from(homeroomTeacherIds).join(
-        ", "
-      )}\notherTeachers: ${otherTeachers
-        .map((t) => t._id.toString())
-        .join(", ")}\n`;
-      fs.appendFileSync("debug-assignment.txt", debugLine);
       const unassignedClassIds = classIds.filter(
         (cid) => !assignedClassIds.has(cid.toString())
       );
@@ -396,7 +387,6 @@ class MultiClassSchedulerService {
         )}): ${classNames.join(", ")}\n`;
       }
     }
-    fs.writeFileSync("result-timetable-assignment.txt", output, "utf8");
   }
 }
 

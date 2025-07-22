@@ -1,7 +1,6 @@
 const Lesson = require("../models/lesson.model");
 const WeeklySchedule = require("../models/weekly-schedule.model");
 const User = require("../../auth/models/user.model");
-const fs = require("fs");
 
 /**
  * Constraint Scheduler Service
@@ -1211,17 +1210,7 @@ class ConstraintSchedulerService {
       constraints.classId
     );
     subject.teacher = assignedTeacher;
-    fs.appendFileSync(
-      "lesson-log.txt",
-      `[Lesson] DOUBLE | ${subject.subjectName} | ${
-        assignedTeacher?.name
-      } | ${assignedTeacher?.role?.join(", ")} | Lớp: ${
-        constraints.classId
-      } | Ngày: ${dayIndex + 1} | Tiết: ${startPeriod + 1}, ${
-        startPeriod + 2
-      }\n`
-    );
-
+  
     // Tạo lesson cho tiết 1
     const lesson1 = await this.createLesson({
       lessonId: `${constraints.classId.toString().slice(-6)}_${scheduledDate
@@ -1310,14 +1299,6 @@ class ConstraintSchedulerService {
       constraints.classId
     );
     subject.teacher = assignedTeacher;
-    fs.appendFileSync(
-      "lesson-log.txt",
-      `[Lesson] SINGLE | ${subject.subjectName} | ${
-        assignedTeacher?.name
-      } | ${assignedTeacher?.role?.join(", ")} | Lớp: ${
-        constraints.classId
-      } | Ngày: ${dayIndex + 1} | Tiết: ${period + 1}\n`
-    );
 
     const lesson = await this.createLesson({
       lessonId: `${constraints.classId.toString().slice(-6)}_${scheduledDate
@@ -1385,14 +1366,6 @@ class ConstraintSchedulerService {
           constraints.classId
         );
         subject.teacher = assignedTeacher;
-        fs.appendFileSync(
-          "lesson-log.txt",
-          `[Lesson] SUPPLEMENT | ${subject.subjectName} | ${
-            assignedTeacher?.name
-          } | ${assignedTeacher?.role?.join(", ")} | Lớp: ${
-            constraints.classId
-          } | Ngày: ${slot.dayIndex + 1} | Tiết: ${slot.period}\n`
-        );
 
         const scheduledDate = new Date(
           weekStartDate.getTime() + slot.dayIndex * 24 * 60 * 60 * 1000
