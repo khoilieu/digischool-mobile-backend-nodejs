@@ -1,4 +1,6 @@
 const scheduleService = require("../services/schedule.service");
+const XLSX = require("xlsx");
+const fs = require("fs");
 
 class ScheduleController {
   createWeeklySchedule = async (req, res) => {
@@ -236,6 +238,39 @@ class ScheduleController {
       });
     } catch (error) {
       console.error("❌ Error in completeLesson:", error.message);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
+
+  importScheduleFromExcel = async (req, res) => {
+    try {
+      const filePath = req.file.path;
+      const workbook = XLSX.readFile(filePath);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(sheet);
+
+      // Lấy các trường bổ sung từ body
+      const { startDate, endDate, academicYear, weekNumber } = req.body;
+
+      // Gọi service xử lý import
+      const result = await scheduleService.importScheduleFromExcel(
+        data,
+        req.user,
+        { startDate, endDate, academicYear, weekNumber }
+      );
+
+      // Xóa file tạm sau khi xử lý
+      fs.unlinkSync(filePath);
+
+      res.status(200).json({
+        success: true,
+        message: "Import thời khóa biểu thành công",
+        ...result,
+      });
+    } catch (error) {
       res.status(500).json({
         success: false,
         message: error.message,

@@ -157,6 +157,21 @@ class ScheduleValidation {
       this.handleValidationErrors,
     ];
   }
+
+  validateImportExcel() {
+    return [
+      (req, res, next) => {
+        if (!req.file) {
+          return res.status(400).json({
+            success: false,
+            message: "Vui lòng upload file Excel (.xlsx)",
+          });
+        }
+        next();
+      },
+      this.handleValidationErrors,
+    ];
+  }
 }
 
 module.exports = new ScheduleValidation();

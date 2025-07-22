@@ -4,6 +4,8 @@ const scheduleController = require("../controllers/schedule.controller");
 const authMiddleware = require("../../auth/middleware/auth.middleware");
 const scheduleValidation = require("../middleware/schedule.validation");
 const lessonRequestRoutes = require("./lesson-request.routes");
+const multer = require("multer");
+const upload = multer({ dest: "uploads/" }); // Thư mục tạm lưu file
 
 router.use("/lesson-request", lessonRequestRoutes);
 router.use(authMiddleware.protect);
@@ -69,6 +71,14 @@ router.patch(
   authMiddleware.authorize("admin", "manager", "teacher"),
   scheduleValidation.validateGetLessonDetail(),
   scheduleController.completeLesson
+);
+
+router.post(
+  "/import-excel",
+  authMiddleware.authorize("admin", "manager"),
+  upload.single("file"),
+  scheduleValidation.validateImportExcel(),
+  scheduleController.importScheduleFromExcel
 );
 
 module.exports = router;

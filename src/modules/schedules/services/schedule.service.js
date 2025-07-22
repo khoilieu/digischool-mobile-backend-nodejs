@@ -10,6 +10,8 @@ const TestInfo = require("../models/test-info.model");
 const TeacherLessonEvaluation = require("../models/teacher-lesson-evaluation.model");
 const StudentLessonEvaluation = require("../models/student-lesson-evaluation.model");
 const MultiClassSchedulerService = require("./multi-class-scheduler.service");
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 
 class ScheduleService {
   async initializeSchedulesWithNewArchitecture(data, token) {
@@ -608,6 +610,288 @@ class ScheduleService {
       console.error("❌ Error in completeLesson:", error.message);
       throw new Error(`Error completing lesson: ${error.message}`);
     }
+  }
+
+  async importScheduleFromExcel(data, currentUser, options = {}) {
+    const errors = [];
+    const createdTeachers = [];
+    const createdLessons = [];
+    const weeklyScheduleMap = new Map();
+    const bcrypt = require("bcryptjs");
+    const allClasses = await Class.find();
+    const allSubjects = await Subject.find();
+    let allTeachers = await User.find({
+      role: { $in: ["teacher", "homeroom_teacher"] },
+    });
+    const AcademicYear = require("../models/academic-year.model");
+    const allAcademicYears = await AcademicYear.find();
+    const { startDate, endDate, academicYear, weekNumber } = options;
+    let academicYearObj = null;
+    if (academicYear) {
+      academicYearObj = allAcademicYears.find(
+        (a) => a._id.toString() === academicYear || a.name === academicYear
+      );
+      if (!academicYearObj) {
+        throw new Error(
+          `Năm học '${academicYear}' không tồn tại trong hệ thống!`
+        );
+      }
+    }
+    if (!startDate || !endDate || !academicYearObj) {
+      throw new Error("Thiếu startDate, endDate hoặc academicYear!");
+    }
+
+    // Xác định giáo viên chủ nhiệm cho từng lớp
+    const homeroomTeachersByClass = {};
+    for (const row of data) {
+      const {
+        Lớp: className,
+        "Môn học": subjectName,
+        "Giáo viên": teacherName,
+      } = row;
+      if (["Chào cờ", "Sinh hoạt"].includes(subjectName) && teacherName) {
+        homeroomTeachersByClass[className] = teacherName;
+      }
+    }
+
+    async function findOrCreateAndUpdateTeacher(
+      teacherName,
+      subjectObj,
+      className
+    ) {
+      if (!teacherName) return null;
+      let teacher = allTeachers.find((t) => t.name === teacherName);
+      const isHomeroom = homeroomTeachersByClass[className] === teacherName;
+      if (!teacher) {
+        // Tạo mới
+        const gender = Math.random() < 0.5 ? "male" : "female";
+        const roles = isHomeroom
+          ? ["teacher", "homeroom_teacher"]
+          : ["teacher"];
+        const isSpecial =
+          subjectObj &&
+          ["Chào cờ", "Sinh hoạt"].includes(subjectObj.subjectName);
+        const newTeacher = new User({
+          name: teacherName,
+          email: `gv${Date.now()}${Math.floor(
+            Math.random() * 1000
+          )}@yopmail.com`,
+          passwordHash: await bcrypt.hash("Teacher@123", 10),
+          role: roles,
+          isNewUser: true,
+          active: true,
+          gender: gender,
+          subject: subjectObj && !isSpecial ? subjectObj._id : undefined,
+          subjects: subjectObj && !isSpecial ? [subjectObj._id] : [],
+        });
+        await newTeacher.save();
+        allTeachers.push(newTeacher);
+        return newTeacher;
+      }
+      // Update role nếu là chủ nhiệm
+      if (isHomeroom && !teacher.role.includes("homeroom_teacher")) {
+        teacher.role = Array.from(
+          new Set([...teacher.role, "homeroom_teacher"])
+        );
+      }
+      // Chỉ gán subject/subjects nếu là môn chuyên môn
+      if (
+        subjectObj &&
+        !["Chào cờ", "Sinh hoạt"].includes(subjectObj.subjectName)
+      ) {
+        if (!teacher.subjects) teacher.subjects = [];
+        if (
+          !teacher.subjects
+            .map((id) => id.toString())
+            .includes(subjectObj._id.toString())
+        ) {
+          teacher.subjects.push(subjectObj._id);
+        }
+        if (!teacher.subject) {
+          teacher.subject = subjectObj._id;
+        }
+      }
+      teacher.passwordHash = await bcrypt.hash("Teacher@123", 10);
+      if (teacher.email && teacher.email.endsWith("@school.local")) {
+        teacher.email = teacher.email.replace(
+          /@school\.local$/,
+          "@yopmail.com"
+        );
+      }
+      await teacher.save();
+      return teacher;
+    }
+
+    const allTimeSlots = await TimeSlot.find();
+    const dayMap = {
+      "Thứ 2": 0,
+      "Thứ 3": 1,
+      "Thứ 4": 2,
+      "Thứ 5": 3,
+      "Thứ 6": 4,
+      "Thứ 7": 5,
+      "Chủ nhật": 6,
+    };
+
+    for (const [i, row] of data.entries()) {
+      const {
+        Lớp: className,
+        "Môn học": subjectName,
+        "Giáo viên": teacherName,
+        Ngày: day,
+        Tiết: period,
+        Tuần: week,
+        Buổi: session,
+      } = row;
+      const classObj = allClasses.find((c) => c.className === className);
+      if (!classObj) {
+        errors.push({ row: i + 2, error: `Lớp ${className} không tồn tại` });
+        continue;
+      }
+      const subjectObj = allSubjects.find((s) => s.subjectName === subjectName);
+      const isSpecial = ["Chào cờ", "Sinh hoạt"].includes(subjectName);
+      if (!subjectObj && !isSpecial) {
+        errors.push({
+          row: i + 2,
+          error: `Môn học ${subjectName} không tồn tại`,
+        });
+        continue;
+      }
+      let teacherObj = null;
+      if (teacherName) {
+        teacherObj = await findOrCreateAndUpdateTeacher(
+          teacherName,
+          subjectObj,
+          className
+        );
+      }
+      if (!teacherObj) {
+        errors.push({
+          row: i + 2,
+          error: `Không thể tạo hoặc cập nhật giáo viên '${teacherName}'`,
+        });
+        continue;
+      }
+      // Mapping scheduledDate
+      const dayIndex = dayMap[day];
+      if (typeof dayIndex === "undefined") {
+        errors.push({
+          row: i + 2,
+          error: `Giá trị ngày '${day}' không hợp lệ`,
+        });
+        continue;
+      }
+      const scheduledDate = new Date(startDate);
+      scheduledDate.setDate(scheduledDate.getDate() + dayIndex);
+      // Mapping timeSlot
+      const timeSlotObj = allTimeSlots.find(
+        (ts) => ts.period === Number(period)
+      );
+      if (!timeSlotObj) {
+        errors.push({
+          row: i + 2,
+          error: `Không tìm thấy timeSlot cho tiết ${period}`,
+        });
+        continue;
+      }
+      const weekKey = `${classObj._id}_${week}`;
+      let weeklySchedule = weeklyScheduleMap.get(weekKey);
+      if (!weeklySchedule) {
+        weeklySchedule = await WeeklySchedule.findOne({
+          class: classObj._id,
+          weekNumber: weekNumber || week,
+        });
+        if (!weeklySchedule) {
+          weeklySchedule = new WeeklySchedule({
+            class: classObj._id,
+            academicYear: academicYearObj._id,
+            weekNumber: weekNumber || week,
+            startDate: new Date(startDate),
+            endDate: new Date(endDate),
+            lessons: [],
+            createdBy: currentUser._id,
+          });
+          await weeklySchedule.save();
+        }
+        weeklyScheduleMap.set(weekKey, weeklySchedule);
+      }
+      const lesson = new Lesson({
+        lessonId: new mongoose.Types.ObjectId().toString(),
+        class: classObj._id,
+        subject: subjectObj ? subjectObj._id : undefined,
+        teacher: teacherObj ? teacherObj._id : undefined,
+        academicYear: academicYearObj._id,
+        timeSlot: timeSlotObj._id,
+        scheduledDate: scheduledDate,
+        type: isSpecial ? "fixed" : "regular",
+        status: "scheduled",
+        topic: subjectName,
+        createdBy: currentUser._id,
+      });
+      await lesson.save();
+      createdLessons.push(lesson);
+      weeklySchedule.lessons.push(lesson._id);
+      await weeklySchedule.save();
+    }
+
+    // Sau khi import xong các lesson từ file Excel, lấp đầy lesson empty cho các slot còn thiếu
+    // Gom lesson theo tuần/lớp
+    for (const [weekKey, weeklySchedule] of weeklyScheduleMap.entries()) {
+      // Lấy lại startDate, endDate từ weeklySchedule
+      const {
+        startDate,
+        class: classId,
+        academicYear,
+        createdBy,
+      } = weeklySchedule;
+      // Lấy timeSlots
+      const allTimeSlots = await TimeSlot.find();
+      for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        // 0: Thứ 2, 6: Chủ nhật
+        const scheduledDate = new Date(
+          new Date(startDate).getTime() + dayIndex * 24 * 60 * 60 * 1000
+        );
+        for (let period = 0; period < 10; period++) {
+          // Kiểm tra đã có lesson ở slot này chưa
+          const hasLesson = await Lesson.findOne({
+            class: classId,
+            academicYear: academicYear,
+            scheduledDate: scheduledDate,
+            timeSlot: allTimeSlots[period]?._id,
+          });
+          if (!hasLesson) {
+            const lessonId = `${classId.toString().slice(-6)}_${scheduledDate
+              .toISOString()
+              .slice(0, 10)
+              .replace(/-/g, "")}_T${period + 1}`;
+            const emptyLesson = new Lesson({
+              lessonId: lessonId,
+              class: classId,
+              academicYear: academicYear,
+              timeSlot: allTimeSlots[period]?._id,
+              scheduledDate: scheduledDate,
+              type: "empty",
+              status: "scheduled",
+              createdBy: createdBy || (currentUser && currentUser._id),
+            });
+            await emptyLesson.save();
+            weeklySchedule.lessons.push(emptyLesson._id);
+          }
+        }
+      }
+      await weeklySchedule.save();
+    }
+
+    return {
+      errors,
+      createdTeachers: createdTeachers.map((t) => ({
+        name: t.name,
+        email: t.email,
+        gender: t.gender,
+      })),
+      totalLessons: createdLessons.length,
+      totalTeachersCreated: createdTeachers.length,
+    };
   }
 }
 
