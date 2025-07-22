@@ -116,15 +116,29 @@ class MultiClassSchedulerService {
       const homeroomTeacherIds = new Set();
       // Map lớp chủ nhiệm -> giáo viên chủ nhiệm nếu dạy đúng môn
       for (const classId of classIds) {
-        const homeroomTeacher = homeroomTeachersMap.get(classId.toString());
+        let homeroomTeacher = homeroomTeachersMap.get(classId.toString());
+        // Nếu chưa populate đủ, truy vấn lại
         if (
+          homeroomTeacher &&
+          (!homeroomTeacher.role || !homeroomTeacher.subject)
+        ) {
+          homeroomTeacher = await User.findById(homeroomTeacher._id).select(
+            "name role subject subjects"
+          );
+        }
+        // Kiểm tra cả subject (single) và subjects (array)
+        const isHomeroomTeacherForSubject =
           homeroomTeacher &&
           Array.isArray(homeroomTeacher.role) &&
           homeroomTeacher.role.includes("teacher") &&
           homeroomTeacher.role.includes("homeroom_teacher") &&
-          homeroomTeacher.subject &&
-          homeroomTeacher.subject.toString() === subject._id.toString()
-        ) {
+          ((homeroomTeacher.subject &&
+            homeroomTeacher.subject.toString() === subject._id.toString()) ||
+            (Array.isArray(homeroomTeacher.subjects) &&
+              homeroomTeacher.subjects
+                .map((s) => s.toString())
+                .includes(subject._id.toString())));
+        if (isHomeroomTeacherForSubject) {
           if (!assignments.has(homeroomTeacher._id.toString())) {
             assignments.set(homeroomTeacher._id.toString(), []);
           }
@@ -144,16 +158,17 @@ class MultiClassSchedulerService {
         }
       }
       // Các lớp còn lại chia đều cho các giáo viên bộ môn còn lại (loại giáo viên chủ nhiệm đã gán lớp chủ nhiệm)
-      // Đảm bảo so sánh _id bằng string
       const otherTeachers = teachers.filter(
         (t) => !Array.from(homeroomTeacherIds).includes(t._id.toString())
       );
-      // Log kiểm tra
-      console.log("homeroomTeacherIds:", Array.from(homeroomTeacherIds));
-      console.log(
-        "otherTeachers:",
-        otherTeachers.map((t) => t._id.toString())
-      );
+      const debugLine = `Môn: ${
+        subject.subjectName
+      }\nhomeroomTeacherIds: ${Array.from(homeroomTeacherIds).join(
+        ", "
+      )}\notherTeachers: ${otherTeachers
+        .map((t) => t._id.toString())
+        .join(", ")}\n`;
+      fs.appendFileSync("debug-assignment.txt", debugLine);
       const unassignedClassIds = classIds.filter(
         (cid) => !assignedClassIds.has(cid.toString())
       );
