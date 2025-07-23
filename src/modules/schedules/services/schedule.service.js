@@ -12,6 +12,7 @@ const StudentLessonEvaluation = require("../models/student-lesson-evaluation.mod
 const MultiClassSchedulerService = require("./multi-class-scheduler.service");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const LessonRequest = require("../models/lesson-request.model");
 
 class ScheduleService {
   async initializeSchedulesWithNewArchitecture(data, token) {
@@ -523,6 +524,50 @@ class ScheduleService {
           comments: studentLessonEvaluation.comments,
         };
       }
+
+      // Lấy các lesson-request liên quan đến lesson này
+      // Substitute: lesson field
+      const substituteRequests = await LessonRequest.find({
+        requestType: "substitute",
+        lesson: lesson._id,
+      })
+        .populate("requestingTeacher", "name email fullName")
+        .populate("candidateTeachers.teacher", "name email fullName")
+        .lean();
+      // Swap: originalLesson hoặc replacementLesson
+      const swapRequests = await LessonRequest.find({
+        requestType: "swap",
+        $or: [
+          { originalLesson: lesson._id },
+          { replacementLesson: lesson._id },
+        ],
+      })
+        .populate("requestingTeacher", "name email fullName")
+        .populate("replacementTeacher", "name email fullName")
+        .populate("originalLesson", "lessonId scheduledDate topic status type")
+        .populate(
+          "replacementLesson",
+          "lessonId scheduledDate topic status type"
+        )
+        .lean();
+      // Makeup: originalLesson hoặc replacementLesson
+      const makeupRequests = await LessonRequest.find({
+        requestType: "makeup",
+        $or: [
+          { originalLesson: lesson._id },
+          { replacementLesson: lesson._id },
+        ],
+      })
+        .populate("requestingTeacher", "name email fullName")
+        .populate("originalLesson", "lessonId scheduledDate topic status type")
+        .populate(
+          "replacementLesson",
+          "lessonId scheduledDate topic status type"
+        )
+        .lean();
+      lessonObj.substituteRequests = substituteRequests;
+      lessonObj.swapRequests = swapRequests;
+      lessonObj.makeupRequests = makeupRequests;
 
       return lessonObj;
     } catch (error) {
