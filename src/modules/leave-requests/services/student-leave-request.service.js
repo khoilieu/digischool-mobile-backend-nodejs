@@ -27,7 +27,7 @@ class StudentLeaveRequestService {
       // Validate student exists and has a class
       const student = await User.findById(studentId).populate(
         "class_id",
-        "className"
+        "className homeroomTeacher"
       );
       if (!student || !student.role.includes("student")) {
         throw new Error("Student not found");
@@ -35,6 +35,12 @@ class StudentLeaveRequestService {
 
       if (!student.class_id) {
         throw new Error("Student is not assigned to any class");
+      }
+
+      // Lấy giáo viên chủ nhiệm của lớp
+      let homeroomTeacherId = null;
+      if (student.class_id.homeroomTeacher) {
+        homeroomTeacherId = student.class_id.homeroomTeacher.toString();
       }
 
       console.log(
@@ -128,22 +134,24 @@ class StudentLeaveRequestService {
             `✅ Created leave request for ${lesson.subject.subjectName} - Period ${period}`
           );
 
-          // Gửi notification cho giáo viên chủ nhiệm (giáo viên của tiết học đó)
-          await notificationService.createNotification({
-            type: "activity",
-            title: `Đơn xin vắng mới từ học sinh - ${student.name}`,
-            content: `Học sinh ${student.name} xin vắng tiết ${
-              lesson.subject.subjectName
-            } lớp ${lesson.class.className} ngày ${new Date(
-              lesson.scheduledDate
-            ).toLocaleDateString("vi-VN")}. Lý do: ${reason}`,
-            sender: studentId,
-            receiverScope: { type: "user", ids: [lesson.teacher._id] },
-            relatedObject: {
-              id: leaveRequest._id,
-              requestType: "student_leave_request",
-            },
-          });
+          // Gửi notification cho giáo viên chủ nhiệm (nếu có)
+          if (homeroomTeacherId) {
+            await notificationService.createNotification({
+              type: "activity",
+              title: `Đơn xin vắng mới từ học sinh - ${student.name}`,
+              content: `Học sinh ${student.name} xin vắng tiết ${
+                lesson.subject.subjectName
+              } lớp ${lesson.class.className} ngày ${new Date(
+                lesson.scheduledDate
+              ).toLocaleDateString("vi-VN")}. Lý do: ${reason}`,
+              sender: studentId,
+              receiverScope: { type: "user", ids: [homeroomTeacherId] },
+              relatedObject: {
+                id: leaveRequest._id,
+                requestType: "student_leave_request",
+              },
+            });
+          }
         } catch (lessonError) {
           console.error(
             `❌ Error processing lesson ${lessonId}:`,
