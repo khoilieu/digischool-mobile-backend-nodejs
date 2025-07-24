@@ -694,7 +694,7 @@ class ScheduleService {
         "Môn học": subjectName,
         "Giáo viên": teacherName,
       } = row;
-      if (["Chào cờ", "Sinh hoạt"].includes(subjectName) && teacherName) {
+      if (["Chào cờ", "Sinh hoạt lớp"].includes(subjectName) && teacherName) {
         homeroomTeachersByClass[className] = teacherName;
       }
     }
@@ -715,7 +715,7 @@ class ScheduleService {
           : ["teacher"];
         const isSpecial =
           subjectObj &&
-          ["Chào cờ", "Sinh hoạt"].includes(subjectObj.subjectName);
+          ["Chào cờ", "Sinh hoạt lớp"].includes(subjectObj.subjectName);
         const newTeacher = new User({
           name: teacherName,
           email: `gv${Date.now()}${Math.floor(
@@ -727,7 +727,7 @@ class ScheduleService {
           active: true,
           gender: gender,
           subject: subjectObj && !isSpecial ? subjectObj._id : undefined,
-          subjects: subjectObj && !isSpecial ? [subjectObj._id] : [],
+          // subjects: subjectObj && !isSpecial ? [subjectObj._id] : [], // XÓA DÒNG NÀY
         });
         await newTeacher.save();
         allTeachers.push(newTeacher);
@@ -739,23 +739,14 @@ class ScheduleService {
           new Set([...teacher.role, "homeroom_teacher"])
         );
       }
-      // Chỉ gán subject/subjects nếu là môn chuyên môn
+      // Chỉ gán subject nếu là môn chuyên môn
       if (
         subjectObj &&
-        !["Chào cờ", "Sinh hoạt"].includes(subjectObj.subjectName)
+        !["Chào cờ", "Sinh hoạt lớp"].includes(subjectObj.subjectName)
       ) {
-        if (!teacher.subjects) teacher.subjects = [];
-        if (
-          !teacher.subjects
-            .map((id) => id.toString())
-            .includes(subjectObj._id.toString())
-        ) {
-          teacher.subjects.push(subjectObj._id);
-        }
-        if (!teacher.subject) {
-          teacher.subject = subjectObj._id;
-        }
+        teacher.subject = subjectObj._id;
       }
+      // XÓA LOGIC GÁN subjects ARRAY
       teacher.passwordHash = await bcrypt.hash("Teacher@123", 10);
       if (teacher.email && teacher.email.endsWith("@school.local")) {
         teacher.email = teacher.email.replace(
@@ -794,7 +785,7 @@ class ScheduleService {
         continue;
       }
       const subjectObj = allSubjects.find((s) => s.subjectName === subjectName);
-      const isSpecial = ["Chào cờ", "Sinh hoạt"].includes(subjectName);
+      const isSpecial = ["Chào cờ", "Sinh hoạt lớp"].includes(subjectName);
       if (!subjectObj && !isSpecial) {
         errors.push({
           row: i + 2,

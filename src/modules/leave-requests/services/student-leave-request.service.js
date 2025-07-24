@@ -130,7 +130,7 @@ class StudentLeaveRequestService {
 
           // Gửi notification cho giáo viên chủ nhiệm (giáo viên của tiết học đó)
           await notificationService.createNotification({
-            type: "student_leave_request",
+            type: "activity",
             title: `Đơn xin vắng mới từ học sinh - ${student.name}`,
             content: `Học sinh ${student.name} xin vắng tiết ${
               lesson.subject.subjectName
@@ -367,7 +367,7 @@ class StudentLeaveRequestService {
       await request.save();
       // Gửi notification cho học sinh
       await notificationService.createNotification({
-        type: "student_leave_request_result",
+        type: "activity",
         title: `Đơn xin vắng đã được duyệt - ${request.subjectId.subjectName}`,
         content: `Đơn xin vắng của bạn cho tiết ${
           request.subjectId.subjectName
@@ -444,7 +444,7 @@ class StudentLeaveRequestService {
       await request.save();
       // Gửi notification cho học sinh
       await notificationService.createNotification({
-        type: "student_leave_request_result",
+        type: "activity",
         title: `Đơn xin vắng đã bị từ chối - ${request.subjectId.subjectName}`,
         content: `Đơn xin vắng của bạn cho tiết ${
           request.subjectId.subjectName

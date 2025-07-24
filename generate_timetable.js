@@ -76,7 +76,7 @@ const teacherAssignments = {
 const timetableData = {
     '12A1': {
         'Sáng': {
-            'Thứ 2': ['Chào cờ', 'Sinh hoạt', 'Ngữ văn', 'Toán', 'Toán'],
+            'Thứ 2': ['Chào cờ', 'Sinh hoạt lớp', 'Ngữ văn', 'Toán', 'Toán'],
             'Thứ 3': ['Ngữ văn', 'Ngữ văn', 'Toán', '', ''],
             'Thứ 4': ['', '', 'Sinh học', 'Sinh học', 'Hóa học'],
             'Thứ 5': ['Ngoại ngữ', 'Ngoại ngữ', 'Sinh học', 'Lịch sử', 'Lịch sử'],
@@ -96,7 +96,7 @@ const timetableData = {
     },
     '12A2': {
         'Sáng': {
-            'Thứ 2': ['Chào cờ', 'Sinh hoạt', 'Vật lý', 'Sinh học', 'Hóa học'],
+            'Thứ 2': ['Chào cờ', 'Sinh hoạt lớp', 'Vật lý', 'Sinh học', 'Hóa học'],
             'Thứ 3': ['Ngữ văn', 'Ngữ văn', 'Toán', 'Toán', 'Ngoại ngữ'],
             'Thứ 4': ['', '', 'Lịch sử', 'Toán', 'Lịch sử'],
             'Thứ 5': ['', '', 'Ngữ văn', 'Sinh học', 'Sinh học'],
@@ -116,7 +116,7 @@ const timetableData = {
     },
     '12A3': {
         'Sáng': {
-            'Thứ 2': ['Chào cờ', 'Sinh hoạt', 'Ngữ văn', '', ''],
+            'Thứ 2': ['Chào cờ', 'Sinh hoạt lớp', 'Ngữ văn', '', ''],
             'Thứ 3': ['Sinh học', 'Sinh học', 'Toán', 'Vật lý', 'Tin học'],
             'Thứ 4': ['', '', 'Toán', 'Toán', 'Hóa học'],
             'Thứ 5': ['Ngữ văn', 'Ngữ văn', 'Tin học', 'Tin học', 'Lịch sử'],
@@ -136,7 +136,7 @@ const timetableData = {
     },
     '12B': {
         'Sáng': {
-            'Thứ 2': ['Chào cờ', 'Sinh hoạt', 'Toán', 'Ngoại ngữ', 'Ngoại ngữ'],
+            'Thứ 2': ['Chào cờ', 'Sinh hoạt lớp', 'Toán', 'Ngoại ngữ', 'Ngoại ngữ'],
             'Thứ 3': ['Tin học', 'Tin học', 'Ngữ văn', '', ''],
             'Thứ 4': ['', '', 'Tin học', 'Lịch sử', 'Vật lý'],
             'Thứ 5': ['Vật lý', 'Vật lý', 'Sinh học', 'Hóa học', 'Hóa học'],
@@ -167,7 +167,7 @@ for (const className of ['12A1', '12A2', '12A3', '12B']) {
             for (let periodIdx = 0; periodIdx < periods.length; periodIdx++) {
                 const subject = periods[periodIdx];
                 if (subject) { // Include all non-empty periods
-                    const teacher = (subject === 'Chào cờ' || subject === 'Sinh hoạt') 
+                    const teacher = (subject === 'Chào cờ' || subject === 'Sinh hoạt lớp') 
                         ? homeroomTeachers[className] // Assign homeroom teacher
                         : (teacherAssignments[subject] ? teacherAssignments[subject][className] || '' : '');
                     // Adjust period numbering: 1-5 for Sáng, 6-10 for Chiều
