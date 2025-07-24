@@ -5,7 +5,7 @@ const authMiddleware = require("../../auth/middleware/auth.middleware");
 const scheduleValidation = require("../middleware/schedule.validation");
 const lessonRequestRoutes = require("./lesson-request.routes");
 const multer = require("multer");
-const upload = multer({ dest: "uploads/" }); // Thư mục tạm lưu file
+const upload = multer({ dest: "/tmp/" }); // Thư mục tạm lưu file
 
 router.use("/lesson-request", lessonRequestRoutes);
 router.use(authMiddleware.protect);
