@@ -44,12 +44,7 @@ const validateApproveRequest = [
 // Validation for rejecting request
 const validateRejectRequest = [
   ...validateRequestId,
-  body("comment")
-    .notEmpty()
-    .withMessage("Comment is required when rejecting a request")
-    .isLength({ min: 5, max: 300 })
-    .withMessage("Comment must be between 5-300 characters")
-    .trim(),
+  // Bỏ validate comment
 ];
 
 // Validation for date range queries

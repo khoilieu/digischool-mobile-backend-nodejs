@@ -197,7 +197,7 @@ class StudentLeaveRequestController {
     try {
       const { requestId } = req.params;
       const teacherId = req.user._id;
-      const { comment } = req.body;
+      // Bỏ lấy comment
 
       if (!requestId) {
         return res.status(400).json({
@@ -206,17 +206,10 @@ class StudentLeaveRequestController {
         });
       }
 
-      if (!comment || !comment.trim()) {
-        return res.status(400).json({
-          success: false,
-          message: "Comment is required when rejecting a request",
-        });
-      }
-
+      // Không kiểm tra comment nữa
       const result = await studentLeaveRequestService.rejectLeaveRequest(
         requestId,
-        teacherId,
-        comment
+        teacherId
       );
 
       res.status(200).json({

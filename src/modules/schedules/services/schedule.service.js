@@ -9,6 +9,7 @@ const Lesson = require("../models/lesson.model");
 const TestInfo = require("../models/test-info.model");
 const TeacherLessonEvaluation = require("../models/teacher-lesson-evaluation.model");
 const StudentLessonEvaluation = require("../models/student-lesson-evaluation.model");
+const PersonalActivity = require("../models/personal-activity.model");
 const MultiClassSchedulerService = require("./multi-class-scheduler.service");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
@@ -344,6 +345,19 @@ class ScheduleService {
         return lessonObj;
       });
 
+      // Lấy studentPersonalActivities: các PersonalActivity của user có class_id.className = className và date trong tuần
+      const startDate = weeklySchedule.startDate;
+      const endDate = weeklySchedule.endDate;
+      const usersInClass = await User.find({ class_id: classInfo._id }).select(
+        "_id"
+      );
+      const userIds = usersInClass.map((u) => u._id);
+      const PersonalActivity = require("../models/personal-activity.model");
+      const studentPersonalActivities = await PersonalActivity.find({
+        user: { $in: userIds },
+        date: { $gte: startDate, $lte: endDate },
+      });
+
       return {
         academicYear: academicYearDoc.name,
         class: {
@@ -356,6 +370,7 @@ class ScheduleService {
           endDate: weeklySchedule.endDate,
           lessons: lessonsWithDayInfo,
         },
+        studentPersonalActivities,
       };
     } catch (error) {
       console.error(
@@ -403,11 +418,11 @@ class ScheduleService {
         .populate("timeSlot", "period startTime endTime type")
         .sort("scheduledDate timeSlot.period");
 
+      // Không gán personalActivity vào từng lesson nữa
       const lessonsWithDayInfo = lessons.map((lesson) => {
         const lessonObj = lesson.toObject();
         const scheduledDate = new Date(lesson.scheduledDate);
         const dayOfWeek = scheduledDate.getDay();
-
         const dayNames = [
           "Chủ nhật",
           "Thứ 2",
@@ -419,8 +434,13 @@ class ScheduleService {
         ];
         lessonObj.dayOfWeek = dayNames[dayOfWeek];
         lessonObj.dayNumber = dayOfWeek === 0 ? 7 : dayOfWeek;
-
         return lessonObj;
+      });
+
+      // Lấy tất cả hoạt động cá nhân của giáo viên trong tuần (theo date, period)
+      const teacherPersonalActivities = await PersonalActivity.find({
+        user: teacherId,
+        date: { $gte: startDate, $lte: endDate },
       });
 
       return {
@@ -431,6 +451,7 @@ class ScheduleService {
         endDate: endDate,
         totalLessons: lessonsWithDayInfo.length,
         lessons: lessonsWithDayInfo,
+        teacherPersonalActivities,
       };
     } catch (error) {
       console.error("❌ Error in getTeacherWeeklySchedule:", error.message);

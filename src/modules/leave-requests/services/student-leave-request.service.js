@@ -344,7 +344,7 @@ class StudentLeaveRequestService {
         .populate("lessonId", "lessonId topic scheduledDate")
         .populate("subjectId", "subjectName")
         .populate("teacherId", "name fullName")
-        .populate("classId", "className");
+        .populate("classId", "className homeroomTeacher");
 
       if (!request) {
         const error = new Error("Leave request not found");
@@ -352,28 +352,28 @@ class StudentLeaveRequestService {
         throw error;
       }
 
-      // Check if teacher has permission to process this request
-      if (request.teacherId._id.toString() !== teacherId.toString()) {
+      // Lấy homeroomTeacher của lớp
+      const homeroomTeacherId = request.classId.homeroomTeacher?.toString();
+
+      // Chỉ cho phép giáo viên chủ nhiệm duyệt
+      if (teacherId.toString() !== homeroomTeacherId) {
         const error = new Error(
-          "You are not authorized to approve this request. Only the lesson teacher can approve."
+          "Bạn không có quyền duyệt đơn này. Chỉ giáo viên chủ nhiệm lớp mới được duyệt."
         );
         error.statusCode = 403;
         throw error;
       }
 
-      // Check if request has already been processed
       if (request.status !== "pending") {
         const error = new Error(`Request has already been ${request.status}`);
         error.statusCode = 400;
         throw error;
       }
 
-      // Update request directly (we already checked permissions above)
       request.status = "approved";
       request.processedAt = new Date();
       request.teacherId = teacherId;
       await request.save();
-      // Gửi notification cho học sinh
       await notificationService.createNotification({
         type: "activity",
         title: `Đơn xin vắng đã được duyệt - ${request.subjectId.subjectName}`,
@@ -391,7 +391,7 @@ class StudentLeaveRequestService {
       });
 
       console.log(
-        `✅ Leave request approved by teacher ${teacherId} for student ${request.studentId.name}`
+        `✅ Leave request approved by homeroom teacher ${teacherId} for student ${request.studentId.name}`
       );
 
       return {
@@ -401,14 +401,11 @@ class StudentLeaveRequestService {
       };
     } catch (error) {
       console.error("❌ Error approving leave request:", error.message);
-
-      // Preserve status code if it exists
       if (error.statusCode) {
         const customError = new Error(error.message);
         customError.statusCode = error.statusCode;
         throw customError;
       }
-
       throw new Error(`Failed to approve leave request: ${error.message}`);
     }
   }
@@ -421,7 +418,7 @@ class StudentLeaveRequestService {
         .populate("lessonId", "lessonId topic scheduledDate")
         .populate("subjectId", "subjectName")
         .populate("teacherId", "name fullName")
-        .populate("classId", "className");
+        .populate("classId", "className homeroomTeacher");
 
       if (!request) {
         const error = new Error("Leave request not found");
@@ -429,28 +426,28 @@ class StudentLeaveRequestService {
         throw error;
       }
 
-      // Check if teacher has permission to process this request
-      if (request.teacherId._id.toString() !== teacherId.toString()) {
+      // Lấy homeroomTeacher của lớp
+      const homeroomTeacherId = request.classId.homeroomTeacher?.toString();
+
+      // Chỉ cho phép giáo viên chủ nhiệm từ chối
+      if (teacherId.toString() !== homeroomTeacherId) {
         const error = new Error(
-          "You are not authorized to reject this request. Only the lesson teacher can reject."
+          "Bạn không có quyền từ chối đơn này. Chỉ giáo viên chủ nhiệm lớp mới được từ chối."
         );
         error.statusCode = 403;
         throw error;
       }
 
-      // Check if request has already been processed
       if (request.status !== "pending") {
         const error = new Error(`Request has already been ${request.status}`);
         error.statusCode = 400;
         throw error;
       }
 
-      // Update request directly (we already checked permissions above)
       request.status = "rejected";
       request.processedAt = new Date();
       request.teacherId = teacherId;
       await request.save();
-      // Gửi notification cho học sinh
       await notificationService.createNotification({
         type: "activity",
         title: `Đơn xin vắng đã bị từ chối - ${request.subjectId.subjectName}`,
@@ -468,7 +465,7 @@ class StudentLeaveRequestService {
       });
 
       console.log(
-        `❌ Leave request rejected by teacher ${teacherId} for student ${request.studentId.name}`
+        `❌ Leave request rejected by homeroom teacher ${teacherId} for student ${request.studentId.name}`
       );
 
       return {
@@ -478,14 +475,11 @@ class StudentLeaveRequestService {
       };
     } catch (error) {
       console.error("❌ Error rejecting leave request:", error.message);
-
-      // Preserve status code if it exists
       if (error.statusCode) {
         const customError = new Error(error.message);
         customError.statusCode = error.statusCode;
         throw customError;
       }
-
       throw new Error(`Failed to reject leave request: ${error.message}`);
     }
   }
@@ -677,20 +671,27 @@ class StudentLeaveRequestService {
         `📚 Found ${lessons.length} lessons for class ${student.class_id.className}`
       );
 
-      // Get existing leave requests for this period
-      const existingRequests = await StudentLeaveRequest.find({
-        studentId,
-        date: { $gte: start, $lte: end },
-      }).select("lessonId");
-
-      const requestedLessonIds = existingRequests.map((req) =>
-        req.lessonId.toString()
-      );
-
-      // Filter out lessons already requested
-      const availableLessons = lessons.filter(
-        (lesson) => !requestedLessonIds.includes(lesson._id.toString())
-      );
+      const availableLessons = lessons.map((lesson) => ({
+        _id: lesson._id,
+        lessonId: lesson.lessonId,
+        date: lesson.scheduledDate,
+        period: lesson.timeSlot?.period || 0,
+        timeSlot: {
+          startTime: lesson.timeSlot?.startTime || "",
+          endTime: lesson.timeSlot?.endTime || "",
+        },
+        subject: {
+          _id: lesson.subject._id,
+          name: lesson.subject.subjectName,
+          code: lesson.subject.subjectCode,
+        },
+        teacher: {
+          _id: lesson.teacher._id,
+          name: lesson.teacher.name,
+        },
+        type: lesson.type,
+        topic: lesson.topic || "",
+      }));
 
       return availableLessons.map((lesson) => ({
         _id: lesson._id,

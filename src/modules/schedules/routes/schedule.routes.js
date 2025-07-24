@@ -49,6 +49,9 @@ router.get(
   scheduleController.getLessonStudents
 );
 
+// Gắn personal-activity routes
+// router.use("/lesson/:lessonId/personal-activity", personalActivityRoutes);
+
 // Cập nhật mô tả tiết học
 router.patch(
   "/lessons/:lessonId/description",

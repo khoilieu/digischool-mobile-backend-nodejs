@@ -1,4 +1,5 @@
 const scheduleService = require("../services/schedule.service");
+const PersonalActivity = require("../models/personal-activity.model");
 const XLSX = require("xlsx");
 const fs = require("fs");
 
@@ -37,6 +38,38 @@ class ScheduleController {
         parseInt(weekNumber),
         token
       );
+
+      // Bổ sung: cá nhân hóa hoạt động cá nhân cho lesson trống
+      if (
+        result.weeklySchedule &&
+        Array.isArray(result.weeklySchedule.lessons) &&
+        req.user &&
+        req.user._id
+      ) {
+        for (const lesson of result.weeklySchedule.lessons) {
+          if (lesson.type === "empty") {
+            if (
+              req.user.role.includes("teacher") ||
+              req.user.role.includes("homeroom_teacher")
+            ) {
+              // Giáo viên: lấy theo user, date, period
+              const activity = await PersonalActivity.findOne({
+                user: req.user._id,
+                date: lesson.scheduledDate,
+                period: lesson.timeSlot?.period,
+              });
+              lesson.personalActivity = activity;
+            } else {
+              // Học sinh: lấy theo user, lessonId
+              const activity = await PersonalActivity.findOne({
+                user: req.user._id,
+                lesson: lesson._id || lesson.id,
+              });
+              lesson.personalActivity = activity;
+            }
+          }
+        }
+      }
 
       res.status(200).json({
         success: true,
@@ -84,6 +117,15 @@ class ScheduleController {
       const token = req.headers.authorization?.split(" ")[1];
 
       const result = await scheduleService.getLessonDetail(lessonId, token);
+
+      // Nếu lesson là empty, trả về personalActivity của user hiện tại
+      if (result.type === "empty" && req.user && req.user._id) {
+        const activity = await PersonalActivity.findOne({
+          user: req.user._id,
+          lesson: lessonId,
+        });
+        result.personalActivity = activity;
+      }
 
       res.status(200).json({
         success: true,

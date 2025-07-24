@@ -8,6 +8,7 @@ const studentLeaveRequestValidation = require("../middleware/student-leave-reque
 router.use(authMiddleware.protect);
 
 // Student routes - Học sinh xin vắng
+//API
 router.post(
   "/create",
   authMiddleware.authorize("student"),
