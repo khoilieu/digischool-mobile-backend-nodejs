@@ -355,6 +355,81 @@ const validateUser = {
       }
       next();
     }
+  ],
+
+  createParent: [
+    protect,
+    authorize('manager'),
+    body('name')
+      .trim()
+      .notEmpty()
+      .withMessage('Name is required')
+      .isLength({ min: 2, max: 100 })
+      .withMessage('Name must be between 2 and 100 characters'),
+
+    body('email')
+      .optional()
+      .trim()
+      .isEmail()
+      .withMessage('Please enter a valid email'),
+
+    body('phone')
+      .trim()
+      .notEmpty()
+      .withMessage('Phone number is required')
+      .matches(/^[0-9+\-\s()]+$/)
+      .withMessage('Phone number must contain only numbers, spaces, hyphens, and parentheses')
+      .isLength({ min: 10, max: 15 })
+      .withMessage('Phone number must be between 10 and 15 characters'),
+
+    body('childrenIds')
+      .isArray({ min: 1 })
+      .withMessage('Children IDs must be a non-empty array')
+      .custom((value) => {
+        if (!value.every(id => /^[0-9a-fA-F]{24}$/.test(id))) {
+          throw new Error('All children IDs must be valid MongoDB ObjectIds');
+        }
+        return true;
+      }),
+
+    body('dateOfBirth')
+      .optional()
+      .isISO8601()
+      .withMessage('Date of birth must be in ISO 8601 format (YYYY-MM-DD)')
+      .custom((value) => {
+        if (value) {
+          const birthDate = new Date(value);
+          const today = new Date();
+          const age = today.getFullYear() - birthDate.getFullYear();
+          if (age < 18 || age > 80) {
+            throw new Error('Parent age must be between 18 and 80 years');
+          }
+        }
+        return true;
+      }),
+
+    body('gender')
+      .optional()
+      .trim()
+      .isIn(['male', 'female', 'other'])
+      .withMessage('Gender must be male, female, or other'),
+
+    body('address')
+      .optional()
+      .trim()
+      .isLength({ max: 500 })
+      .withMessage('Address must not exceed 500 characters'),
+
+    (req, res, next) => {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          errors: errors.array()
+        });
+      }
+      next();
+    }
   ]
 };
 

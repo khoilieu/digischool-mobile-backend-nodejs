@@ -17,6 +17,7 @@ const newsRoutes = require("../modules/news/routes/news.routes");
 const chatRoutes = require("../modules/chat/routes/chat.routes");
 const notificationRoutes = require("../modules/notification/routes/notification.routes");
 const personalActivityRoutes = require("../modules/schedules/routes/personal-activity.routes");
+const parentRoutes = require("../modules/parents/routes/parent.routes");
 
 // Health check route
 router.get("/health", (req, res) => {
@@ -52,5 +53,7 @@ router.use("/chat", chatRoutes);
 router.use("/notifications", notificationRoutes);
 // /api/personal-activities
 router.use("/personal-activity", personalActivityRoutes);
+// /api/parents
+router.use("/parents", parentRoutes);
 
 module.exports = router;

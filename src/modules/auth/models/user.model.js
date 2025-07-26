@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const userSchema = new mongoose.Schema({
   role: { 
     type: [String], 
-    enum: ['student', 'teacher', 'homeroom_teacher', 'admin', 'manager'], 
+    enum: ['student', 'teacher', 'homeroom_teacher', 'admin', 'manager', 'parents'], 
     required: true,
     default: ['manager']
   },
@@ -52,6 +52,23 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Subject'
   }],
+  // New fields for parents
+  children: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: function() {
+      // children chỉ bắt buộc cho parents
+      return this.role.includes('parents') && !this.isNewUser;
+    }
+  }],
+  address: {
+    type: String,
+    required: false
+  },
+  phone: {
+    type: String,
+    required: false
+  },
   isNewUser: {
     type: Boolean,
     default: true

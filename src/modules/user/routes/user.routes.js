@@ -109,4 +109,25 @@ router.post('/create-teacher',
   userController.createTeacher
 );
 
+// Tạo parent mới (chỉ manager)
+router.post('/create-parent', 
+  validateUser.createParent,
+  userController.createParent
+);
+
+// Import parents từ file Excel (chỉ manager)
+router.post('/import-parents', 
+  protect,
+  authorize('manager'),
+  upload.single('file'),
+  userController.importParents
+);
+
+// Import parents từ base64 (chỉ manager)
+router.post('/import-parents-base64', 
+  protect,
+  authorize('manager'),
+  userController.importParentsBase64
+);
+
 module.exports = router; 

@@ -1,0 +1,433 @@
+[{
+  "_id": {
+    "$oid": "685584df62669cca8757dfea"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Nguyễn Văn Phúc",
+  "email": "nguyenvanphuc.stu@yopmail.com",
+  "passwordHash": "$2b$12$jb2UBlAKxndo/hdvVXcZ2ed0.0lBULRJHOOiWaIojc/rC5Cgm30G.",
+  "dateOfBirth": {
+    "$date": "2008-04-07T00:00:00.000Z"
+  },
+  "gender": "female",
+  "studentId": "STU202512017",
+  "class_id": {
+    "$oid": "6855828a0672fea58658283b"
+  },
+  "isNewUser": false,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:57:20.058Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T16:02:01.258Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "685584e462669cca8757dfef"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Trần Thị Quỳnh",
+  "email": "tranthiquynh.stu@yopmail.com",
+  "passwordHash": "$2b$12$duWg7jtmrjGAO4QbqQGjWubxkaB0FIyp6XLOxW2om8e57R5tzUzq6",
+  "dateOfBirth": {
+    "$date": "2007-09-28T00:00:00.000Z"
+  },
+  "gender": "female",
+  "studentId": "STU202512018",
+  "class_id": {
+    "$oid": "6855828a0672fea58658283b"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:57:24.642Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:57:24.642Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "685584e862669cca8757dff4"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Lê Minh Sơn",
+  "email": "leminhson.stu@yopmail.com",
+  "passwordHash": "$2b$12$isTNbd3YYNzSU1hv94aqi.WNYq6PcpNV25zVcYeUkrx9bh7EY0yAe",
+  "dateOfBirth": {
+    "$date": "2007-01-16T00:00:00.000Z"
+  },
+  "gender": "male",
+  "studentId": "STU202512019",
+  "class_id": {
+    "$oid": "6855828a0672fea58658283b"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:57:28.327Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:57:28.327Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "685584ec62669cca8757dff9"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Phạm Thị Thảo",
+  "email": "phamthithao.stu@yopmail.com",
+  "passwordHash": "$2b$12$7gP9X6tMa7bakfBMxRiR0e40.mVSIvwtAfCr5qJNiWBzQ.NZxm0TS",
+  "dateOfBirth": {
+    "$date": "2007-03-07T00:00:00.000Z"
+  },
+  "gender": "male",
+  "studentId": "STU202512020",
+  "class_id": {
+    "$oid": "6855828a0672fea58658283b"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:57:32.085Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:57:32.085Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "685584ef62669cca8757dffe"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Hoàng Văn Tuấn",
+  "email": "hoangvantuan.stu@yopmail.com",
+  "passwordHash": "$2b$12$cT5pOdAZSoIjI1hZ5unkT.fehzFT3oBnhDAA.ztQ5/oW3QqUXyr3W",
+  "dateOfBirth": {
+    "$date": "2008-04-26T00:00:00.000Z"
+  },
+  "gender": "male",
+  "studentId": "STU202512021",
+  "class_id": {
+    "$oid": "6855827e0672fea586582831"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:57:35.869Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:57:35.869Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "685584f462669cca8757e003"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Đỗ Thị Uyên",
+  "email": "dothiuyen.stu@yopmail.com",
+  "passwordHash": "$2b$12$xAgOUI4tvb5IfW0qGnNHJeU7P7wMHGptEeZPn7jITJdwHFmQQ2N0e",
+  "dateOfBirth": {
+    "$date": "2007-06-07T00:00:00.000Z"
+  },
+  "gender": "male",
+  "studentId": "STU202512022",
+  "class_id": {
+    "$oid": "6855827e0672fea586582831"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:57:40.221Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:57:40.221Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "685584f862669cca8757e008"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Vũ Minh Việt",
+  "email": "vuminhviet.stu@yopmail.com",
+  "passwordHash": "$2b$12$pH5/9VZsdH2PiwDdq8FlVOR4jsS5LKu7Gr3RMMwZebPQZkZYVSvyK",
+  "dateOfBirth": {
+    "$date": "2008-12-16T00:00:00.000Z"
+  },
+  "gender": "female",
+  "studentId": "STU202512023",
+  "class_id": {
+    "$oid": "6855827e0672fea586582831"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:57:45.402Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:57:45.402Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "6855851262669cca8757e00d"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Bùi Thị Xuân",
+  "email": "buithixuan.stu@yopmail.com",
+  "passwordHash": "$2b$12$8MM69K8eqdF0u6L..JJPV.v/ng9D3/GlbcWSzU6HZqp.x1okcdyDu",
+  "dateOfBirth": {
+    "$date": "2007-03-02T00:00:00.000Z"
+  },
+  "gender": "male",
+  "studentId": "STU202512024",
+  "class_id": {
+    "$oid": "6855827e0672fea586582831"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:58:10.730Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:58:10.730Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "6855851862669cca8757e012"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Nguyễn Văn Yên",
+  "email": "nguyenvanyen.stu@yopmail.com",
+  "passwordHash": "$2b$12$9/3CZNEoo/fW6adZ0N4Va.boyd0LSWjEfF.4p//spA9q3PVneBfvq",
+  "dateOfBirth": {
+    "$date": "2008-01-26T00:00:00.000Z"
+  },
+  "gender": "female",
+  "studentId": "STU202512025",
+  "class_id": {
+    "$oid": "6855825a0672fea58658281d"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:58:16.786Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:58:16.786Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "6855851d62669cca8757e017"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Trần Thị Zung",
+  "email": "tranthizung.stu@yopmail.com",
+  "passwordHash": "$2b$12$26Lrzd7I4oLViB5nYXQ4o.6Juuqm5xPglB8i1XvITcbEo.p4omSNW",
+  "dateOfBirth": {
+    "$date": "2008-07-15T00:00:00.000Z"
+  },
+  "gender": "female",
+  "studentId": "STU202512026",
+  "class_id": {
+    "$oid": "6855825a0672fea58658281d"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:58:21.468Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:58:21.468Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "6855852262669cca8757e01c"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Lê Minh Anh",
+  "email": "leminhanh.stu@yopmail.com",
+  "passwordHash": "$2b$12$X3tjhs8g7s2R.k0b/CXQLOfPSQ6L8KfxjsEf5j2KoaJmmc65GdadK",
+  "dateOfBirth": {
+    "$date": "2007-08-27T00:00:00.000Z"
+  },
+  "gender": "female",
+  "studentId": "STU202512027",
+  "class_id": {
+    "$oid": "6855825a0672fea58658281d"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:58:26.484Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:58:26.484Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "6855852762669cca8757e021"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Phạm Thị Bảo",
+  "email": "phamthibao.stu@yopmail.com",
+  "passwordHash": "$2b$12$0dFMFwzQpb/lzqSPiwGRV.I6OTbzUZ0CSAKd6Lor6onXCOzElZxWe",
+  "dateOfBirth": {
+    "$date": "2008-09-10T00:00:00.000Z"
+  },
+  "gender": "male",
+  "studentId": "STU202512028",
+  "class_id": {
+    "$oid": "6855825a0672fea58658281d"
+  },
+  "isNewUser": true,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-20T15:58:31.948Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-20T15:58:31.948Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "685c1c4888697d34ad3439da"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Liêu Vinh Khôi",
+  "email": "lieuvinhkhoi.stu@yopmail.com",
+  "passwordHash": "$2b$12$u.X/9SLk5gCosPudvv4O2.EJdbmcdBz2rD35YaZCRDVA/325gIJU2",
+  "dateOfBirth": {
+    "$date": "2010-05-15T00:00:00.000Z"
+  },
+  "gender": "female",
+  "studentId": "ST2024003",
+  "class_id": {
+    "$oid": "6855828a0672fea58658283b"
+  },
+  "isNewUser": false,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-25T15:56:56.736Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-25T15:58:03.706Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "685d2db5da93da632c548dd4"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "vojoony",
+  "email": "vojoony@gmail.com",
+  "passwordHash": "$2b$12$PwjWTXgwpzGk9ST/lP8DueWlIadCDAIqRcgJoJVMYWmuhoID0EkUy",
+  "class_id": null,
+  "isNewUser": false,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-26T11:23:33.068Z"
+  },
+  "updatedAt": {
+    "$date": "2025-06-29T09:57:03.466Z"
+  },
+  "__v": 0
+},
+{
+  "_id": {
+    "$oid": "6860c3ebc2402acd3a9752e9"
+  },
+  "role": [
+    "student"
+  ],
+  "name": "Khôi Liêu",
+  "email": "hocsinh1@yopmail.com",
+  "passwordHash": "$2b$12$s455D8qa840LPVR8FUOoXuRAUJkMqwi402ESmyQnBVPY1XvPaVRG6",
+  "dateOfBirth": {
+    "$date": "2003-10-13T00:00:00.000Z"
+  },
+  "gender": "male",
+  "studentId": "HS13102003",
+  "class_id": {
+    "$oid": "6855827e0672fea586582831"
+  },
+  "isNewUser": false,
+  "isPending": false,
+  "active": true,
+  "createdAt": {
+    "$date": "2025-06-29T04:41:15.232Z"
+  },
+  "updatedAt": {
+    "$date": "2025-07-24T06:49:30.804Z"
+  },
+  "__v": 1,
+  "resetPasswordExpires": {
+    "$date": "2025-07-24T07:02:21.756Z"
+  },
+  "resetPasswordToken": "$2b$10$3gzp5cGWrI7tEVVf65DHo.YxHz6z4dhyEkzK09pYVCOhI2qVtXTaa",
+  "subjects": []
+}]
