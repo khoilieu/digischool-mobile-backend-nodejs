@@ -32,6 +32,13 @@ const weeklyScheduleSchema = new mongoose.Schema(
       max: 52,
     },
 
+    // Học kỳ
+    semester: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
     // Ngày bắt đầu tuần
     startDate: {
       type: Date,

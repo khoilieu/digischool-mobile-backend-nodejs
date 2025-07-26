@@ -48,6 +48,8 @@ class ScheduleValidation {
         .isISO8601()
         .withMessage("End date must be a valid ISO date"),
 
+      body("semester").trim().notEmpty().withMessage("Semester is required"),
+
       (req, res, next) => {
         const { startDate, endDate } = req.body;
 

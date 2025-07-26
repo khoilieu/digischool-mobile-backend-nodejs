@@ -295,13 +295,14 @@ class ScheduleController {
       const data = XLSX.utils.sheet_to_json(sheet);
 
       // Lấy các trường bổ sung từ body
-      const { startDate, endDate, academicYear, weekNumber } = req.body;
+      const { startDate, endDate, academicYear, weekNumber, semester } =
+        req.body;
 
       // Gọi service xử lý import
       const result = await scheduleService.importScheduleFromExcel(
         data,
         req.user,
-        { startDate, endDate, academicYear, weekNumber }
+        { startDate, endDate, academicYear, weekNumber, semester }
       );
 
       // Xóa file tạm sau khi xử lý

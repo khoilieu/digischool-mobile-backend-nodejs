@@ -25,6 +25,7 @@ class ScheduleService {
         scheduleType = "MONDAY_TO_SATURDAY",
         startDate: customStartDate,
         endDate: customEndDate,
+        semester, // thêm trường semester
       } = data;
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -111,6 +112,7 @@ class ScheduleService {
           endDate: endDate,
           lessons: [],
           createdBy: currentUser._id,
+          semester: semester, // lưu học kỳ
         });
 
         const savedWeeklySchedule = await weeklySchedule.save();
@@ -352,7 +354,6 @@ class ScheduleService {
         "_id"
       );
       const userIds = usersInClass.map((u) => u._id);
-      const PersonalActivity = require("../models/personal-activity.model");
       const studentPersonalActivities = await PersonalActivity.find({
         user: { $in: userIds },
         date: { $gte: startDate, $lte: endDate },
@@ -691,7 +692,7 @@ class ScheduleService {
     });
     const AcademicYear = require("../models/academic-year.model");
     const allAcademicYears = await AcademicYear.find();
-    const { startDate, endDate, academicYear, weekNumber } = options;
+    const { startDate, endDate, academicYear, weekNumber, semester } = options;
     let academicYearObj = null;
     if (academicYear) {
       academicYearObj = allAcademicYears.find(
@@ -799,6 +800,7 @@ class ScheduleService {
         Tiết: period,
         Tuần: week,
         Buổi: session,
+        "Bài học": topic, // Thêm dòng này
       } = row;
       const classObj = allClasses.find((c) => c.className === className);
       if (!classObj) {
@@ -867,6 +869,7 @@ class ScheduleService {
             endDate: new Date(endDate),
             lessons: [],
             createdBy: currentUser._id,
+            semester: semester, // lưu học kỳ
           });
           await weeklySchedule.save();
         }
@@ -882,7 +885,7 @@ class ScheduleService {
         scheduledDate: scheduledDate,
         type: isSpecial ? "fixed" : "regular",
         status: "scheduled",
-        topic: subjectName,
+        topic: topic || subjectName, // Ưu tiên topic, fallback sang tên môn học
         createdBy: currentUser._id,
       });
       await lesson.save();
