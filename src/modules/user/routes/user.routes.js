@@ -109,4 +109,45 @@ router.post('/create-teacher',
   userController.createTeacher
 );
 
+// Tạo parent mới (chỉ manager)
+router.post('/create-parent', 
+  validateUser.createParent,
+  userController.createParent
+);
+
+// Import parents từ file Excel (chỉ manager)
+router.post('/import-parents', 
+  protect,
+  authorize('manager'),
+  upload.single('file'),
+  userController.importParents
+);
+
+// Import parents từ base64 (chỉ manager)
+router.post('/import-parents-base64', 
+  protect,
+  authorize('manager'),
+  userController.importParentsBase64
+);
+
+// ===== API QUẢN LÝ TÀI KHOẢN =====
+
+// Lấy danh sách tài khoản cho trang quản lý
+router.get('/management/accounts', 
+  validateUser.getAccountsForManagement,
+  userController.getAccountsForManagement
+);
+
+// Lấy danh sách lớp theo khối
+router.get('/management/classes', 
+  validateUser.getClassesByGrade,
+  userController.getClassesByGrade
+);
+
+// Lấy thông tin chi tiết tài khoản
+router.get('/management/accounts/:id', 
+  validateUser.getAccountDetail,
+  userController.getAccountDetail
+);
+
 module.exports = router; 

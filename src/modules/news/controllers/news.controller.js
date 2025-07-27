@@ -4,21 +4,42 @@ const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
 const newsService = require("../services/news.service");
 
-const storage = new Storage({
+// Kiểm tra các biến môi trường GCP
+const gcpConfig = {
   projectId: process.env.GCP_PROJECT_ID,
-  credentials: {
-    client_email: process.env.GCP_CLIENT_EMAIL,
-    private_key: process.env.GCP_PRIVATE_KEY.replace(/\\n/g, "\n"),
-  },
-});
+  clientEmail: process.env.GCP_CLIENT_EMAIL,
+  privateKey: process.env.GCP_PRIVATE_KEY,
+  bucketName: process.env.GCP_BUCKET_NAME
+};
 
-const bucket = storage.bucket(process.env.GCP_BUCKET_NAME);
+// Chỉ khởi tạo storage nếu có đủ config
+let storage, bucket;
 
-const upload = multer({ storage });
+if (gcpConfig.projectId && gcpConfig.clientEmail && gcpConfig.privateKey && gcpConfig.bucketName) {
+  storage = new Storage({
+    projectId: gcpConfig.projectId,
+    credentials: {
+      client_email: gcpConfig.clientEmail,
+      private_key: gcpConfig.privateKey.replace(/\\n/g, "\n"),
+    },
+  });
+  
+  bucket = storage.bucket(gcpConfig.bucketName);
+} else {
+  console.warn('⚠️  GCP configuration is incomplete. File upload features will be disabled.');
+  console.warn('Required environment variables: GCP_PROJECT_ID, GCP_CLIENT_EMAIL, GCP_PRIVATE_KEY, GCP_BUCKET_NAME');
+}
+
+
 
 // Helper function để xóa ảnh trên GCS
 async function deleteImageFromGCS(imageUrl) {
   try {
+    if (!bucket) {
+      console.warn('GCS bucket not configured, skipping image deletion');
+      return;
+    }
+    
     if (!imageUrl || imageUrl.includes("news-default.png")) {
       return; // Không xóa ảnh mặc định
     }
@@ -52,6 +73,12 @@ class NewsController {
 
       let coverImageUrl = null;
       if (req.file) {
+        if (!bucket) {
+          return res.status(500).json({ 
+            message: "File upload service is not configured. Please contact administrator." 
+          });
+        }
+        
         const filename = `news/${uuidv4()}_${req.file.originalname}`;
         const file = bucket.file(filename);
 
@@ -123,6 +150,12 @@ class NewsController {
 
       // Xử lý ảnh mới nếu có
       if (req.file) {
+        if (!bucket) {
+          return res.status(500).json({ 
+            message: "File upload service is not configured. Please contact administrator." 
+          });
+        }
+        
         const filename = `news/${uuidv4()}_${req.file.originalname}`;
         const file = bucket.file(filename);
 

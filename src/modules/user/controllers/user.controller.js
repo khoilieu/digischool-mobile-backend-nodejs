@@ -332,6 +332,160 @@ class UserController {
       next(error);
     }
   }
+
+  // Import parents từ file Excel (chỉ manager)
+  async importParents(req, res, next) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'No file uploaded'
+        });
+      }
+
+      const token = req.headers.authorization?.split(' ')[1];
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: 'No token provided'
+        });
+      }
+
+      const result = await userService.importParents(req.file.path, token);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Parent import completed',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Import parents từ base64 (chỉ manager)
+  async importParentsBase64(req, res, next) {
+    try {
+      const { base64Data, fileData } = req.body;
+      
+      // Chấp nhận cả hai tham số
+      const data = base64Data || fileData;
+      
+      if (!data) {
+        return res.status(400).json({
+          success: false,
+          message: 'No base64 data provided'
+        });
+      }
+
+      const token = req.headers.authorization?.split(' ')[1];
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: 'No token provided'
+        });
+      }
+
+      const result = await userService.importParentsBase64(data, token);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Parent import completed',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Tạo parent mới (chỉ manager)
+  async createParent(req, res, next) {
+    try {
+      const token = req.headers.authorization?.split(' ')[1];
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: 'No token provided'
+        });
+      }
+
+      const result = await userService.createParent(req.body, token);
+      
+      res.status(201).json({
+        success: true,
+        message: 'Parent created successfully',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Lấy danh sách tài khoản cho trang quản lý
+  async getAccountsForManagement(req, res, next) {
+    try {
+      const { role, search, gradeLevel, className, page, limit } = req.query;
+      
+      const result = await userService.getAccountsForManagement({
+        role,
+        search,
+        gradeLevel,
+        className,
+        page: parseInt(page) || 1,
+        limit: parseInt(limit) || 20
+      });
+      
+      res.status(200).json({
+        success: true,
+        message: 'Lấy danh sách tài khoản thành công',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Lấy danh sách lớp theo khối
+  async getClassesByGrade(req, res, next) {
+    try {
+      const { gradeLevel } = req.query;
+      
+      if (!gradeLevel) {
+        return res.status(400).json({
+          success: false,
+          message: 'Khối học là bắt buộc'
+        });
+      }
+
+      const result = await userService.getClassesByGrade(gradeLevel);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Lấy danh sách lớp thành công',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Lấy thông tin chi tiết tài khoản
+  async getAccountDetail(req, res, next) {
+    try {
+      const { id } = req.params;
+      
+      const result = await userService.getAccountDetail(id);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Lấy thông tin tài khoản thành công',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
 }
 
 module.exports = new UserController(); 

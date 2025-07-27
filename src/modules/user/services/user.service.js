@@ -400,7 +400,7 @@ class UserService {
         const user = await User.create(newUserData);
 
         // Populate subject cho response nếu là teacher
-        if (userData.role === 'teacher' && userData.subjectId) {
+        if (userData.role === 'teacher' && user.subject) {
           await user.populate('subject', 'subjectName subjectCode');
         }
 
@@ -493,6 +493,326 @@ class UserService {
           pages: Math.ceil(total / limit)
         }
       };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Lấy danh sách tài khoản cho trang quản lý
+  async getAccountsForManagement({ role, search, gradeLevel, className, page = 1, limit = 20 }) {
+    try {
+      const query = { active: true };
+      
+      // Filter theo role (student hoặc teacher/homeroom_teacher)
+      if (role === 'student') {
+        query.role = 'student';
+      } else if (role === 'teacher') {
+        query.role = { $in: ['teacher', 'homeroom_teacher'] };
+      }
+
+      // Tìm kiếm - sẽ được xử lý trong aggregation pipeline
+      let searchQuery = null;
+      if (search) {
+        searchQuery = [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+          { studentId: { $regex: search, $options: 'i' } },
+          { teacherId: { $regex: search, $options: 'i' } }
+        ];
+      }
+
+      // Sử dụng aggregation để filter theo khối và lớp
+      let pipeline = [
+        { $match: query },
+        {
+          $lookup: {
+            from: 'classes',
+            localField: 'class_id',
+            foreignField: '_id',
+            as: 'classInfo'
+          }
+        },
+        { $unwind: { path: '$classInfo', preserveNullAndEmptyArrays: true } }
+      ];
+
+
+
+      // Filter theo khối (có thể từ class_id hoặc gradeLevel trực tiếp)
+      if (gradeLevel) {
+        const gradeLevelInt = parseInt(gradeLevel);
+        pipeline.push({
+          $match: {
+            $or: [
+              { gradeLevel: gradeLevelInt },
+              { 'classInfo.gradeLevel': gradeLevelInt }
+            ]
+          }
+        });
+      }
+
+      // Filter theo lớp (có thể từ class_id hoặc className trực tiếp)
+      if (className) {
+        pipeline.push({
+          $match: {
+            $or: [
+              { className: className },
+              { 'classInfo.className': className }
+            ]
+          }
+        });
+      }
+
+      // Thêm populate cho subject
+      pipeline.push({
+        $lookup: {
+          from: 'subjects',
+          localField: 'subject',
+          foreignField: '_id',
+          as: 'subjectInfo'
+        }
+      });
+      pipeline.push({ $unwind: { path: '$subjectInfo', preserveNullAndEmptyArrays: true } });
+
+      // Thêm tìm kiếm theo tên môn học sau khi đã lookup subject
+      if (search) {
+        pipeline.push({
+          $match: {
+            $or: [
+              { name: { $regex: search, $options: 'i' } },
+              { email: { $regex: search, $options: 'i' } },
+              { studentId: { $regex: search, $options: 'i' } },
+              { teacherId: { $regex: search, $options: 'i' } },
+              { 'subjectInfo.subjectName': { $regex: search, $options: 'i' } }
+            ]
+          }
+        });
+      }
+
+      // Thêm pagination và sorting
+      pipeline.push(
+        { $sort: { name: 1 } },
+        { $skip: (page - 1) * limit },
+        { $limit: limit }
+      );
+
+      const users = await User.aggregate(pipeline);
+
+      // Đếm tổng số kết quả (không có pagination)
+      const countPipeline = [
+        { $match: query },
+        {
+          $lookup: {
+            from: 'classes',
+            localField: 'class_id',
+            foreignField: '_id',
+            as: 'classInfo'
+          }
+        },
+        { $unwind: { path: '$classInfo', preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: 'subjects',
+            localField: 'subject',
+            foreignField: '_id',
+            as: 'subjectInfo'
+          }
+        },
+        { $unwind: { path: '$subjectInfo', preserveNullAndEmptyArrays: true } }
+      ];
+
+      if (gradeLevel) {
+        const gradeLevelInt = parseInt(gradeLevel);
+        countPipeline.push({
+          $match: {
+            $or: [
+              { gradeLevel: gradeLevelInt },
+              { 'classInfo.gradeLevel': gradeLevelInt }
+            ]
+          }
+        });
+      }
+
+      if (className) {
+        countPipeline.push({
+          $match: {
+            $or: [
+              { className: className },
+              { 'classInfo.className': className }
+            ]
+          }
+        });
+      }
+
+      // Thêm tìm kiếm theo môn học cho count pipeline
+      if (search) {
+        countPipeline.push({
+          $match: {
+            $or: [
+              { name: { $regex: search, $options: 'i' } },
+              { email: { $regex: search, $options: 'i' } },
+              { studentId: { $regex: search, $options: 'i' } },
+              { teacherId: { $regex: search, $options: 'i' } },
+              { 'subjectInfo.subjectName': { $regex: search, $options: 'i' } }
+            ]
+          }
+        });
+      }
+
+      countPipeline.push({ $count: 'total' });
+      const countResult = await User.aggregate(countPipeline);
+      const total = countResult.length > 0 ? countResult[0].total : 0;
+
+      // Format dữ liệu theo yêu cầu UI
+      const formattedUsers = users.map(user => {
+        const baseData = {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          avatar: user.avatar || null,
+          active: user.active,
+          createdAt: user.createdAt
+        };
+
+        if (user.role == 'student') {
+          return {
+            ...baseData,
+            type: 'student',
+            code: user.studentId || `HS-${user._id.toString().slice(-6)}`,
+            class: user.classInfo?.className || user.className || 'Chưa phân lớp',
+            gradeLevel: user.classInfo?.gradeLevel || user.gradeLevel
+          };
+        } else {
+          return {
+            ...baseData,
+            type: 'teacher',
+            code: user.teacherId || `GV-${user._id.toString().slice(-6)}`,
+            subject: user.subjectInfo?.subjectName || 'Chưa phân môn',
+            subjectCode: user.subjectInfo?.subjectCode
+          };
+        }
+      });
+
+      return {
+        accounts: formattedUsers,
+        pagination: {
+          total,
+          page: Number(page),
+          limit: Number(limit),
+          pages: Math.ceil(total / limit)
+        }
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+
+
+  // Lấy danh sách lớp theo khối
+  async getClassesByGrade(gradeLevel) {
+    try {
+      const gradeLevelInt = parseInt(gradeLevel);
+      
+      const classes = await User.aggregate([
+        {
+          $match: {
+            role: 'student',
+            active: true
+          }
+        },
+        {
+          $lookup: {
+            from: 'classes',
+            localField: 'class_id',
+            foreignField: '_id',
+            as: 'classInfo'
+          }
+        },
+        { $unwind: { path: '$classInfo', preserveNullAndEmptyArrays: true } },
+        {
+          $match: {
+            $or: [
+              { gradeLevel: gradeLevelInt },
+              { 'classInfo.gradeLevel': gradeLevelInt }
+            ]
+          }
+        },
+        {
+          $group: {
+            _id: {
+              $ifNull: ['$classInfo.className', '$className']
+            },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $sort: { _id: 1 }
+        }
+      ]);
+
+      return classes.map(cls => ({
+        className: cls._id,
+        studentCount: cls.count
+      }));
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Lấy thông tin chi tiết tài khoản
+  async getAccountDetail(id) {
+    try {
+      const user = await User.findById(id)
+        .populate([
+          { path: 'class_id', select: 'className gradeLevel academicYear' },
+          { path: 'subject', select: 'subjectName subjectCode' }
+        ]);
+
+      if (!user) {
+        throw new Error('Tài khoản không tồn tại');
+      }
+
+      // Format dữ liệu chi tiết
+      const accountDetail = {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone || '',
+        address: user.address || '',
+        dateOfBirth: user.dateOfBirth || null,
+        gender: user.gender || '',
+        avatar: user.avatar || null,
+        active: user.active,
+        role: user.role,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      };
+
+      if (user.role == 'student') {
+        return {
+          ...accountDetail,
+          studentId: user.studentId || `HS-${user._id.toString().slice(-6)}`,
+          class: {
+            name: user.class_id?.className || user.className || 'Chưa phân lớp',
+            gradeLevel: user.class_id?.gradeLevel || user.gradeLevel,
+            academicYear: user.class_id?.academicYear || user.academicYear
+          },
+          subjects: [],
+          roleInfo: { type: 'student' }
+        };
+      } else {
+        return {
+          ...accountDetail,
+          teacherId: user.teacherId || `GV-${user._id.toString().slice(-6)}`,
+          subject: user.subject?.subjectName || 'Chưa phân môn',
+          subjectCode: user.subject?.subjectCode,
+          subjects: user.subjects || [],
+          roleInfo: { 
+            type: 'teacher',
+            isHomeroom: user.role === 'homeroom_teacher'
+          }
+        };
+      }
     } catch (error) {
       throw error;
     }
@@ -1353,6 +1673,497 @@ class UserService {
     } catch (error) {
       throw error;
     }
+  }
+
+  // Tạo parent mới với thông tin đầy đủ (chỉ manager)
+  async createParent(parentData, token) {
+    try {
+      // Verify token và kiểm tra role manager
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const currentUser = await User.findById(decoded.id);
+      
+      if (!currentUser || !currentUser.role.includes('manager')) {
+        throw new Error('Only managers can create parents');
+      }
+
+      // Validate dữ liệu bắt buộc
+      const { name, email, phone, childrenIds, dateOfBirth, gender, address } = parentData;
+      
+      if (!name || !phone || !childrenIds || !Array.isArray(childrenIds) || childrenIds.length === 0) {
+        throw new Error('Missing required fields: name, phone, or childrenIds (must be a non-empty array)');
+      }
+
+      // Generate email if not provided
+      const parentEmail = email || this.generateParentEmail(name);
+
+      // Kiểm tra email đã tồn tại (nếu được cung cấp)
+      if (email) {
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+          throw new Error('Email already exists');
+        }
+      }
+
+      // Kiểm tra phone đã tồn tại
+      const existingPhone = await User.findOne({ phone });
+      if (existingPhone) {
+        throw new Error('Phone number already exists');
+      }
+
+      // Kiểm tra tất cả children có tồn tại và là student không
+      const children = await User.find({ 
+        _id: { $in: childrenIds },
+        role: { $in: ['student'] }
+      });
+
+      if (children.length !== childrenIds.length) {
+        throw new Error('Some children not found or are not students');
+      }
+
+      // Tạo mật khẩu tạm thời và hash
+      const tempPassword = this.generateOTP();
+      const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+      // Tạo parent mới
+      const newParent = new User({
+        name,
+        email: parentEmail,
+        passwordHash,
+        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+        gender: gender || 'other',
+        role: ['parents'],
+        children: childrenIds,
+        phone,
+        address: address || '',
+        isNewUser: true, // Sẽ redirect tới set-password khi login
+        active: true
+      });
+
+      await newParent.save();
+
+      // Populate children info cho response
+      await newParent.populate('children', 'name studentId class_id');
+
+      // Gửi email với mật khẩu tạm thời
+      const childrenNames = children.map(child => child.name);
+      await this.sendParentWelcomeEmail(parentEmail, name, tempPassword, childrenNames);
+
+      return {
+        id: newParent._id,
+        name: newParent.name,
+        email: newParent.email,
+        phone: newParent.phone,
+        address: newParent.address,
+        children: newParent.children.map(child => ({
+          id: child._id,
+          name: child.name,
+          studentId: child.studentId,
+          class_id: child.class_id
+        })),
+        dateOfBirth: newParent.dateOfBirth,
+        gender: newParent.gender,
+        role: newParent.role,
+        isNewUser: newParent.isNewUser,
+        active: newParent.active,
+        tempPassword: tempPassword, // Tạm thời để test, production nên bỏ
+        status: 'awaiting_first_login',
+        createdAt: newParent.createdAt,
+        updatedAt: newParent.updatedAt
+      };
+
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Gửi email chào mừng cho parent mới import
+  async sendParentWelcomeEmail(email, name, tempPassword, childrenNames) {
+    try {
+      // Kiểm tra cấu hình email
+      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        console.log(`📧 [NO EMAIL CONFIG] Temp password for ${email}: ${tempPassword}`);
+        console.log('⚠️  Please configure EMAIL_USER, EMAIL_PASS in .env file to send real emails');
+        return;
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: process.env.EMAIL_HOST,
+        port: process.env.EMAIL_PORT || 587,
+        secure: process.env.EMAIL_PORT == 465,
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS
+        }
+      });
+
+      const mailOptions = {
+        from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+        to: email,
+        subject: 'Welcome to EcoSchool - Parent Account Created',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color: #2c3e50;">EcoSchool - Parent Account</h1>
+            <p>Hello ${name},</p>
+            <p>Your parent account has been created successfully. You can now access information about your children's education.</p>
+            <p><strong>Children:</strong> ${childrenNames.join(', ')}</p>
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; text-align: center; margin: 20px 0;">
+              <h2 style="color: #e74c3c; font-size: 24px; letter-spacing: 2px;">${tempPassword}</h2>
+              <p style="margin: 0; color: #7f8c8d;">Your temporary password</p>
+            </div>
+            <p><strong>Important:</strong></p>
+            <ul>
+              <li>Use this temporary password to log in for the first time</li>
+              <li>You will be prompted to set a new password on first login</li>
+              <li>Do not share this password with anyone</li>
+            </ul>
+            <p>If you have any questions, please contact the school administration.</p>
+            <hr style="margin: 30px 0;">
+            <p style="color: #7f8c8d; font-size: 12px;">This is an automated message from EcoSchool system.</p>
+          </div>
+        `
+      };
+
+      await transporter.sendMail(mailOptions);
+      console.log(`📧 Parent welcome email successfully sent to ${email}`);
+    } catch (error) {
+      console.error('❌ Parent welcome email sending failed:', error.message);
+      console.log(`📧 [FALLBACK] Temp password for ${email}: ${tempPassword}`);
+    }
+  }
+
+  // Import parents từ file Excel
+  async importParents(filePath, token) {
+    const XLSX = require('xlsx');
+    const fs = require('fs');
+    
+    try {
+      // Verify token và kiểm tra role manager
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const currentUser = await User.findById(decoded.id);
+      
+      if (!currentUser || !currentUser.role.includes('manager')) {
+        throw new Error('Only managers can import parents');
+      }
+
+      // Đọc file Excel
+      const workbook = XLSX.readFile(filePath);
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const parentsData = XLSX.utils.sheet_to_json(worksheet);
+
+      if (!parentsData || parentsData.length === 0) {
+        throw new Error('No data found in Excel file');
+      }
+
+      const results = {
+        success: [],
+        failed: [],
+        total: parentsData.length
+      };
+
+      // Group parents by email to handle multiple children
+      const parentsByEmail = {};
+      
+      // Process each row
+      for (let i = 0; i < parentsData.length; i++) {
+        const parentRow = parentsData[i];
+        
+        try {
+          // Validate dữ liệu
+          if (!parentRow.name || !parentRow.childId || !parentRow.phone) {
+            results.failed.push({
+              row: i + 2,
+              data: parentRow,
+              error: 'Missing required fields: name, childId, or phone'
+            });
+            continue;
+          }
+
+          // Generate email if not provided
+          const email = parentRow.email || this.generateParentEmail(parentRow.name);
+          
+          // Find child by _id
+          const child = await User.findById(parentRow.childId);
+          
+          if (!child || !child.role.includes('student')) {
+            results.failed.push({
+              row: i + 2,
+              data: parentRow,
+              error: `Child with ID '${parentRow.childId}' not found or is not a student`
+            });
+            continue;
+          }
+
+          // Group by email to handle multiple children
+          if (!parentsByEmail[email]) {
+            parentsByEmail[email] = {
+              name: parentRow.name,
+              email: email,
+              dateOfBirth: parentRow.dateOfBirth ? new Date(parentRow.dateOfBirth) : null,
+              gender: parentRow.gender || 'other',
+              phone: parentRow.phone,
+              address: parentRow.address || '',
+              children: [],
+              row: i + 2
+            };
+          }
+          
+          parentsByEmail[email].children.push(child._id);
+
+        } catch (error) {
+          results.failed.push({
+            row: i + 2,
+            data: parentRow,
+            error: error.message
+          });
+        }
+      }
+
+      // Process unique parents
+      for (const [email, parentInfo] of Object.entries(parentsByEmail)) {
+        try {
+          // Kiểm tra email đã tồn tại
+          const existingUser = await User.findOne({ email });
+          if (existingUser) {
+            results.failed.push({
+              row: parentInfo.row,
+              data: { email, name: parentInfo.name },
+              error: 'Email already exists'
+            });
+            continue;
+          }
+
+          // Tạo mật khẩu tạm thời và hash
+          const tempPassword = this.generateOTP();
+          const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+          // Get children names for email
+          const children = await User.find({ _id: { $in: parentInfo.children } });
+          const childrenNames = children.map(child => child.name);
+
+          // Tạo parent mới
+          const newParent = new User({
+            name: parentInfo.name,
+            email: parentInfo.email,
+            passwordHash,
+            dateOfBirth: parentInfo.dateOfBirth,
+            gender: parentInfo.gender,
+            role: ['parents'],
+            children: parentInfo.children,
+            phone: parentInfo.phone,
+            address: parentInfo.address,
+            isNewUser: true,
+            active: true
+          });
+
+          await newParent.save();
+
+          // Gửi email với mật khẩu tạm thời
+          await this.sendParentWelcomeEmail(parentInfo.email, parentInfo.name, tempPassword, childrenNames);
+
+          results.success.push({
+            row: parentInfo.row,
+            email: parentInfo.email,
+            name: parentInfo.name,
+            childrenCount: parentInfo.children.length,
+            childrenNames: childrenNames,
+            status: 'awaiting_first_login',
+            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
+          });
+
+        } catch (error) {
+          results.failed.push({
+            row: parentInfo.row,
+            data: { email: parentInfo.email, name: parentInfo.name },
+            error: error.message
+          });
+        }
+      }
+
+      // Xóa file tạm sau khi xử lý
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+
+      return results;
+
+    } catch (error) {
+      // Xóa file tạm nếu có lỗi
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      throw error;
+    }
+  }
+
+  // Import parents từ base64
+  async importParentsBase64(fileData, token) {
+    const XLSX = require('xlsx');
+    
+    try {
+      // Verify token và kiểm tra role manager
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const currentUser = await User.findById(decoded.id);
+      
+      if (!currentUser || !currentUser.role.includes('manager')) {
+        throw new Error('Only managers can import parents');
+      }
+
+      // Decode base64 data
+      const buffer = Buffer.from(fileData, 'base64');
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const parentsData = XLSX.utils.sheet_to_json(worksheet);
+
+      if (!parentsData || parentsData.length === 0) {
+        throw new Error('No data found in Excel file');
+      }
+
+      const results = {
+        success: [],
+        failed: [],
+        total: parentsData.length
+      };
+
+      // Group parents by email to handle multiple children
+      const parentsByEmail = {};
+      
+      // Process each row
+      for (let i = 0; i < parentsData.length; i++) {
+        const parentRow = parentsData[i];
+        
+        try {
+          // Validate dữ liệu
+          if (!parentRow.name || !parentRow.childId || !parentRow.phone) {
+            results.failed.push({
+              row: i + 2,
+              data: parentRow,
+              error: 'Missing required fields: name, childId, or phone'
+            });
+            continue;
+          }
+
+          // Generate email if not provided
+          const email = parentRow.email || this.generateParentEmail(parentRow.name);
+          
+          // Find child by _id
+          const child = await User.findById(parentRow.childId);
+          
+          if (!child || !child.role.includes('student')) {
+            results.failed.push({
+              row: i + 2,
+              data: parentRow,
+              error: `Child with ID '${parentRow.childId}' not found or is not a student`
+            });
+            continue;
+          }
+
+          // Group by email to handle multiple children
+          if (!parentsByEmail[email]) {
+            parentsByEmail[email] = {
+              name: parentRow.name,
+              email: email,
+              dateOfBirth: parentRow.dateOfBirth ? new Date(parentRow.dateOfBirth) : null,
+              gender: parentRow.gender || 'other',
+              phone: parentRow.phone,
+              address: parentRow.address || '',
+              children: [],
+              row: i + 2
+            };
+          }
+          
+          parentsByEmail[email].children.push(child._id);
+
+        } catch (error) {
+          results.failed.push({
+            row: i + 2,
+            data: parentRow,
+            error: error.message
+          });
+        }
+      }
+
+      // Process unique parents
+      for (const [email, parentInfo] of Object.entries(parentsByEmail)) {
+        try {
+          // Kiểm tra email đã tồn tại
+          const existingUser = await User.findOne({ email });
+          if (existingUser) {
+            results.failed.push({
+              row: parentInfo.row,
+              data: { email, name: parentInfo.name },
+              error: 'Email already exists'
+            });
+            continue;
+          }
+
+          // Tạo mật khẩu tạm thời và hash
+          const tempPassword = this.generateOTP();
+          const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+          // Get children names for email
+          const children = await User.find({ _id: { $in: parentInfo.children } });
+          const childrenNames = children.map(child => child.name);
+
+          // Tạo parent mới
+          const newParent = new User({
+            name: parentInfo.name,
+            email: parentInfo.email,
+            passwordHash,
+            dateOfBirth: parentInfo.dateOfBirth,
+            gender: parentInfo.gender,
+            role: ['parents'],
+            children: parentInfo.children,
+            phone: parentInfo.phone,
+            address: parentInfo.address,
+            isNewUser: true,
+            active: true
+          });
+
+          await newParent.save();
+
+          // Gửi email với mật khẩu tạm thời
+          await this.sendParentWelcomeEmail(parentInfo.email, parentInfo.name, tempPassword, childrenNames);
+
+          results.success.push({
+            row: parentInfo.row,
+            email: parentInfo.email,
+            name: parentInfo.name,
+            childrenCount: parentInfo.children.length,
+            childrenNames: childrenNames,
+            status: 'awaiting_first_login',
+            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
+          });
+
+        } catch (error) {
+          results.failed.push({
+            row: parentInfo.row,
+            data: { email: parentInfo.email, name: parentInfo.name },
+            error: error.message
+          });
+        }
+      }
+
+      return results;
+
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Generate parent email from name
+  generateParentEmail(name) {
+    // Remove diacritics and convert to lowercase
+    const normalizedName = name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, '')
+      .replace(/\s+/g, '')
+      .substring(0, 20); // Limit length
+    
+    return `${normalizedName}.parents@yopmail.com`;
   }
 }
 

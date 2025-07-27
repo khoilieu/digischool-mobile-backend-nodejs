@@ -77,7 +77,6 @@ class NotificationService {
 
   async getUserNotifications(userId, type, page = 1, limit = 20) {
     try {
-      console.log("\uD83D\uDCCB Getting notifications for user:", userId);
       const query = { receivers: userId };
       if (type) query.type = type;
       const notifications = await Notification.find(query)
@@ -140,10 +139,6 @@ class NotificationService {
           };
         }
       }
-
-      console.log(
-        `\u2705 Found ${notifications.length} notifications for user ${userId}`
-      );
       return notifications;
     } catch (error) {
       console.error("\u274C Error getting notifications:", error.message);
@@ -153,12 +148,6 @@ class NotificationService {
 
   async markAsRead(notificationId, userId) {
     try {
-      console.log(
-        "\u270F\uFE0F Marking notification as read:",
-        notificationId,
-        "for user:",
-        userId
-      );
       const notification = await Notification.findByIdAndUpdate(
         notificationId,
         { $addToSet: { isReadBy: userId } },
@@ -171,10 +160,6 @@ class NotificationService {
       }
       return notification;
     } catch (error) {
-      console.error(
-        "\u274C Error marking notification as read:",
-        error.message
-      );
       throw error;
     }
   }
@@ -222,7 +207,6 @@ class NotificationService {
           return [];
       }
     } catch (error) {
-      console.error("\u274C Error getting user ids from scope:", error.message);
       throw error;
     }
   }
