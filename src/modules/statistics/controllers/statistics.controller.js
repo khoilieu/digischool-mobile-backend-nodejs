@@ -134,7 +134,20 @@ class StatisticsController {
   getTeacherRollcall = async (req, res, next) => {
     try {
       const { date, status, subject, weekNumber, academicYear } = req.query;
-      const targetDate = date ? new Date(date) : new Date();
+      
+      // Kiểm tra và xử lý date
+      let targetDate;
+      if (date) {
+        targetDate = new Date(date);
+        if (isNaN(targetDate.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: "Định dạng ngày không hợp lệ"
+          });
+        }
+      } else {
+        targetDate = new Date();
+      }
       
       const filters = {
         status,
@@ -152,7 +165,11 @@ class StatisticsController {
         data: rollcallData
       });
     } catch (error) {
-      next(error);
+      console.error("❌ Error in getTeacherRollcall:", error.message);
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
     }
   };
 

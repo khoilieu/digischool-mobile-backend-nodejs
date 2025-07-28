@@ -326,6 +326,11 @@ class StatisticsService {
     try {
       const { status, subject, weekNumber, academicYear } = filters;
       
+      // Kiểm tra targetDate có hợp lệ không
+      if (!targetDate || isNaN(new Date(targetDate).getTime())) {
+        throw new Error("Ngày không hợp lệ");
+      }
+      
       // Lấy ngày bắt đầu và kết thúc của ngày
       const startOfDay = new Date(targetDate);
       startOfDay.setHours(0, 0, 0, 0);
@@ -367,12 +372,19 @@ class StatisticsService {
       // Tạo map để dễ lookup
       const evaluationMap = new Map();
       evaluations.forEach(evaluation => {
-        evaluationMap.set(evaluation.lesson.toString(), evaluation);
+        if (evaluation && evaluation.lesson) {
+          evaluationMap.set(evaluation.lesson.toString(), evaluation);
+        }
       });
 
       // Nhóm lessons theo teacher
       const teacherLessonsMap = new Map();
       lessons.forEach(lesson => {
+        // Kiểm tra lesson.teacher có tồn tại không
+        if (!lesson.teacher || !lesson.teacher._id) {
+          return; // Bỏ qua lesson này
+        }
+        
         const teacherId = lesson.teacher._id.toString();
         if (!teacherLessonsMap.has(teacherId)) {
           teacherLessonsMap.set(teacherId, []);
@@ -383,14 +395,27 @@ class StatisticsService {
       // Tạo danh sách điểm danh
       const rollcalls = [];
       for (const [teacherId, teacherLessons] of teacherLessonsMap) {
+        // Kiểm tra teacherLessons có dữ liệu không
+        if (!teacherLessons || teacherLessons.length === 0) {
+          continue;
+        }
+        
         // Tìm tiết học đã hoàn thành đầu tiên của giáo viên trong ngày
         let completedLesson = null;
         let completedEvaluation = null;
         
         // Sắp xếp theo period để tìm tiết hoàn thành đầu tiên
-        teacherLessons.sort((a, b) => a.timeSlot.period - b.timeSlot.period);
+        teacherLessons.sort((a, b) => {
+          if (!a.timeSlot || !b.timeSlot) return 0;
+          return a.timeSlot.period - b.timeSlot.period;
+        });
         
         for (const lesson of teacherLessons) {
+          // Kiểm tra lesson có tồn tại không
+          if (!lesson) {
+            continue;
+          }
+          
           // Kiểm tra status của lesson thay vì đánh giá
           if (lesson.status === 'completed') {
             completedLesson = lesson;
@@ -402,7 +427,11 @@ class StatisticsService {
 
         // Nếu không có tiết nào hoàn thành, lấy tiết đầu tiên với trạng thái "Chưa điểm danh"
         if (!completedLesson) {
-          completedLesson = teacherLessons[0];
+          if (teacherLessons.length > 0) {
+            completedLesson = teacherLessons[0];
+          } else {
+            continue;
+          }
         }
 
         // Tính toán trạng thái điểm danh
@@ -415,6 +444,23 @@ class StatisticsService {
           if (status === 'Trễ' && attendanceStatus !== 'Trễ') continue;
         }
 
+        // Kiểm tra các thuộc tính cần thiết trước khi tạo rollcall
+        if (!completedLesson.teacher || !completedLesson.teacher._id) {
+          continue;
+        }
+        
+        if (!completedLesson.class || !completedLesson.class.className) {
+          continue;
+        }
+        
+        if (!completedLesson.subject || !completedLesson.subject.subjectName) {
+          continue;
+        }
+        
+        if (!completedLesson.timeSlot) {
+          continue;
+        }
+        
         rollcalls.push({
           teacherId: completedLesson.teacher._id,
           teacherName: completedLesson.teacher.name,
@@ -777,7 +823,7 @@ class StatisticsService {
   getDefaultRequirements() {
     return {
       'Toán': 4,
-      'Ngữ Văn': 4,
+      'Ngữ văn': 4,
       'Vật lý': 3,
       'Hóa học': 2,
       'Sinh học': 3,
@@ -788,7 +834,6 @@ class StatisticsService {
       'Thể dục': 2,
       'GDQP': 2,
       'Tin học': 2,
-      'Công nghệ': 2
     };
   }
 

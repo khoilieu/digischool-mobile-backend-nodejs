@@ -738,7 +738,7 @@ class ScheduleService {
       throw new Error("Thiếu startDate, endDate hoặc academicYear!");
     }
 
-    // Xác định giáo viên chủ nhiệm cho từng lớp
+    // Xác định giáo viên chủ nhiệm cho từng lớp và cập nhật trước khi tạo lesson
     const homeroomTeachersByClass = {};
     for (const row of data) {
       const {
@@ -751,6 +751,63 @@ class ScheduleService {
       }
     }
 
+    // Cập nhật giáo viên chủ nhiệm cho các lớp TRƯỚC KHI tạo lesson
+    console.log("🔄 Cập nhật giáo viên chủ nhiệm cho các lớp...");
+    const updatedClasses = [];
+    const teacherMapping = new Map(); // Map để lưu teacher cũ -> teacher mới
+
+    for (const [className, homeroomTeacherName] of Object.entries(homeroomTeachersByClass)) {
+      const classObj = allClasses.find((c) => c.className === className);
+      if (classObj) {
+        // Tìm hoặc tạo giáo viên chủ nhiệm
+        let homeroomTeacher = allTeachers.find((t) => t.name === homeroomTeacherName);
+        
+        if (!homeroomTeacher) {
+          // Tạo mới giáo viên chủ nhiệm nếu chưa tồn tại
+          const gender = Math.random() < 0.5 ? "male" : "female";
+          const newTeacher = new User({
+            name: homeroomTeacherName,
+            email: `gv${Date.now()}${Math.floor(Math.random() * 1000)}@yopmail.com`,
+            passwordHash: await bcrypt.hash("Teacher@123", 10),
+            role: ["teacher", "homeroom_teacher"],
+            isNewUser: true,
+            active: true,
+            gender: gender,
+          });
+          await newTeacher.save();
+          allTeachers.push(newTeacher);
+          homeroomTeacher = newTeacher;
+          createdTeachers.push(newTeacher);
+        } else {
+          // Cập nhật role nếu chưa có homeroom_teacher
+          if (!homeroomTeacher.role.includes("homeroom_teacher")) {
+            homeroomTeacher.role = Array.from(
+              new Set([...homeroomTeacher.role, "homeroom_teacher"])
+            );
+            await homeroomTeacher.save();
+          }
+        }
+
+        // Lưu mapping teacher cũ -> teacher mới nếu có thay đổi
+        if (classObj.homeroomTeacher && classObj.homeroomTeacher.toString() !== homeroomTeacher._id.toString()) {
+          teacherMapping.set(classObj.homeroomTeacher.toString(), homeroomTeacher._id.toString());
+        }
+
+        // Cập nhật homeroomTeacher cho lớp
+        if (classObj.homeroomTeacher?.toString() !== homeroomTeacher._id.toString()) {
+          const oldTeacherId = classObj.homeroomTeacher;
+          classObj.homeroomTeacher = homeroomTeacher._id;
+          await classObj.save();
+          updatedClasses.push({
+            className: classObj.className,
+            oldHomeroomTeacher: oldTeacherId,
+            newHomeroomTeacher: homeroomTeacher.name
+          });
+          console.log(`✅ Cập nhật GVCN cho lớp ${className}: ${homeroomTeacher.name}`);
+        }
+      }
+    }
+
     async function findOrCreateAndUpdateTeacher(
       teacherName,
       subjectObj,
@@ -759,6 +816,7 @@ class ScheduleService {
       if (!teacherName) return null;
       let teacher = allTeachers.find((t) => t.name === teacherName);
       const isHomeroom = homeroomTeachersByClass[className] === teacherName;
+      
       if (!teacher) {
         // Tạo mới
         const gender = Math.random() < 0.5 ? "male" : "female";
@@ -779,18 +837,20 @@ class ScheduleService {
           active: true,
           gender: gender,
           subject: subjectObj && !isSpecial ? subjectObj._id : undefined,
-          // subjects: subjectObj && !isSpecial ? [subjectObj._id] : [], // XÓA DÒNG NÀY
         });
         await newTeacher.save();
         allTeachers.push(newTeacher);
+        createdTeachers.push(newTeacher);
         return newTeacher;
       }
+      
       // Update role nếu là chủ nhiệm
       if (isHomeroom && !teacher.role.includes("homeroom_teacher")) {
         teacher.role = Array.from(
           new Set([...teacher.role, "homeroom_teacher"])
         );
       }
+      
       // Chỉ gán subject nếu là môn chuyên môn
       if (
         subjectObj &&
@@ -798,7 +858,7 @@ class ScheduleService {
       ) {
         teacher.subject = subjectObj._id;
       }
-      // XÓA LOGIC GÁN subjects ARRAY
+      
       teacher.passwordHash = await bcrypt.hash("Teacher@123", 10);
       if (teacher.email && teacher.email.endsWith("@school.local")) {
         teacher.email = teacher.email.replace(
@@ -860,6 +920,21 @@ class ScheduleService {
           error: `Không thể tạo hoặc cập nhật giáo viên '${teacherName}'`,
         });
         continue;
+      }
+
+      // Kiểm tra xem có cần thay thế teacher ID không (nếu là giáo viên chủ nhiệm)
+      const isHomeroomLesson = ["Chào cờ", "Sinh hoạt lớp"].includes(subjectName);
+      if (isHomeroomLesson && teacherMapping.has(teacherObj._id.toString())) {
+        // Nếu là lesson của giáo viên chủ nhiệm và có mapping, sử dụng teacher mới
+        const newTeacherId = teacherMapping.get(teacherObj._id.toString());
+        teacherObj = allTeachers.find(t => t._id.toString() === newTeacherId);
+        if (!teacherObj) {
+          errors.push({
+            row: i + 2,
+            error: `Không tìm thấy giáo viên mới cho '${teacherName}'`,
+          });
+          continue;
+        }
       }
       // Mapping scheduledDate
       const dayIndex = dayMap[day];
@@ -986,6 +1061,17 @@ class ScheduleService {
       await weeklySchedule.save();
     }
 
+    // Cập nhật lại các lesson đã tạo để đảm bảo sử dụng đúng teacher ID
+    console.log("🔄 Cập nhật teacher ID cho các lesson đã tạo...");
+    for (const lesson of createdLessons) {
+      if (lesson.teacher && teacherMapping.has(lesson.teacher.toString())) {
+        const newTeacherId = teacherMapping.get(lesson.teacher.toString());
+        lesson.teacher = newTeacherId;
+        await lesson.save();
+        console.log(`✅ Cập nhật teacher ID cho lesson ${lesson.lessonId}: ${lesson.teacher} -> ${newTeacherId}`);
+      }
+    }
+
     return {
       errors,
       createdTeachers: createdTeachers.map((t) => ({
@@ -995,6 +1081,13 @@ class ScheduleService {
       })),
       totalLessons: createdLessons.length,
       totalTeachersCreated: createdTeachers.length,
+      updatedClasses: updatedClasses,
+      totalClassesUpdated: updatedClasses.length,
+      teacherMappings: Array.from(teacherMapping.entries()).map(([oldId, newId]) => ({
+        oldTeacherId: oldId,
+        newTeacherId: newId,
+      })),
+      totalTeacherMappings: teacherMapping.size,
     };
   }
 }

@@ -801,15 +801,32 @@ class UserService {
           roleInfo: { type: 'student' }
         };
       } else {
+        // Kiểm tra xem teacher có là giáo viên chủ nhiệm lớp nào không
+        let homeroomClass = null;
+        if (user.role.includes('homeroom_teacher') || user.role.includes('teacher')) {
+          const Class = require('../../classes/models/class.model');
+          homeroomClass = await Class.findOne({ 
+            homeroomTeacher: user._id,
+            active: true 
+          }).select('className gradeLevel academicYear');
+        }
+
         return {
           ...accountDetail,
           teacherId: user.teacherId || `GV-${user._id.toString().slice(-6)}`,
           subject: user.subject?.subjectName || 'Chưa phân môn',
           subjectCode: user.subject?.subjectCode,
           subjects: user.subjects || [],
+          homeroomClass: homeroomClass ? {
+            id: homeroomClass._id,
+            name: homeroomClass.className,
+            gradeLevel: homeroomClass.gradeLevel,
+            academicYear: homeroomClass.academicYear
+          } : null,
           roleInfo: { 
             type: 'teacher',
-            isHomeroom: user.role === 'homeroom_teacher'
+            isHomeroom: user.role.includes('homeroom_teacher'),
+            isHomeroomTeacher: homeroomClass !== null
           }
         };
       }

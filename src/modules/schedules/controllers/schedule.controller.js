@@ -308,10 +308,34 @@ class ScheduleController {
       // Xóa file tạm sau khi xử lý
       fs.unlinkSync(filePath);
 
+      // Tạo message chi tiết về kết quả import
+      let message = "Import thời khóa biểu thành công";
+      if (result.totalClassesUpdated > 0) {
+        message += `. Đã cập nhật ${result.totalClassesUpdated} lớp với giáo viên chủ nhiệm mới`;
+      }
+      if (result.totalTeachersCreated > 0) {
+        message += `. Đã tạo ${result.totalTeachersCreated} giáo viên mới`;
+      }
+      if (result.totalLessons > 0) {
+        message += `. Đã tạo ${result.totalLessons} tiết học`;
+      }
+      if (result.totalTeacherMappings > 0) {
+        message += `. Đã cập nhật ${result.totalTeacherMappings} teacher ID trong lesson`;
+      }
+
       res.status(200).json({
         success: true,
-        message: "Import thời khóa biểu thành công",
-        ...result,
+        message: message,
+        data: {
+          errors: result.errors,
+          createdTeachers: result.createdTeachers,
+          updatedClasses: result.updatedClasses,
+          teacherMappings: result.teacherMappings,
+          totalLessons: result.totalLessons,
+          totalTeachersCreated: result.totalTeachersCreated,
+          totalClassesUpdated: result.totalClassesUpdated,
+          totalTeacherMappings: result.totalTeacherMappings,
+        },
       });
     } catch (error) {
       res.status(500).json({
