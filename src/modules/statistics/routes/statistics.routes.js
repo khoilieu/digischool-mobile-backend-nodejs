@@ -37,7 +37,7 @@ router.get('/completion-rates',
   statisticsController.getCompletionRates
 );
 
-// Điểm danh giáo viên theo ngày
+// Điểm danh giáo viên theo ngày - trả về tiết học đã hoàn thành đầu tiên
 router.get('/teacher-rollcall', 
   authMiddleware.authorize("admin", "manager"), 
   statisticsController.getTeacherRollcall

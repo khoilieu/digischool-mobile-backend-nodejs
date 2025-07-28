@@ -121,9 +121,11 @@ class StatisticsService {
         active: true 
       });
 
-      // Tìm các giáo viên đã điểm danh (có đánh giá tiết học trong ngày)
-      const attendedTeachers = await TeacherLessonEvaluation.distinct('teacher', {
-        createdAt: { $gte: startOfDay, $lte: endOfDay }
+      // Tìm các giáo viên đã điểm danh (có lesson completed trong ngày)
+      const attendedTeachers = await Lesson.distinct('teacher', {
+        scheduledDate: { $gte: startOfDay, $lte: endOfDay },
+        status: 'completed',
+        teacher: { $exists: true, $ne: null }
       });
 
       const attendedCount = attendedTeachers.length;
@@ -269,14 +271,24 @@ class StatisticsService {
         })
       ]);
 
-      // Lấy số học sinh có đánh giá tiết học trong khoảng thời gian
-      const studentsWithEvaluations = await StudentLessonEvaluation.distinct('student', {
-        evaluatedAt: { $gte: startDate, $lte: endDate }
+      // Lấy số học sinh có lesson completed trong khoảng thời gian
+      const studentsWithCompletedLessons = await Lesson.distinct('class', {
+        scheduledDate: { $gte: startDate, $lte: endDate },
+        status: 'completed'
       });
 
-      // Lấy số giáo viên có đánh giá tiết học trong khoảng thời gian
-      const teachersWithEvaluations = await TeacherLessonEvaluation.distinct('teacher', {
-        createdAt: { $gte: startDate, $lte: endDate }
+      // Lấy số học sinh từ các lớp có lesson completed
+      const studentsWithEvaluations = await User.distinct('_id', {
+        class_id: { $in: studentsWithCompletedLessons },
+        role: 'student',
+        active: true
+      });
+
+      // Lấy số giáo viên có lesson completed trong khoảng thời gian
+      const teachersWithEvaluations = await Lesson.distinct('teacher', {
+        scheduledDate: { $gte: startDate, $lte: endDate },
+        status: 'completed',
+        teacher: { $exists: true, $ne: null }
       });
 
       const studentCompletionRate = totalStudents > 0 
@@ -307,6 +319,8 @@ class StatisticsService {
 
   /**
    * Lấy dữ liệu điểm danh giáo viên theo ngày
+   * Logic: Giáo viên được coi là đã điểm danh nếu có lesson với status 'completed' trong ngày
+   * Trả về thông tin tiết học đã hoàn thành đầu tiên của mỗi giáo viên
    */
   async getTeacherRollcallData(targetDate, filters = {}) {
     try {
@@ -356,7 +370,7 @@ class StatisticsService {
         evaluationMap.set(evaluation.lesson.toString(), evaluation);
       });
 
-      // Nhóm lessons theo teacher và tìm tiết học đầu tiên
+      // Nhóm lessons theo teacher
       const teacherLessonsMap = new Map();
       lessons.forEach(lesson => {
         const teacherId = lesson.teacher._id.toString();
@@ -369,15 +383,30 @@ class StatisticsService {
       // Tạo danh sách điểm danh
       const rollcalls = [];
       for (const [teacherId, teacherLessons] of teacherLessonsMap) {
-        // Sắp xếp theo period để tìm tiết đầu tiên
+        // Tìm tiết học đã hoàn thành đầu tiên của giáo viên trong ngày
+        let completedLesson = null;
+        let completedEvaluation = null;
+        
+        // Sắp xếp theo period để tìm tiết hoàn thành đầu tiên
         teacherLessons.sort((a, b) => a.timeSlot.period - b.timeSlot.period);
-        const firstLesson = teacherLessons[0];
         
-        // Kiểm tra evaluation cho tiết học đầu tiên
-        const evaluation = evaluationMap.get(firstLesson._id.toString());
-        
+        for (const lesson of teacherLessons) {
+          // Kiểm tra status của lesson thay vì đánh giá
+          if (lesson.status === 'completed') {
+            completedLesson = lesson;
+            // Tìm đánh giá tương ứng nếu có
+            completedEvaluation = evaluationMap.get(lesson._id.toString()) || null;
+            break; // Tìm thấy tiết hoàn thành đầu tiên
+          }
+        }
+
+        // Nếu không có tiết nào hoàn thành, lấy tiết đầu tiên với trạng thái "Chưa điểm danh"
+        if (!completedLesson) {
+          completedLesson = teacherLessons[0];
+        }
+
         // Tính toán trạng thái điểm danh
-        const attendanceStatus = this.calculateAttendanceStatus(firstLesson, evaluation);
+        const attendanceStatus = this.calculateAttendanceStatus(completedLesson, completedEvaluation);
         
         // Filter theo trạng thái nếu có
         if (status && status !== 'Tất cả') {
@@ -387,17 +416,16 @@ class StatisticsService {
         }
 
         rollcalls.push({
-          teacherId: firstLesson.teacher._id,
-          teacherName: firstLesson.teacher.name,
-          class: firstLesson.class.className,
-          subject: firstLesson.subject.subjectName,
-          period: firstLesson.timeSlot.period,
-          startTime: firstLesson.timeSlot.startTime,
-          endTime: firstLesson.timeSlot.endTime,
+          teacherId: completedLesson.teacher._id,
+          teacherName: completedLesson.teacher.name,
+          class: completedLesson.class.className,
+          subject: completedLesson.subject.subjectName,
+          period: completedLesson.timeSlot.period,
+          startTime: completedLesson.timeSlot.startTime,
+          endTime: completedLesson.timeSlot.endTime,
           status: attendanceStatus,
-          completedAt: evaluation ? evaluation.createdAt : null,
-          isFirstLessonOfDay: true,
-          lessonId: firstLesson._id
+          completedAt: completedEvaluation ? completedEvaluation.createdAt : null,
+          lessonId: completedLesson._id
         });
       }
 
@@ -422,10 +450,17 @@ class StatisticsService {
 
   /**
    * Tính toán trạng thái điểm danh
+   * Logic: Kiểm tra status của lesson trước, sau đó kiểm tra thời gian đánh giá nếu có
    */
   calculateAttendanceStatus(lesson, evaluation) {
-    if (!evaluation) {
+    // Kiểm tra status của lesson trước
+    if (lesson.status !== 'completed') {
       return 'Chưa điểm danh';
+    }
+
+    // Nếu lesson đã completed nhưng không có đánh giá, vẫn coi là đã điểm danh
+    if (!evaluation) {
+      return 'Đã điểm danh';
     }
 
     // Kiểm tra nếu hoàn thành sau thời gian kết thúc tiết học

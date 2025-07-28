@@ -129,6 +129,7 @@ class StatisticsController {
 
   /**
    * Lấy dữ liệu điểm danh giáo viên theo ngày
+   * Trả về thông tin tiết học đã hoàn thành đầu tiên của mỗi giáo viên trong ngày
    */
   getTeacherRollcall = async (req, res, next) => {
     try {
