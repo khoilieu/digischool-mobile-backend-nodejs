@@ -11,6 +11,8 @@ const TeacherLessonEvaluation = require("../models/teacher-lesson-evaluation.mod
 const StudentLessonEvaluation = require("../models/student-lesson-evaluation.model");
 const PersonalActivity = require("../models/personal-activity.model");
 const MultiClassSchedulerService = require("./multi-class-scheduler.service");
+const School = require("../../classes/models/school.model");
+const userService = require("../../user/services/user.service");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const LessonRequest = require("../models/lesson-request.model");
@@ -764,20 +766,99 @@ class ScheduleService {
         
         if (!homeroomTeacher) {
           // Tạo mới giáo viên chủ nhiệm nếu chưa tồn tại
-          const gender = Math.random() < 0.5 ? "male" : "female";
-          const newTeacher = new User({
-            name: homeroomTeacherName,
-            email: `gv${Date.now()}${Math.floor(Math.random() * 1000)}@yopmail.com`,
-            passwordHash: await bcrypt.hash("Teacher@123", 10),
-            role: ["teacher", "homeroom_teacher"],
-            isNewUser: true,
-            active: true,
-            gender: gender,
-          });
-          await newTeacher.save();
-          allTeachers.push(newTeacher);
-          homeroomTeacher = newTeacher;
-          createdTeachers.push(newTeacher);
+          try {
+            // Lấy trường học
+            let school = await School.findOne({ active: true });
+            if (!school) {
+              school = await School.create({
+                name: 'THPT Phan Văn Trị',
+                address: '123 Đường Nguyễn Văn Linh, Quận 7, TP.HCM',
+                phone: '028 3776 1234',
+                email: 'info@thptphanvantri.edu.vn',
+                website: 'https://thptphanvantri.edu.vn',
+                principal: 'Nguyễn Văn A',
+                active: true
+              });
+            }
+            
+            // Tạo giáo viên chủ nhiệm sử dụng UserService
+            homeroomTeacher = await userService.createTeacherFromSchedule(homeroomTeacherName, 'Chào cờ', school._id);
+            
+            // Cập nhật role để bao gồm homeroom_teacher
+            if (!homeroomTeacher.role.includes("homeroom_teacher")) {
+              homeroomTeacher.role = Array.from(
+                new Set([...homeroomTeacher.role, "homeroom_teacher"])
+              );
+              await homeroomTeacher.save();
+            }
+            
+            allTeachers.push(homeroomTeacher);
+            createdTeachers.push(homeroomTeacher);
+          } catch (error) {
+            console.error(`❌ Lỗi tạo giáo viên chủ nhiệm ${homeroomTeacherName}:`, error.message);
+            
+            // Fallback: tạo giáo viên chủ nhiệm cơ bản
+            const gender = Math.random() < 0.5 ? "male" : "female";
+            
+            // Tạo email theo format mới
+            const normalizedName = homeroomTeacherName
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/[^a-z0-9\s]/g, '')
+              .replace(/\s+/g, '.');
+            const email = `${normalizedName}.teacher@yopmail.com`;
+            
+            // Tạo mã giáo viên
+            const teacherCount = await User.countDocuments({ role: { $in: ['teacher', 'homeroom_teacher'] } });
+            const teacherId = `TCH${String(teacherCount + 1).padStart(3, '0')}`;
+            
+            // Tạo ngày sinh random (25-60 tuổi)
+            const generateRandomDate = (minAge, maxAge) => {
+              const now = new Date();
+              const minYear = now.getFullYear() - maxAge;
+              const maxYear = now.getFullYear() - minAge;
+              const year = Math.floor(Math.random() * (maxYear - minYear + 1)) + minYear;
+              const month = Math.floor(Math.random() * 12);
+              const day = Math.floor(Math.random() * 28) + 1;
+              return new Date(year, month, day);
+            };
+            
+            // Tạo số điện thoại random
+            const generateRandomPhone = () => {
+              const prefixes = ['032', '033', '034', '035', '036', '037', '038', '039'];
+              const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+              const number = Math.floor(Math.random() * 10000000).toString().padStart(7, '0');
+              return `${prefix}${number}`;
+            };
+            
+            // Tạo địa chỉ random
+            const generateRandomAddress = () => {
+              const districts = ['Quận 1', 'Quận 2', 'Quận 3', 'Quận 7', 'Quận 8', 'Quận 9'];
+              const district = districts[Math.floor(Math.random() * districts.length)];
+              const street = Math.floor(Math.random() * 100) + 1;
+              return `${street} Đường Nguyễn Văn Linh, ${district}, TP.HCM`;
+            };
+            
+            const newTeacher = new User({
+              name: homeroomTeacherName,
+              email: email,
+              passwordHash: await bcrypt.hash("Teacher@123", 10),
+              teacherId: teacherId,
+              role: ["teacher", "homeroom_teacher"],
+              dateOfBirth: generateRandomDate(25, 60),
+              gender: gender,
+              phone: generateRandomPhone(),
+              address: generateRandomAddress(),
+              school: school._id,
+              isNewUser: true,
+              active: true,
+            });
+            await newTeacher.save();
+            allTeachers.push(newTeacher);
+            homeroomTeacher = newTeacher;
+            createdTeachers.push(newTeacher);
+          }
         } else {
           // Cập nhật role nếu chưa có homeroom_teacher
           if (!homeroomTeacher.role.includes("homeroom_teacher")) {
@@ -818,30 +899,104 @@ class ScheduleService {
       const isHomeroom = homeroomTeachersByClass[className] === teacherName;
       
       if (!teacher) {
-        // Tạo mới
-        const gender = Math.random() < 0.5 ? "male" : "female";
-        const roles = isHomeroom
-          ? ["teacher", "homeroom_teacher"]
-          : ["teacher"];
-        const isSpecial =
-          subjectObj &&
-          ["Chào cờ", "Sinh hoạt lớp"].includes(subjectObj.subjectName);
-        const newTeacher = new User({
-          name: teacherName,
-          email: `gv${Date.now()}${Math.floor(
-            Math.random() * 1000
-          )}@yopmail.com`,
-          passwordHash: await bcrypt.hash("Teacher@123", 10),
-          role: roles,
-          isNewUser: true,
-          active: true,
-          gender: gender,
-          subject: subjectObj && !isSpecial ? subjectObj._id : undefined,
-        });
-        await newTeacher.save();
-        allTeachers.push(newTeacher);
-        createdTeachers.push(newTeacher);
-        return newTeacher;
+        // Tạo mới giáo viên sử dụng UserService
+        try {
+          // Lấy trường học đầu tiên (hoặc tạo mới nếu chưa có)
+          let school = await School.findOne({ active: true });
+          if (!school) {
+            school = await School.create({
+              name: 'THPT Phan Văn Trị',
+              address: '123 Đường Nguyễn Văn Linh, Quận 7, TP.HCM',
+              phone: '028 3776 1234',
+              email: 'info@thptphanvantri.edu.vn',
+              website: 'https://thptphanvantri.edu.vn',
+              principal: 'Nguyễn Văn A',
+              active: true
+            });
+          }
+
+          // Tạo giáo viên sử dụng UserService
+          const subjectName = subjectObj ? subjectObj.subjectName : 'Chào cờ';
+          teacher = await userService.createTeacherFromSchedule(teacherName, subjectName, school._id);
+          
+          // Cập nhật role nếu là chủ nhiệm
+          if (isHomeroom && !teacher.role.includes("homeroom_teacher")) {
+            teacher.role = Array.from(
+              new Set([...teacher.role, "homeroom_teacher"])
+            );
+            await teacher.save();
+          }
+          
+          allTeachers.push(teacher);
+          createdTeachers.push(teacher);
+          return teacher;
+        } catch (error) {
+          console.error(`❌ Lỗi tạo giáo viên ${teacherName}:`, error.message);
+          // Fallback: tạo giáo viên cơ bản nếu có lỗi
+          const gender = Math.random() < 0.5 ? "male" : "female";
+          const roles = isHomeroom ? ["teacher", "homeroom_teacher"] : ["teacher"];
+          const isSpecial = subjectObj && ["Chào cờ", "Sinh hoạt lớp"].includes(subjectObj.subjectName);
+          
+          // Tạo email theo format mới
+          const normalizedName = teacherName
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9\s]/g, '')
+            .replace(/\s+/g, '.');
+          const email = `${normalizedName}.teacher@yopmail.com`;
+          
+          // Tạo mã giáo viên
+          const teacherCount = await User.countDocuments({ role: { $in: ['teacher', 'homeroom_teacher'] } });
+          const teacherId = `TCH${String(teacherCount + 1).padStart(3, '0')}`;
+          
+          // Tạo ngày sinh random (25-60 tuổi)
+          const generateRandomDate = (minAge, maxAge) => {
+            const now = new Date();
+            const minYear = now.getFullYear() - maxAge;
+            const maxYear = now.getFullYear() - minAge;
+            const year = Math.floor(Math.random() * (maxYear - minYear + 1)) + minYear;
+            const month = Math.floor(Math.random() * 12);
+            const day = Math.floor(Math.random() * 28) + 1;
+            return new Date(year, month, day);
+          };
+          
+          // Tạo số điện thoại random
+          const generateRandomPhone = () => {
+            const prefixes = ['032', '033', '034', '035', '036', '037', '038', '039'];
+            const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+            const number = Math.floor(Math.random() * 10000000).toString().padStart(7, '0');
+            return `${prefix}${number}`;
+          };
+          
+          // Tạo địa chỉ random
+          const generateRandomAddress = () => {
+            const districts = ['Quận 1', 'Quận 2', 'Quận 3', 'Quận 7', 'Quận 8', 'Quận 9'];
+            const district = districts[Math.floor(Math.random() * districts.length)];
+            const street = Math.floor(Math.random() * 100) + 1;
+            return `${street} Đường Nguyễn Văn Linh, ${district}, TP.HCM`;
+          };
+          
+          const newTeacher = new User({
+            name: teacherName,
+            email: email,
+            passwordHash: await bcrypt.hash("Teacher@123", 10),
+            teacherId: teacherId,
+            role: roles,
+            dateOfBirth: generateRandomDate(25, 60),
+            gender: gender,
+            phone: generateRandomPhone(),
+            address: generateRandomAddress(),
+            school: school._id,
+            isNewUser: true,
+            active: true,
+            subject: subjectObj && !isSpecial ? subjectObj._id : undefined,
+          });
+          await newTeacher.save();
+          allTeachers.push(newTeacher);
+          createdTeachers.push(newTeacher);
+          return newTeacher;
+        }
       }
       
       // Update role nếu là chủ nhiệm
@@ -859,13 +1014,6 @@ class ScheduleService {
         teacher.subject = subjectObj._id;
       }
       
-      teacher.passwordHash = await bcrypt.hash("Teacher@123", 10);
-      if (teacher.email && teacher.email.endsWith("@school.local")) {
-        teacher.email = teacher.email.replace(
-          /@school\.local$/,
-          "@yopmail.com"
-        );
-      }
       await teacher.save();
       return teacher;
     }

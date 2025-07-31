@@ -1,6 +1,8 @@
 const Lesson = require("../models/lesson.model");
 const WeeklySchedule = require("../models/weekly-schedule.model");
 const User = require("../../auth/models/user.model");
+const School = require("../../classes/models/school.model");
+const userService = require("../../user/services/user.service");
 
 /**
  * Constraint Scheduler Service
@@ -666,6 +668,49 @@ class ConstraintSchedulerService {
         return classMap.get((classId || this.classId).toString());
       }
     }
+    
+    // Nếu không có giáo viên được gán, tìm giáo viên có môn học này
+    const Subject = require("../../subjects/models/subject.model");
+    const subject = await Subject.findById(subjectId);
+    if (subject) {
+      const teacher = await User.findOne({
+        subject: subjectId,
+        role: { $in: ['teacher', 'homeroom_teacher'] },
+        active: true
+      });
+      
+      if (teacher) {
+        return teacher;
+      }
+      
+      // Nếu không có giáo viên, tạo mới giáo viên cho môn học này
+      try {
+        // Lấy trường học
+        let school = await School.findOne({ active: true });
+        if (!school) {
+          school = await School.create({
+            name: 'THPT Phan Văn Trị',
+            address: '123 Đường Nguyễn Văn Linh, Quận 7, TP.HCM',
+            phone: '028 3776 1234',
+            email: 'info@thptphanvantri.edu.vn',
+            website: 'https://thptphanvantri.edu.vn',
+            principal: 'Nguyễn Văn A',
+            active: true
+          });
+        }
+        
+        // Tạo giáo viên mới với tên môn học gốc
+        const teacherName = `Giáo viên ${subject.subjectName}`;
+        const newTeacher = await userService.createTeacherFromSchedule(teacherName, subject.subjectName, school._id);
+        
+        console.log(`✅ Đã tạo giáo viên mới cho môn ${subject.subjectName}: ${newTeacher.name}`);
+        return newTeacher;
+      } catch (error) {
+        console.error(`❌ Lỗi tạo giáo viên cho môn ${subject.subjectName}:`, error.message);
+        return null;
+      }
+    }
+    
     // Nếu không có, trả về null (lesson sẽ không có teacher)
     return null;
   }

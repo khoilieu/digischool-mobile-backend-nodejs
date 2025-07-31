@@ -816,7 +816,7 @@ class UserService {
           teacherId: user.teacherId || `GV-${user._id.toString().slice(-6)}`,
           subject: user.subject?.subjectName || 'Chưa phân môn',
           subjectCode: user.subject?.subjectCode,
-          subjects: user.subjects || [],
+          subject: user.subject?.subjectName || 'Chưa phân môn',
           homeroomClass: homeroomClass ? {
             id: homeroomClass._id,
             name: homeroomClass.className,
@@ -849,7 +849,7 @@ class UserService {
         name: user.name,
         role: user.role,
         class_id: user.class_id,
-        subjects: user.subjects,
+        subject: user.subject,
         isNewUser: user.isNewUser,
         active: user.active,
         createdAt: user.createdAt,
@@ -2181,6 +2181,136 @@ class UserService {
       .substring(0, 20); // Limit length
     
     return `${normalizedName}.parents@yopmail.com`;
+  }
+
+  // Tạo giáo viên tự động khi import TKB
+  async createTeacherFromSchedule(teacherName, subjectName, schoolId) {
+    try {
+      // Kiểm tra giáo viên đã tồn tại
+      const existingTeacher = await User.findOne({ 
+        name: teacherName,
+        role: { $in: ['teacher', 'homeroom_teacher'] }
+      });
+
+      if (existingTeacher) {
+        return existingTeacher;
+      }
+
+      // Tìm môn học với mapping tên môn học
+      const subjectMapping = {
+        'Toán': 'Mathematics',
+        'Ngữ văn': 'Literature', 
+        'Ngoại ngữ': 'English',
+        'Vật lý': 'Physics',
+        'Hóa học': 'Chemistry',
+        'Sinh học': 'Biology',
+        'Lịch sử': 'History',
+        'Địa lý': 'Geography',
+        'Tin học': 'Informatics',
+        'GDQP': 'Defense Education',
+        'GDCD': 'Civic Education',
+        'Thể dục': 'Physical Education',
+        'Chào cờ': 'Flag Ceremony',
+        'Sinh hoạt lớp': 'Class Activity'
+      };
+
+      let subject = null;
+      const mappedSubjectName = subjectMapping[subjectName] || subjectName;
+      
+      // Tìm môn học theo tên đã map hoặc tên gốc
+      subject = await Subject.findOne({ 
+        $or: [
+          { subjectName: { $regex: new RegExp(mappedSubjectName, 'i') } },
+          { subjectName: { $regex: new RegExp(subjectName, 'i') } }
+        ]
+      });
+
+      if (!subject) {
+        console.log(`⚠️ Không tìm thấy môn học: ${subjectName}, sẽ tạo giáo viên không có môn học`);
+      }
+
+      // Tạo email và password theo format yêu cầu
+      const email = this.generateTeacherEmail(teacherName);
+      const password = this.generateTeacherPassword();
+      const passwordHash = await bcrypt.hash(password, 12);
+
+      // Tạo mã giáo viên
+      const teacherCount = await User.countDocuments({ role: { $in: ['teacher', 'homeroom_teacher'] } });
+      const teacherId = `TCH${String(teacherCount + 1).padStart(3, '0')}`;
+
+      // Tạo giáo viên mới với đầy đủ thông tin
+      const newTeacher = new User({
+        name: teacherName,
+        email: email,
+        passwordHash: passwordHash,
+        teacherId: teacherId,
+        role: ['teacher'],
+        subject: subject ? subject._id : undefined,
+        dateOfBirth: this.generateRandomDate(25, 60),
+        gender: Math.random() > 0.5 ? 'male' : 'female',
+        phone: this.generateRandomPhone(),
+        address: this.generateRandomAddress(),
+        school: schoolId,
+        isNewUser: true,
+        active: true
+      });
+
+      await newTeacher.save();
+
+      // Gửi email chào mừng
+      if (subject) {
+        await this.sendTeacherWelcomeEmail(email, teacherName, password, subject.subjectName);
+      }
+
+      console.log(`✅ Đã tạo giáo viên mới: ${teacherName} (${email}) - Môn: ${subject ? subject.subjectName : 'Chưa phân môn'}`);
+      return newTeacher;
+
+    } catch (error) {
+      console.error(`❌ Lỗi tạo giáo viên ${teacherName}:`, error.message);
+      throw error;
+    }
+  }
+
+  // Generate teacher email
+  generateTeacherEmail(name) {
+    const normalizedName = name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, '.');
+    return `${normalizedName}.teacher@yopmail.com`;
+  }
+
+  // Generate teacher password
+  generateTeacherPassword() {
+    return 'Teacher@123';
+  }
+
+  // Generate random date
+  generateRandomDate(minAge, maxAge) {
+    const today = new Date();
+    const minDate = new Date(today.getFullYear() - maxAge, today.getMonth(), today.getDate());
+    const maxDate = new Date(today.getFullYear() - minAge, today.getMonth(), today.getDate());
+    return new Date(minDate.getTime() + Math.random() * (maxDate.getTime() - minDate.getTime()));
+  }
+
+  // Generate random phone
+  generateRandomPhone() {
+    const prefixes = ['032', '033', '034', '035', '036', '037', '038', '039'];
+    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+    const number = Math.floor(Math.random() * 10000000).toString().padStart(7, '0');
+    return `${prefix}${number}`;
+  }
+
+  // Generate random address
+  generateRandomAddress() {
+    const streets = ['Nguyễn Văn Linh', 'Lê Văn Việt', 'Mai Chí Thọ', 'Võ Văn Ngân', 'Phạm Văn Đồng'];
+    const districts = ['Quận 1', 'Quận 2', 'Quận 3', 'Quận 7', 'Quận 9'];
+    const street = streets[Math.floor(Math.random() * streets.length)];
+    const district = districts[Math.floor(Math.random() * districts.length)];
+    const number = Math.floor(Math.random() * 200) + 1;
+    return `${number} ${street}, ${district}, TP.HCM`;
   }
 }
 

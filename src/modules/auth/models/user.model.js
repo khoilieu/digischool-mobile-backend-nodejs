@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const userSchema = new mongoose.Schema({
   role: { 
     type: [String], 
-    enum: ['student', 'teacher', 'homeroom_teacher', 'admin', 'manager', 'parents'], 
+    enum: ['student', 'teacher', 'homeroom_teacher', 'admin', 'manager', 'parent'], 
     required: true,
     default: ['manager']
   },
@@ -17,78 +17,152 @@ const userSchema = new mongoose.Schema({
   },
   email: { type: String, unique: true, required: true },
   passwordHash: { type: String, required: true },
+  
+  // Thông tin cá nhân chung
   dateOfBirth: {
     type: Date,
-    required: false
+    required: false,
+    default: undefined
   },
   gender: {
     type: String,
     enum: ['male', 'female', 'other'],
-    required: false
+    required: false,
+    default: undefined
   },
+  phone: {
+    type: String,
+    required: false,
+    default: undefined
+  },
+  address: {
+    type: String,
+    required: false,
+    default: undefined
+  },
+  
+  // Thông tin trường học
+  school: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'School',
+    required: false,
+    default: undefined
+  },
+  
+  // Thông tin học sinh
   studentId: {
     type: String,
     unique: true,
-    sparse: true, // Cho phép null values và chỉ enforce unique cho non-null values
+    sparse: true,
     required: function() {
-      // Mã số học sinh chỉ bắt buộc cho học sinh
       return this.role.includes('student') && !this.isNewUser;
-    }
+    },
+    default: undefined
   },
   class_id: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Class',
-    default: null
+    required: function() {
+      return this.role.includes('student') && !this.isNewUser;
+    },
+    default: undefined
+  },
+  academicYear: {
+    type: String,
+    required: function() {
+      return this.role.includes('student') && !this.isNewUser;
+    },
+    validate: {
+      validator: function(v) {
+        return /^\d{4}-\d{4}$/.test(v);
+      },
+      message: 'Academic year must be in format YYYY-YYYY (e.g., 2024-2025)'
+    },
+    default: undefined
+  },
+  
+  // Thông tin giáo viên
+  teacherId: {
+    type: String,
+    unique: true,
+    sparse: true,
+    required: function() {
+      return this.role.includes('teacher') && !this.isNewUser;
+    },
+    default: undefined
   },
   subject: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Subject',
     required: function() {
-      // subject không bắt buộc cho manager hoặc user mới tạo qua OTP
       return this.role.includes('teacher') && !this.isNewUser;
-    }
+    },
+    default: undefined
   },
-  subjects: [{ 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Subject'
-  }],
-  // New fields for parents
-  children: [{
+  homeroomClass: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Class',
     required: function() {
-      // children chỉ bắt buộc cho parents
-      return this.role.includes('parents') && !this.isNewUser;
-    }
-  }],
-  address: {
-    type: String,
-    required: false
+      return this.role.includes('homeroom_teacher') && !this.isNewUser;
+    },
+    default: undefined
   },
-  phone: {
+  
+  // Thông tin quản lý
+  managerId: {
     type: String,
-    required: false
+    unique: true,
+    sparse: true,
+    required: function() {
+      return this.role.includes('manager') && !this.isNewUser;
+    },
+    default: undefined
   },
+  
+  // Thông tin phụ huynh
+  parentId: {
+    type: String,
+    unique: true,
+    sparse: true,
+    required: function() {
+      return this.role.includes('parent') && !this.isNewUser;
+    },
+    default: undefined
+  },
+  children: {
+    type: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }],
+    required: function() {
+      return this.role.includes('parent') && !this.isNewUser;
+    },
+    default: undefined
+  },
+  
+  // Trạng thái tài khoản
   isNewUser: {
     type: Boolean,
     default: true
   },
   isPending: {
     type: Boolean,
-    default: false // Trạng thái chờ hoàn thành setup (chỉ dành cho teacher import)
+    default: false
   },
   tempPassword: {
     type: String,
-    required: false // Mật khẩu tạm thời cho teacher mới import
+    required: false,
+    default: undefined
   },
-  // Forgot password fields
   resetPasswordToken: {
     type: String,
-    required: false
+    required: false,
+    default: undefined
   },
   resetPasswordExpires: {
     type: Date,
-    required: false
+    required: false,
+    default: undefined
   },
   active: { type: Boolean, default: true }
 }, { timestamps: true });
@@ -157,6 +231,47 @@ userSchema.methods.verifyResetPasswordToken = function(token) {
   // Compare token with stored hash
   return bcrypt.compareSync(token, this.resetPasswordToken);
 };
+
+// Middleware để loại bỏ các trường undefined và children cho role không phải parent
+userSchema.pre('save', function(next) {
+  const doc = this.toObject();
+  Object.keys(doc).forEach(key => {
+    if (doc[key] === undefined) {
+      this.unset(key);
+    }
+  });
+  
+  // Loại bỏ trường children cho role không phải parent
+  if (!this.role.includes('parent') && this.hasOwnProperty('children')) {
+    this.unset('children');
+  }
+  
+  next();
+});
+
+userSchema.pre('findOneAndUpdate', function(next) {
+  const update = this.getUpdate();
+  if (update) {
+    Object.keys(update).forEach(key => {
+      if (update[key] === undefined) {
+        delete update[key];
+      }
+    });
+  }
+  next();
+});
+
+userSchema.pre('updateOne', function(next) {
+  const update = this.getUpdate();
+  if (update) {
+    Object.keys(update).forEach(key => {
+      if (update[key] === undefined) {
+        delete update[key];
+      }
+    });
+  }
+  next();
+});
 
 const User = mongoose.model('User', userSchema);
 

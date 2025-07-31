@@ -1,5 +1,7 @@
 const ConstraintSchedulerService = require("./constraint-scheduler.service");
 const User = require("../../auth/models/user.model");
+const School = require("../../classes/models/school.model");
+const userService = require("../../user/services/user.service");
 
 class MultiClassSchedulerService {
   constructor() {
@@ -445,8 +447,8 @@ class ModifiedConstraintScheduler extends ConstraintSchedulerService {
         return classMap.get((classId || this.classId).toString());
       }
     }
-    // Fallback
-    return await super.findSpecializedTeacher(subjectId);
+    // Fallback - sử dụng method từ parent class để tạo giáo viên tự động
+    return await super.findSpecializedTeacher(subjectId, classId);
   }
 
   // Ghi đè hàm tìm slot tốt nhất để áp dụng ràng buộc phân loại môn học

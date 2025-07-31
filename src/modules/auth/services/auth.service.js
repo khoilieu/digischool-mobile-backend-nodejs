@@ -84,17 +84,19 @@ class AuthService {
       // Verify token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       
-      // Lấy thông tin user từ token với populate
+      // Lấy thông tin user từ token với populate đầy đủ
       const user = await User.findById(decoded.id)
-        .populate('class_id', 'className classCode description')
+        .populate('class_id', 'className classCode description gradeLevel')
         .populate('subject', 'subjectName subjectCode description')
+        .populate('school', 'name address phone email website principal')
+        .populate('children', 'name studentId class_id')
         .select('-passwordHash -resetPasswordToken -resetPasswordExpires');
 
       if (!user) {
         throw new Error('User not found');
       }
 
-      // Chuẩn bị response data
+      // Chuẩn bị response data theo role của user
       const userData = {
         id: user._id,
         email: user.email,
@@ -105,33 +107,87 @@ class AuthService {
         dateOfBirth: user.dateOfBirth || null,
         gender: user.gender || null,
         avatar: user.avatar || null,
-        studentId: user.studentId || null,
-        teacherId: user.teacherId || null,
-        managerId: user.managerId || null,
         isNewUser: user.isNewUser,
         active: user.active,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
         
-        // Class information (for students)
-        class: user.class_id ? {
-          id: user.class_id._id,
-          className: user.class_id.className,
-          classCode: user.class_id.classCode,
-          description: user.class_id.description
+        // School information (cho tất cả)
+        school: user.school ? {
+          id: user.school._id,
+          name: user.school.name,
+          address: user.school.address,
+          phone: user.school.phone,
+          email: user.school.email,
+          website: user.school.website,
+          principal: user.school.principal
         } : null,
-        
-        // Subjects information (for teachers)
-        subjects: user.subject ? [{
-          id: user.subject._id,
-          subjectName: user.subject.subjectName,
-          subjectCode: user.subject.subjectCode,
-          description: user.subject.description
-        }] : [],
         
         // Role-specific information
         roleInfo: this.getRoleSpecificInfo(user)
       };
+
+      // Thêm thông tin theo role
+      if (user.role.includes('student')) {
+        userData.studentId = user.studentId || null;
+        userData.academicYear = user.academicYear || null;
+        userData.class = user.class_id ? {
+          id: user.class_id._id,
+          className: user.class_id.className,
+          classCode: user.class_id.classCode,
+          description: user.class_id.description,
+          gradeLevel: user.class_id.gradeLevel
+        } : null;
+      }
+
+      if (user.role.includes('teacher') || user.role.includes('homeroom_teacher')) {
+        userData.teacherId = user.teacherId || null;
+        userData.subject = user.subject ? {
+          id: user.subject._id,
+          subjectName: user.subject.subjectName,
+          subjectCode: user.subject.subjectCode,
+          description: user.subject.description
+        } : null;
+        
+        // Nếu là giáo viên chủ nhiệm, tìm lớp chủ nhiệm từ Class model
+        if (user.role.includes('homeroom_teacher')) {
+          const Class = require('../../classes/models/class.model');
+          const homeroomClass = await Class.findOne({
+            homeroomTeacher: user._id
+          }).select('className classCode description gradeLevel');
+          
+          if (homeroomClass) {
+            userData.homeroomClass = {
+              id: homeroomClass._id,
+              className: homeroomClass.className,
+              classCode: homeroomClass.classCode,
+              description: homeroomClass.description,
+              gradeLevel: homeroomClass.gradeLevel
+            };
+            
+            // Cập nhật homeroomClassId trong roleInfo
+            userData.roleInfo.homeroomClassId = homeroomClass._id;
+          }
+        }
+      }
+
+      if (user.role.includes('manager')) {
+        userData.managerId = user.managerId || null;
+      }
+
+      if (user.role.includes('parent')) {
+        userData.parentId = user.parentId || null;
+        userData.children = user.children ? user.children.map(child => ({
+          id: child._id,
+          name: child.name,
+          studentId: child.studentId,
+          class: child.class_id ? {
+            id: child.class_id._id,
+            className: child.class_id.className,
+            classCode: child.class_id.classCode
+          } : null
+        })) : [];
+      }
 
       return userData;
     } catch (error) {
@@ -156,6 +212,7 @@ class AuthService {
       roleInfo.type = 'student';
       roleInfo.studentId = user.studentId;
       roleInfo.classId = user.class_id ? user.class_id._id : null;
+      roleInfo.academicYear = user.academicYear;
       roleInfo.permissions = [
         'view_schedule',
         'view_grades',
@@ -167,7 +224,8 @@ class AuthService {
     if (user.role.includes('teacher')) {
       roleInfo.type = 'teacher';
       roleInfo.teacherId = user.teacherId;
-      roleInfo.subjectIds = user.subject ? [user.subject._id] : [];
+      roleInfo.subjectId = user.subject ? user.subject._id : null;
+      roleInfo.homeroomClassId = user.homeroomClass ? user.homeroomClass._id : null;
       roleInfo.permissions = [
         'manage_lessons',
         'create_reminders',
@@ -176,6 +234,21 @@ class AuthService {
         'create_announcements'
       ];
     }
+
+          if (user.role.includes('homeroom_teacher')) {
+        roleInfo.type = 'homeroom_teacher';
+        roleInfo.teacherId = user.teacherId;
+        roleInfo.subjectId = user.subject ? user.subject._id : null;
+        roleInfo.homeroomClassId = null; // Sẽ được cập nhật sau
+        roleInfo.permissions = [
+          'manage_lessons',
+          'create_reminders',
+          'grade_students',
+          'view_class_schedule',
+          'create_announcements',
+          'manage_class'
+        ];
+      }
 
     if (user.role.includes('manager')) {
       roleInfo.type = 'manager';
@@ -187,6 +260,17 @@ class AuthService {
         'manage_schedules',
         'view_reports',
         'system_admin'
+      ];
+    }
+
+    if (user.role.includes('parent')) {
+      roleInfo.type = 'parent';
+      roleInfo.parentId = user.parentId;
+      roleInfo.childrenCount = user.children ? user.children.length : 0;
+      roleInfo.permissions = [
+        'view_children_schedule',
+        'view_children_grades',
+        'view_announcements'
       ];
     }
 
