@@ -62,7 +62,7 @@ const teacherLeaveRequestSchema = new mongoose.Schema({
   // Trạng thái đơn
   status: {
     type: String,
-    enum: ["pending", "approved", "rejected"],
+    enum: ["pending", "approved", "rejected", "cancelled"],
     default: "pending",
   },
 
@@ -167,6 +167,21 @@ teacherLeaveRequestSchema.methods.approve = function (managerId) {
 teacherLeaveRequestSchema.methods.reject = function (managerId) {
   this.status = "rejected";
   this.managerId = managerId;
+  this.processedAt = new Date();
+
+  return this.save();
+};
+
+teacherLeaveRequestSchema.methods.cancel = function (teacherId) {
+  if (this.teacherId.toString() !== teacherId.toString()) {
+    throw new Error("Only the teacher can cancel this request");
+  }
+
+  if (this.status !== "pending") {
+    throw new Error("Can only cancel pending requests");
+  }
+
+  this.status = "cancelled";
   this.processedAt = new Date();
 
   return this.save();

@@ -11,7 +11,6 @@ class NotificationService {
     relatedObject,
   }) {
     try {
-      // Xử lý relatedObject: luôn là object gồm id và requestType
       let finalRelatedObject = undefined;
       if (relatedObject) {
         if (
@@ -87,19 +86,18 @@ class NotificationService {
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .lean(); // Sử dụng lean() để có thể chỉnh sửa kết quả
+        .lean();
 
-      // Lấy thông tin người gửi cho từng thông báo
       for (let notification of notifications) {
-        const sender = await User.findById(notification.sender, "name gender");
+        const sender = await User.findById(notification.sender, "name gender role");
         if (sender) {
           notification.sender = {
             id: sender._id,
             name: sender.name,
             gender: sender.gender,
+            role: sender.role,
           };
         }
-        // Bổ sung lấy status của relatedObject nếu có
         if (
           notification.relatedObject &&
           notification.relatedObject.id &&
@@ -195,7 +193,6 @@ class NotificationService {
         case "user":
           return receiverScope.ids;
         case "class": {
-          // Lấy toàn bộ user thuộc các lớp
           const users = await User.find(
             { class_id: { $in: receiverScope.ids } },
             "_id"
@@ -206,7 +203,6 @@ class NotificationService {
           const users = await User.find({}, "_id");
           return users.map((u) => u._id);
         }
-        // TODO: Thêm các trường hợp khác như department, grade...
         default:
           return [];
       }
@@ -220,7 +216,6 @@ class NotificationService {
     try {
       const io = require("../../../server").io;
       if (io && notification.receivers && notification.receivers.length > 0) {
-        // Gửi notification cho từng receiver
         notification.receivers.forEach(receiverId => {
           io.to(String(receiverId)).emit("new_notification", {
             _id: notification._id,

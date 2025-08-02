@@ -40,7 +40,7 @@ router.delete('/:requestId',
   authMiddleware.authorize('teacher'),
   validation.validateRequestId,
   validation.handleValidationErrors,
-  teacherLeaveRequestController.deleteTeacherLeaveRequest
+  teacherLeaveRequestController.cancelTeacherLeaveRequest
 );
 
 // Manager routes - for managers to approve/reject teacher leave requests

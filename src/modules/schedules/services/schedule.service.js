@@ -16,6 +16,8 @@ const userService = require("../../user/services/user.service");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const LessonRequest = require("../models/lesson-request.model");
+const StudentLeaveRequest = require("../../leave-requests/models/student-leave-request.model");
+const TeacherLeaveRequest = require("../../leave-requests/models/teacher-leave-request.model");
 
 class ScheduleService {
   async initializeSchedulesWithNewArchitecture(data, token) {
@@ -619,9 +621,32 @@ class ScheduleService {
           "lessonId scheduledDate topic status type"
         )
         .lean();
+
+      // Student Leave Requests: lessonId field
+      const studentLeaveRequests = await StudentLeaveRequest.find({
+        lessonId: lesson._id,
+      })
+        .populate("studentId", "name email fullName")
+        .populate("teacherId", "name email fullName")
+        .populate("classId", "className")
+        .populate("subjectId", "subjectName subjectCode")
+        .lean();
+
+      // Teacher Leave Requests: lessonId field
+      const teacherLeaveRequests = await TeacherLeaveRequest.find({
+        lessonId: lesson._id,
+      })
+        .populate("teacherId", "name email fullName")
+        .populate("classId", "className")
+        .populate("subjectId", "subjectName subjectCode")
+        .populate("managerId", "name email fullName")
+        .lean();
+
       lessonObj.substituteRequests = substituteRequests;
       lessonObj.swapRequests = swapRequests;
       lessonObj.makeupRequests = makeupRequests;
+      lessonObj.studentLeaveRequests = studentLeaveRequests;
+      lessonObj.teacherLeaveRequests = teacherLeaveRequests;
 
       return lessonObj;
     } catch (error) {

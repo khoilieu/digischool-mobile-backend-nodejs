@@ -67,7 +67,7 @@ const studentLeaveRequestSchema = new mongoose.Schema({
   // Trạng thái đơn
   status: {
     type: String,
-    enum: ["pending", "approved", "rejected"],
+    enum: ["pending", "approved", "rejected", "cancelled"],
     default: "pending",
   },
 
@@ -180,6 +180,21 @@ studentLeaveRequestSchema.methods.reject = function (teacherId) {
   this.status = "rejected";
   this.processedAt = new Date();
   this.teacherId = teacherId;
+
+  return this.save();
+};
+
+studentLeaveRequestSchema.methods.cancel = function (studentId) {
+  if (this.studentId.toString() !== studentId.toString()) {
+    throw new Error("Only the student can cancel this request");
+  }
+
+  if (this.status !== "pending") {
+    throw new Error("Can only cancel pending requests");
+  }
+
+  this.status = "cancelled";
+  this.processedAt = new Date();
 
   return this.save();
 };

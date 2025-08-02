@@ -226,8 +226,8 @@ class TeacherLeaveRequestController {
     }
   }
 
-  // Xóa đơn xin nghỉ (chỉ khi pending và là của teacher đó)
-  async deleteTeacherLeaveRequest(req, res, next) {
+  // Hủy đơn xin nghỉ (chỉ khi pending và là của teacher đó)
+  async cancelTeacherLeaveRequest(req, res, next) {
     try {
       const { requestId } = req.params;
       const teacherId = req.user._id;
@@ -239,18 +239,18 @@ class TeacherLeaveRequestController {
         });
       }
 
-      const result = await teacherLeaveRequestService.deleteTeacherLeaveRequest(
+      const result = await teacherLeaveRequestService.cancelTeacherLeaveRequest(
         requestId,
         teacherId
       );
 
       res.status(200).json({
         success: true,
-        message: "Teacher leave request deleted successfully",
+        message: "Teacher leave request cancelled successfully",
         data: result,
       });
     } catch (error) {
-      console.error("❌ Error in deleteTeacherLeaveRequest:", error.message);
+      console.error("❌ Error in cancelTeacherLeaveRequest:", error.message);
 
       // Handle specific error status codes
       if (error.statusCode === 403) {

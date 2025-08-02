@@ -79,10 +79,11 @@ class TeacherLeaveRequestService {
             continue;
           }
 
-          // Check if leave request already exists for this lesson
+          // Check if leave request already exists for this lesson (only pending and approved are considered existing)
           const existingRequest = await TeacherLeaveRequest.findOne({
             teacherId,
             lessonId: lesson._id,
+            status: { $in: ["pending", "approved"] }, // Only pending and approved requests block new requests
           });
 
           if (existingRequest) {
@@ -222,7 +223,7 @@ class TeacherLeaveRequestService {
           acc[item._id] = item.count;
           return acc;
         },
-        { pending: 0, approved: 0, rejected: 0 }
+        { pending: 0, approved: 0, rejected: 0, cancelled: 0 }
       );
 
       return {
@@ -426,8 +427,8 @@ class TeacherLeaveRequestService {
     }
   }
 
-  // Xóa đơn xin nghỉ (chỉ khi pending và là của teacher đó)
-  async deleteTeacherLeaveRequest(requestId, teacherId) {
+  // Hủy đơn xin nghỉ (chỉ khi pending và là của teacher đó)
+  async cancelTeacherLeaveRequest(requestId, teacherId) {
     try {
       const request = await TeacherLeaveRequest.findById(requestId);
 
@@ -439,28 +440,29 @@ class TeacherLeaveRequestService {
 
       // Check if teacher owns this request
       if (request.teacherId.toString() !== teacherId.toString()) {
-        const error = new Error("You can only delete your own leave requests");
+        const error = new Error("You can only cancel your own leave requests");
         error.statusCode = 403;
         throw error;
       }
 
       // Check if request is still pending
       if (request.status !== "pending") {
-        const error = new Error(`Cannot delete ${request.status} request`);
+        const error = new Error(`Cannot cancel ${request.status} request`);
         error.statusCode = 400;
         throw error;
       }
 
-      await TeacherLeaveRequest.findByIdAndDelete(requestId);
+      // Use the cancel method instead of deleting
+      await request.cancel(teacherId);
 
-      console.log(`🗑️ Teacher leave request deleted by teacher ${teacherId}`);
+      console.log(`🗑️ Teacher leave request cancelled by teacher ${teacherId}`);
 
       return {
         success: true,
-        message: "Teacher leave request deleted successfully",
+        message: "Teacher leave request cancelled successfully",
       };
     } catch (error) {
-      console.error("❌ Error deleting teacher leave request:", error.message);
+      console.error("❌ Error cancelling teacher leave request:", error.message);
 
       if (error.statusCode) {
         const customError = new Error(error.message);
@@ -469,7 +471,7 @@ class TeacherLeaveRequestService {
       }
 
       throw new Error(
-        `Failed to delete teacher leave request: ${error.message}`
+        `Failed to cancel teacher leave request: ${error.message}`
       );
     }
   }
@@ -502,10 +504,11 @@ class TeacherLeaveRequestService {
         .populate("timeSlot", "period startTime endTime")
         .sort({ scheduledDate: 1, "timeSlot.period": 1 });
 
-      // Filter out lessons that already have leave requests
+      // Filter out lessons that already have leave requests (only pending and approved block new requests)
       const lessonsWithRequests = await TeacherLeaveRequest.find({
         teacherId,
         lessonId: { $in: lessons.map((l) => l._id) },
+        status: { $in: ["pending", "approved"] }, // Only pending and approved requests block new requests
       }).select("lessonId");
 
       const requestedLessonIds = lessonsWithRequests.map((r) =>

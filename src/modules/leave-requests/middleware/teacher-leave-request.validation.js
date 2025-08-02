@@ -78,8 +78,8 @@ const validatePagination = [
 const validateStatusFilter = [
   query("status")
     .optional()
-    .isIn(["pending", "approved", "rejected"])
-    .withMessage("Status must be pending, approved, or rejected"),
+    .isIn(["pending", "approved", "rejected", "cancelled"])
+    .withMessage("Status must be pending, approved, rejected, or cancelled"),
 ];
 
 // Validation for getting teacher requests

@@ -93,8 +93,8 @@ const validatePagination = [
 const validateStatusFilter = [
   query("status")
     .optional()
-    .isIn(["pending", "approved", "rejected"])
-    .withMessage("Status must be one of: pending, approved, rejected"),
+    .isIn(["pending", "approved", "rejected", "cancelled"])
+    .withMessage("Status must be one of: pending, approved, rejected, cancelled"),
 ];
 
 // Validation for available lessons query

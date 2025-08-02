@@ -87,10 +87,11 @@ class StudentLeaveRequestService {
           //   continue;
           // }
 
-          // Check if leave request already exists for this lesson
+          // Check if leave request already exists for this lesson (only pending and approved are considered existing)
           const existingRequest = await StudentLeaveRequest.findOne({
             studentId,
             lessonId: lesson._id,
+            status: { $in: ["pending", "approved"] }, // Only pending and approved requests block new requests
           });
 
           if (existingRequest) {
@@ -225,7 +226,7 @@ class StudentLeaveRequestService {
           acc[item._id] = item.count;
           return acc;
         },
-        { pending: 0, approved: 0, rejected: 0 }
+        { pending: 0, approved: 0, rejected: 0, cancelled: 0 }
       );
 
       return {
@@ -561,7 +562,8 @@ class StudentLeaveRequestService {
         throw new Error("Cannot cancel request for past lessons");
       }
 
-      await StudentLeaveRequest.findByIdAndDelete(requestId);
+      // Use the cancel method instead of deleting
+      await request.cancel(studentId);
 
       console.log(`🗑️ Leave request cancelled by student ${studentId}`);
 
@@ -607,6 +609,9 @@ class StudentLeaveRequestService {
             rejected: {
               $sum: { $cond: [{ $eq: ["$status", "rejected"] }, 1, 0] },
             },
+            cancelled: {
+              $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] },
+            },
           },
         },
       ]);
@@ -616,6 +621,7 @@ class StudentLeaveRequestService {
         pending: 0,
         approved: 0,
         rejected: 0,
+        cancelled: 0,
       };
 
       // Calculate rates
@@ -671,27 +677,23 @@ class StudentLeaveRequestService {
         `📚 Found ${lessons.length} lessons for class ${student.class_id.className}`
       );
 
-      const availableLessons = lessons.map((lesson) => ({
-        _id: lesson._id,
-        lessonId: lesson.lessonId,
-        date: lesson.scheduledDate,
-        period: lesson.timeSlot?.period || 0,
-        timeSlot: {
-          startTime: lesson.timeSlot?.startTime || "",
-          endTime: lesson.timeSlot?.endTime || "",
-        },
-        subject: {
-          _id: lesson.subject._id,
-          name: lesson.subject.subjectName,
-          code: lesson.subject.subjectCode,
-        },
-        teacher: {
-          _id: lesson.teacher._id,
-          name: lesson.teacher.name,
-        },
-        type: lesson.type,
-        topic: lesson.topic || "",
-      }));
+      // Filter out lessons that already have leave requests (only pending and approved block new requests)
+      const lessonsWithRequests = await StudentLeaveRequest.find({
+        studentId,
+        lessonId: { $in: lessons.map((l) => l._id) },
+        status: { $in: ["pending", "approved"] }, // Only pending and approved requests block new requests
+      }).select("lessonId");
+
+      const requestedLessonIds = lessonsWithRequests.map((r) =>
+        r.lessonId.toString()
+      );
+      const availableLessons = lessons.filter(
+        (lesson) => !requestedLessonIds.includes(lesson._id.toString())
+      );
+
+      console.log(
+        `📊 Found ${availableLessons.length} available lessons out of ${lessons.length} total lessons`
+      );
 
       return availableLessons.map((lesson) => ({
         _id: lesson._id,
