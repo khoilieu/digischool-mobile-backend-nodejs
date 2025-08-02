@@ -100,7 +100,6 @@ const startServer = async () => {
 
       socket.on("disconnect", () => {
         if (socket.userId) userActiveChat[socket.userId] = null;
-        console.log("User disconnected: " + socket.id);
       });
     });
 

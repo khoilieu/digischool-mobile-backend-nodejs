@@ -68,6 +68,10 @@ class NotificationService {
         "\u2705 Notification created successfully:",
         notification._id
       );
+      
+      // Gửi notification realtime
+      await this.sendRealtimeNotification(notification);
+      
       return notification;
     } catch (error) {
       console.error("\u274C Error creating notification:", error.message);
@@ -208,6 +212,33 @@ class NotificationService {
       }
     } catch (error) {
       throw error;
+    }
+  }
+
+  // Gửi notification realtime
+  async sendRealtimeNotification(notification) {
+    try {
+      const io = require("../../../server").io;
+      if (io && notification.receivers && notification.receivers.length > 0) {
+        // Gửi notification cho từng receiver
+        notification.receivers.forEach(receiverId => {
+          io.to(String(receiverId)).emit("new_notification", {
+            _id: notification._id,
+            type: notification.type,
+            title: notification.title,
+            content: notification.content,
+            sender: notification.sender,
+            createdAt: notification.createdAt,
+            receivers: notification.receivers,
+            relatedObject: notification.relatedObject
+          });
+        });
+        console.log("✅ Realtime notification sent to", notification.receivers.length, "receivers");
+      } else {
+        console.log("⚠️ Socket.IO not available or no receivers");
+      }
+    } catch (error) {
+      console.error("❌ Realtime notification failed:", error);
     }
   }
 }
