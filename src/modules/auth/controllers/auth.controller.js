@@ -157,6 +157,58 @@ class AuthController {
     }
   }
 
+  // Change password - Đổi mật khẩu
+  async changePassword(req, res, next) {
+    try {
+      const { currentPassword, newPassword, confirmPassword } = req.body;
+      const userId = req.user.id; // Lấy từ middleware protect
+
+      // Lấy thông tin user hiện tại
+      const User = require('../models/user.model');
+      const user = await User.findById(userId);
+      
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'Không tìm thấy người dùng'
+        });
+      }
+
+      // Kiểm tra mật khẩu hiện tại
+      const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!isCurrentPasswordValid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Mật khẩu hiện tại không đúng'
+        });
+      }
+
+      // Kiểm tra mật khẩu mới có khác mật khẩu cũ không
+      const isNewPasswordSameAsOld = await bcrypt.compare(newPassword, user.passwordHash);
+      if (isNewPasswordSameAsOld) {
+        return res.status(400).json({
+          success: false,
+          message: 'Mật khẩu mới không được trùng mật khẩu cũ'
+        });
+      }
+
+      // Hash mật khẩu mới
+      const salt = await bcrypt.genSalt(12);
+      const newPasswordHash = await bcrypt.hash(newPassword, salt);
+
+      // Cập nhật mật khẩu
+      user.passwordHash = newPasswordHash;
+      await user.save();
+
+      res.status(200).json({
+        success: true,
+        message: 'Đổi mật khẩu thành công'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // Forgot Password - Gửi mã reset password qua email
   async forgotPassword(req, res, next) {
     try {

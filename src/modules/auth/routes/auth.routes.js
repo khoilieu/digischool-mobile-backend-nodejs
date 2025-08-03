@@ -13,6 +13,9 @@ router.post('/login', validateAuth.login, authController.login);
 // POST /api/auth/set-password - Set password sau khi đăng nhập với OTP
 router.post('/set-password', authController.setPassword);
 
+// POST /api/auth/change-password - Đổi mật khẩu (yêu cầu đăng nhập)
+router.post('/change-password', protect, validateAuth.changePassword, authController.changePassword);
+
 // POST /api/auth/forgot-password - Gửi mã reset password qua email
 router.post('/forgot-password', validateAuth.forgotPassword, authController.forgotPassword);
 

@@ -24,7 +24,7 @@ class ParentService {
         throw new Error('Phụ huynh không tồn tại');
       }
 
-      if (!parent.role.includes('parents')) {
+      if (!parent.role.includes('parent')) {
         throw new Error('Người dùng không phải là phụ huynh');
       }
 
@@ -46,7 +46,7 @@ class ParentService {
         throw new Error('Phụ huynh không tồn tại');
       }
 
-      if (!parent.role.includes('parents')) {
+      if (!parent.role.includes('parent')) {
         throw new Error('Người dùng không phải là phụ huynh');
       }
 
@@ -111,7 +111,7 @@ class ParentService {
         throw new Error('Phụ huynh không tồn tại');
       }
 
-      if (!parent.role.includes('parents')) {
+      if (!parent.role.includes('parent')) {
         throw new Error('Người dùng không phải là phụ huynh');
       }
 
@@ -142,7 +142,7 @@ class ParentService {
         throw new Error('Phụ huynh không tồn tại');
       }
 
-      if (!parent.role.includes('parents')) {
+      if (!parent.role.includes('parent')) {
         throw new Error('Người dùng không phải là phụ huynh');
       }
 
@@ -170,6 +170,145 @@ class ParentService {
       };
     } catch (error) {
       throw new Error(`Lỗi khi lấy danh sách góp ý: ${error.message}`);
+    }
+  }
+
+  // Lấy tất cả feedback (cho admin/manager)
+  async getAllFeedbacks(filters = {}) {
+    try {
+      const { status, rating, page = 1, limit = 10 } = filters;
+      
+      const query = {};
+      
+      // Filter theo status
+      if (status && status !== 'all') {
+        query.status = status;
+      }
+      
+      // Filter theo rating
+      if (rating && rating > 0) {
+        query.rating = rating;
+      }
+
+      const skip = (page - 1) * limit;
+
+      const feedbacks = await Feedback.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('user', 'name email')
+        .populate('respondedBy', 'name email');
+
+      const total = await Feedback.countDocuments(query);
+
+      return {
+        success: true,
+        data: {
+          feedbacks,
+          pagination: {
+            page,
+            limit,
+            total,
+            pages: Math.ceil(total / limit)
+          }
+        }
+      };
+    } catch (error) {
+      throw new Error(`Lỗi khi lấy danh sách feedback: ${error.message}`);
+    }
+  }
+
+  // Lấy thống kê feedback
+  async getFeedbackStats() {
+    try {
+      const total = await Feedback.countDocuments();
+      const pending = await Feedback.countDocuments({ status: 'pending' });
+      const reviewed = await Feedback.countDocuments({ status: 'reviewed' });
+      const resolved = await Feedback.countDocuments({ status: 'resolved' });
+      
+      // Tính điểm trung bình
+      const ratingStats = await Feedback.aggregate([
+        {
+          $group: {
+            _id: null,
+            averageRating: { $avg: '$rating' },
+            totalRatings: { $sum: 1 }
+          }
+        }
+      ]);
+
+      const averageRating = ratingStats.length > 0 ? ratingStats[0].averageRating : 0;
+
+      return {
+        success: true,
+        data: {
+          total,
+          pending,
+          reviewed,
+          resolved,
+          averageRating: Math.round(averageRating * 10) / 10 // Làm tròn 1 chữ số thập phân
+        }
+      };
+    } catch (error) {
+      throw new Error(`Lỗi khi lấy thống kê feedback: ${error.message}`);
+    }
+  }
+
+  // Cập nhật trạng thái feedback
+  async updateFeedbackStatus(feedbackId, status, adminResponse, adminId) {
+    try {
+      const feedback = await Feedback.findById(feedbackId);
+      if (!feedback) {
+        throw new Error('Feedback không tồn tại');
+      }
+
+      const updateData = {
+        status,
+        respondedAt: new Date()
+      };
+
+      if (adminResponse) {
+        updateData.adminResponse = adminResponse;
+      }
+
+      if (adminId) {
+        updateData.respondedBy = adminId;
+      }
+
+      const updatedFeedback = await Feedback.findByIdAndUpdate(
+        feedbackId,
+        updateData,
+        { new: true }
+      ).populate('user', 'name email')
+       .populate('respondedBy', 'name email');
+
+      return {
+        success: true,
+        message: 'Cập nhật trạng thái feedback thành công',
+        data: updatedFeedback
+      };
+    } catch (error) {
+      throw new Error(`Lỗi khi cập nhật trạng thái feedback: ${error.message}`);
+    }
+  }
+
+  // Lấy chi tiết feedback
+  async getFeedbackDetail(feedbackId) {
+    try {
+      const feedback = await Feedback.findById(feedbackId)
+        .populate('user', 'name email')
+        .populate('respondedBy', 'name email');
+
+      if (!feedback) {
+        throw new Error('Feedback không tồn tại');
+      }
+
+      return {
+        success: true,
+        data: feedback
+      };
+    } catch (error) {
+      throw new Error(`Lỗi khi lấy chi tiết feedback: ${error.message}`);
     }
   }
 }

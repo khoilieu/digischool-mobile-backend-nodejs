@@ -53,11 +53,13 @@ class StudentLeaveRequestService {
       // Process each lesson
       for (const lessonId of lessonIds) {
         try {
+
           // Get lesson details
           const lesson = await Lesson.findById(lessonId)
             .populate("class", "className")
             .populate("subject", "subjectName subjectCode")
             .populate("teacher", "name email");
+
 
           if (!lesson) {
             errors.push(`Lesson ${lessonId} not found`);
@@ -105,6 +107,8 @@ class StudentLeaveRequestService {
 
           // Get period from timeSlot
           const period = lesson.timeSlot?.period || 1;
+
+          
 
           // Create leave request
           const leaveRequest = new StudentLeaveRequest({

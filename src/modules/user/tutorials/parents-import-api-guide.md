@@ -10,7 +10,7 @@ API import parents cho phép manager import danh sách phụ huynh từ file Exc
 
 ```javascript
 {
-  role: ['parents'],
+  role: ['parent'],
   name: String,           // Họ tên phụ huynh
   email: String,          // Email (unique)
   passwordHash: String,   // Mật khẩu đã hash

@@ -1,16 +1,16 @@
-# Module Phụ Huynh (Parents Module)
+# Parents Module - Feedback Management
 
-Module này cung cấp các API cho phụ huynh để quản lý thông tin con cái và gửi góp ý cho hệ thống.
+Module này cung cấp các API để quản lý feedback từ phụ huynh và cho phép admin/manager xử lý feedback.
 
-## Các API Endpoints
+## API Endpoints
 
-### 1. Lấy danh sách con của phụ huynh
-**GET** `/api/parents/children`
+### Cho Phụ huynh
 
-**Headers:**
+#### 1. Lấy danh sách con
 ```
-Authorization: Bearer <token>
+GET /api/parents/children
 ```
+**Headers:** `Authorization: Bearer <token>`
 
 **Response:**
 ```json
@@ -19,20 +19,18 @@ Authorization: Bearer <token>
   "message": "Lấy danh sách con thành công",
   "data": [
     {
-      "_id": "child_id",
-      "name": "Nguyễn Văn A",
+      "_id": "student_id",
+      "name": "Tên học sinh",
       "studentId": "HS001",
       "email": "student@example.com",
-      "dateOfBirth": "2010-01-01T00:00:00.000Z",
-      "gender": "male",
       "class_id": {
         "_id": "class_id",
         "className": "10A1",
-        "gradeLevel": "10",
+        "gradeLevel": 10,
         "academicYear": "2024-2025",
         "homeroomTeacher": {
           "_id": "teacher_id",
-          "name": "Cô Nguyễn Thị B",
+          "name": "Tên giáo viên",
           "email": "teacher@example.com"
         }
       }
@@ -41,18 +39,11 @@ Authorization: Bearer <token>
 }
 ```
 
-### 2. Xem thời khóa biểu của con
-**GET** `/api/parents/children/:childId/schedule`
-
-**Headers:**
+#### 2. Xem thời khóa biểu của con
 ```
-Authorization: Bearer <token>
+GET /api/parents/children/:childId/schedule?academicYear=2024-2025&startOfWeek=2024-01-15&endOfWeek=2024-01-21
 ```
-
-**Query Parameters:**
-- `academicYear` (required): Năm học (ví dụ: "2024-2025")
-- `startOfWeek` (required): Ngày bắt đầu tuần (định dạng: YYYY-MM-DD)
-- `endOfWeek` (required): Ngày kết thúc tuần (định dạng: YYYY-MM-DD)
+**Headers:** `Authorization: Bearer <token>`
 
 **Response:**
 ```json
@@ -61,58 +52,38 @@ Authorization: Bearer <token>
   "message": "Lấy thời khóa biểu thành công",
   "data": {
     "child": {
-      "_id": "child_id",
-      "name": "Nguyễn Văn A",
+      "_id": "student_id",
+      "name": "Tên học sinh",
       "studentId": "HS001",
       "class": {
         "_id": "class_id",
         "className": "10A1",
-        "gradeLevel": "10",
+        "gradeLevel": 10,
         "academicYear": "2024-2025"
       }
     },
-    "schedule": {
-      // Thời khóa biểu giống như học sinh thấy
-      "weeklySchedule": {
-        "lessons": [
-          {
-            "subject": "Toán",
-            "teacher": "Cô Nguyễn Thị B",
-            "timeSlot": {
-              "period": 1,
-              "startTime": "07:00",
-              "endTime": "07:45"
-            },
-            "scheduledDate": "2024-01-15T00:00:00.000Z",
-            "type": "lesson"
-          }
-        ]
-      }
+    "schedule": [...],
+    "dateRange": {
+      "startOfWeek": "2024-01-15",
+      "endOfWeek": "2024-01-21"
     }
   }
 }
 ```
 
-### 3. Gửi góp ý cho hệ thống
-**POST** `/api/parents/feedback`
-
-**Headers:**
+#### 3. Gửi feedback
 ```
-Authorization: Bearer <token>
-Content-Type: application/json
+POST /api/parents/feedback
 ```
+**Headers:** `Authorization: Bearer <token>`
 
-**Request Body:**
+**Body:**
 ```json
 {
-  "rating": 4,
-  "description": "Hệ thống rất tốt, giao diện dễ sử dụng. Tuy nhiên cần cải thiện tốc độ tải trang."
+  "rating": 5,
+  "description": "Nội dung feedback..."
 }
 ```
-
-**Validation Rules:**
-- `rating`: Số nguyên từ 1-5 (bắt buộc)
-- `description`: Chuỗi từ 10-1000 ký tự (bắt buộc)
 
 **Response:**
 ```json
@@ -122,26 +93,20 @@ Content-Type: application/json
   "data": {
     "_id": "feedback_id",
     "user": "parent_id",
-    "rating": 4,
-    "description": "Hệ thống rất tốt, giao diện dễ sử dụng. Tuy nhiên cần cải thiện tốc độ tải trang.",
+    "rating": 5,
+    "description": "Nội dung feedback...",
     "status": "pending",
-    "createdAt": "2024-01-15T10:30:00.000Z",
-    "updatedAt": "2024-01-15T10:30:00.000Z"
+    "createdAt": "2024-01-15T10:00:00.000Z",
+    "updatedAt": "2024-01-15T10:00:00.000Z"
   }
 }
 ```
 
-### 4. Lấy danh sách góp ý của phụ huynh
-**GET** `/api/parents/feedback`
-
-**Headers:**
+#### 4. Lấy danh sách feedback của phụ huynh
 ```
-Authorization: Bearer <token>
+GET /api/parents/my-feedback?page=1&limit=10
 ```
-
-**Query Parameters:**
-- `page` (optional): Số trang (mặc định: 1)
-- `limit` (optional): Số lượng item mỗi trang (mặc định: 10, tối đa: 100)
+**Headers:** `Authorization: Bearer <token>`
 
 **Response:**
 ```json
@@ -152,75 +117,229 @@ Authorization: Bearer <token>
     "feedbacks": [
       {
         "_id": "feedback_id",
-        "rating": 4,
-        "description": "Hệ thống rất tốt...",
+        "user": "parent_id",
+        "rating": 5,
+        "description": "Nội dung feedback...",
         "status": "pending",
-        "adminResponse": null,
-        "respondedBy": null,
-        "respondedAt": null,
-        "createdAt": "2024-01-15T10:30:00.000Z",
-        "updatedAt": "2024-01-15T10:30:00.000Z"
+        "adminResponse": "Phản hồi từ admin...",
+        "respondedBy": {
+          "_id": "admin_id",
+          "name": "Admin Name",
+          "email": "admin@example.com"
+        },
+        "respondedAt": "2024-01-16T10:00:00.000Z",
+        "createdAt": "2024-01-15T10:00:00.000Z",
+        "updatedAt": "2024-01-16T10:00:00.000Z"
       }
     ],
     "pagination": {
       "page": 1,
       "limit": 10,
-      "total": 1,
-      "pages": 1
+      "total": 25,
+      "pages": 3
     }
   }
 }
 ```
 
-## Quyền truy cập
+### Cho Admin/Manager
 
-Tất cả các API trong module này yêu cầu:
-1. **Xác thực**: Token JWT hợp lệ
-2. **Phân quyền**: Người dùng phải có role `parents`
+#### 1. Lấy tất cả feedback (với filter)
+```
+GET /api/parents/feedback?status=pending&rating=5&page=1&limit=10
+```
+**Headers:** `Authorization: Bearer <token>`
 
-## Lỗi thường gặp
+**Query Parameters:**
+- `status`: `all`, `pending`, `reviewed`, `resolved` (optional)
+- `rating`: 0-5 (optional, 0 = tất cả)
+- `page`: số trang (optional, default: 1)
+- `limit`: số lượng per page (optional, default: 10)
 
-### 401 Unauthorized
-- Chưa đăng nhập hoặc token không hợp lệ
-
-### 403 Forbidden
-- Người dùng không có role `parents`
-- Không có quyền xem thời khóa biểu của học sinh khác
-
-### 400 Bad Request
-- Dữ liệu không hợp lệ (validation errors)
-- Thiếu thông tin bắt buộc
-
-### 500 Internal Server Error
-- Lỗi server
-
-## Ví dụ sử dụng với cURL
-
-### Lấy danh sách con
-```bash
-curl -X GET "http://localhost:3000/api/parents/children" \
-  -H "Authorization: Bearer your_jwt_token"
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Lấy danh sách feedback thành công",
+  "data": {
+    "feedbacks": [
+      {
+        "_id": "feedback_id",
+        "user": {
+          "_id": "parent_id",
+          "name": "Tên phụ huynh",
+          "email": "parent@example.com"
+        },
+        "rating": 5,
+        "description": "Nội dung feedback...",
+        "status": "pending",
+        "adminResponse": "Phản hồi từ admin...",
+        "respondedBy": {
+          "_id": "admin_id",
+          "name": "Admin Name",
+          "email": "admin@example.com"
+        },
+        "respondedAt": "2024-01-16T10:00:00.000Z",
+        "createdAt": "2024-01-15T10:00:00.000Z",
+        "updatedAt": "2024-01-16T10:00:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 25,
+      "pages": 3
+    }
+  }
+}
 ```
 
-### Xem thời khóa biểu của con
-```bash
-curl -X GET "http://localhost:3000/api/parents/children/child_id/schedule?academicYear=2024-2025&startOfWeek=2024-01-15&endOfWeek=2024-01-21" \
-  -H "Authorization: Bearer your_jwt_token"
+#### 2. Lấy thống kê feedback
+```
+GET /api/parents/feedback/stats
+```
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Lấy thống kê feedback thành công",
+  "data": {
+    "total": 100,
+    "pending": 15,
+    "reviewed": 25,
+    "resolved": 60,
+    "averageRating": 4.2
+  }
+}
 ```
 
-### Gửi góp ý
-```bash
-curl -X POST "http://localhost:3000/api/parents/feedback" \
-  -H "Authorization: Bearer your_jwt_token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rating": 4,
-    "description": "Hệ thống rất tốt, giao diện dễ sử dụng."
-  }'
+#### 3. Cập nhật trạng thái feedback
+```
+PATCH /api/parents/feedback/:feedbackId/status
+```
+**Headers:** `Authorization: Bearer <token>`
+
+**Body:**
+```json
+{
+  "status": "resolved",
+  "adminResponse": "Phản hồi từ admin..."
+}
 ```
 
-### Lấy danh sách góp ý
-```bash
-curl -X GET "http://localhost:3000/api/parents/feedback?page=1&limit=10" \
-  -H "Authorization: Bearer your_jwt_token"
-``` 
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Cập nhật trạng thái feedback thành công",
+  "data": {
+    "_id": "feedback_id",
+    "user": {
+      "_id": "parent_id",
+      "name": "Tên phụ huynh",
+      "email": "parent@example.com"
+    },
+    "rating": 5,
+    "description": "Nội dung feedback...",
+    "status": "resolved",
+    "adminResponse": "Phản hồi từ admin...",
+    "respondedBy": {
+      "_id": "admin_id",
+      "name": "Admin Name",
+      "email": "admin@example.com"
+    },
+    "respondedAt": "2024-01-16T10:00:00.000Z",
+    "createdAt": "2024-01-15T10:00:00.000Z",
+    "updatedAt": "2024-01-16T10:00:00.000Z"
+  }
+}
+```
+
+#### 4. Lấy chi tiết feedback
+```
+GET /api/parents/feedback/:feedbackId
+```
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Lấy chi tiết feedback thành công",
+  "data": {
+    "_id": "feedback_id",
+    "user": {
+      "_id": "parent_id",
+      "name": "Tên phụ huynh",
+      "email": "parent@example.com"
+    },
+    "rating": 5,
+    "description": "Nội dung feedback...",
+    "status": "resolved",
+    "adminResponse": "Phản hồi từ admin...",
+    "respondedBy": {
+      "_id": "admin_id",
+      "name": "Admin Name",
+      "email": "admin@example.com"
+    },
+    "respondedAt": "2024-01-16T10:00:00.000Z",
+    "createdAt": "2024-01-15T10:00:00.000Z",
+    "updatedAt": "2024-01-16T10:00:00.000Z"
+  }
+}
+```
+
+## Validation Rules
+
+### Feedback Creation
+- `rating`: Required, integer 1-5
+- `description`: Required, string 10-1000 characters
+
+### Feedback Status Update
+- `status`: Required, enum ['pending', 'reviewed', 'resolved']
+- `adminResponse`: Optional, string max 2000 characters
+
+### Query Parameters
+- `status`: Optional, enum ['all', 'pending', 'reviewed', 'resolved']
+- `rating`: Optional, integer 0-5 (0 = all)
+- `page`: Optional, integer >= 1, default: 1
+- `limit`: Optional, integer 1-100, default: 10
+
+## Permissions
+
+### Phụ huynh
+- Có thể xem danh sách con
+- Có thể xem thời khóa biểu của con
+- Có thể gửi feedback
+- Có thể xem feedback của mình
+
+### Admin/Manager/Principal
+- Có thể xem tất cả feedback
+- Có thể lọc feedback theo status và rating
+- Có thể xem thống kê feedback
+- Có thể cập nhật trạng thái feedback
+- Có thể phản hồi feedback
+- Có thể xem chi tiết feedback
+
+## Database Schema
+
+### Feedback Model
+```javascript
+{
+  user: ObjectId, // Reference to User (parent)
+  rating: Number, // 1-5
+  description: String, // Required, trimmed
+  status: String, // 'pending', 'reviewed', 'resolved'
+  adminResponse: String, // Optional, trimmed
+  respondedBy: ObjectId, // Reference to User (admin)
+  respondedAt: Date, // When admin responded
+  createdAt: Date, // Auto-generated
+  updatedAt: Date // Auto-generated
+}
+```
+
+## Indexes
+- `{ user: 1, createdAt: -1 }` - For querying user's feedback
+- `{ status: 1, createdAt: -1 }` - For filtering by status 
