@@ -10,6 +10,7 @@ API feedback management cho phép admin/manager:
 - Xem thống kê feedback
 - Cập nhật trạng thái và phản hồi feedback
 - Xem chi tiết feedback
+- **Gửi notification realtime cho phụ huynh khi phản hồi**
 
 ## API Endpoints
 
@@ -168,6 +169,8 @@ curl -X PATCH "http://localhost:3000/api/parents/feedback/feedback_id/status" \
 }
 ```
 
+**Notification:** Khi admin phản hồi feedback, phụ huynh sẽ nhận được notification realtime ngay lập tức.
+
 ### 4. Lấy chi tiết feedback
 
 **Endpoint:** `GET /api/parents/feedback/:feedbackId`
@@ -216,6 +219,31 @@ curl -X GET "http://localhost:3000/api/parents/feedback/feedback_id" \
 - **pending**: Chờ xử lý
 - **reviewed**: Đã xem
 - **resolved**: Đã giải quyết
+
+## Notification System
+
+### Khi Admin Phản hồi Feedback
+
+Khi admin cập nhật trạng thái feedback với `adminResponse`, hệ thống sẽ tự động gửi notification realtime cho phụ huynh:
+
+#### Trạng thái "reviewed":
+- **Title:** "Feedback đã được xem xét"
+- **Content:** "Feedback của bạn đã được [Admin Name] xem xét."
+
+#### Trạng thái "resolved":
+- **Title:** "Feedback đã được giải quyết"
+- **Content:** "Feedback của bạn đã được [Admin Name] giải quyết với phản hồi: "[adminResponse]"
+
+#### Trạng thái khác:
+- **Title:** "Cập nhật trạng thái feedback"
+- **Content:** "Trạng thái feedback của bạn đã được cập nhật thành "[status]."
+
+### Notification Properties
+- **Type:** `feedback`
+- **Sender:** Admin ID
+- **Receiver:** Phụ huynh ID
+- **Related Object:** Feedback ID với requestType `feedback`
+- **Realtime:** Notification được gửi realtime qua Socket.IO
 
 ## Validation Rules
 
@@ -277,8 +305,8 @@ curl -X GET "http://localhost:3000/api/parents/feedback/feedback_id" \
 ## Workflow Quản lý Feedback
 
 1. **Phụ huynh gửi feedback** → Status: `pending`
-2. **Admin xem feedback** → Status: `reviewed`
-3. **Admin phản hồi và giải quyết** → Status: `resolved`
+2. **Admin xem feedback** → Status: `reviewed` + Notification
+3. **Admin phản hồi và giải quyết** → Status: `resolved` + Notification
 
 ## Ví dụ Workflow Hoàn chỉnh
 
@@ -303,6 +331,7 @@ curl -X PATCH "http://localhost:3000/api/parents/feedback/feedback_id/status" \
     "status": "reviewed"
   }'
 ```
+**Kết quả:** Phụ huynh nhận notification "Feedback đã được xem xét"
 
 ### Bước 4: Phản hồi và giải quyết
 ```bash
@@ -314,6 +343,7 @@ curl -X PATCH "http://localhost:3000/api/parents/feedback/feedback_id/status" \
     "adminResponse": "Cảm ơn phụ huynh đã góp ý. Chúng tôi sẽ cải thiện hệ thống."
   }'
 ```
+**Kết quả:** Phụ huynh nhận notification "Feedback đã được giải quyết" với nội dung phản hồi
 
 ### Bước 5: Kiểm tra thống kê
 ```bash
@@ -327,4 +357,6 @@ curl -X GET "http://localhost:3000/api/parents/feedback/stats" \
 2. **Pagination**: Sử dụng `page` và `limit` để tải dữ liệu theo từng phần
 3. **Thống kê**: Kiểm tra stats thường xuyên để theo dõi tình hình
 4. **Phản hồi nhanh**: Cập nhật status thành `reviewed` ngay khi xem
-5. **Phản hồi chi tiết**: Viết `adminResponse` rõ ràng và hữu ích 
+5. **Phản hồi chi tiết**: Viết `adminResponse` rõ ràng và hữu ích
+6. **Notification**: Phụ huynh sẽ nhận notification realtime khi admin phản hồi
+7. **Realtime**: Sử dụng Socket.IO để gửi notification ngay lập tức 

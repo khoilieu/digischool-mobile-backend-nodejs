@@ -25,6 +25,12 @@ class LessonReferenceSwapperService {
         lessonField: "replacementLesson",
         description: "Lesson requests (replacement lesson)",
       },
+      {
+        modelName: "Note",
+        modelPath: "../../note/models/note.model",
+        lessonField: "lesson",
+        description: "User notes",
+      },
       // Dễ dàng thêm collection mới ở đây khi cần
       // {
       //   modelName: "NewCollection",

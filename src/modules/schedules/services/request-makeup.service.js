@@ -222,13 +222,14 @@ class MakeupRequestService {
   async processMakeupApproval(
     lessonRequest,
     originalLesson,
-    replacementLesson
+    replacementLesson,
+    processedBy
   ) {
     // Sử dụng hàm generic để swap lesson fields
     await this.swapLessonFieldsForMakeup(
       originalLesson,
       replacementLesson,
-      lessonRequest.processedBy
+      processedBy
     );
   }
 
@@ -290,7 +291,8 @@ class MakeupRequestService {
       await this.processMakeupApproval(
         lessonRequest,
         originalLesson,
-        replacementLesson
+        replacementLesson,
+        managerId
       );
 
       // Cập nhật trạng thái request
@@ -306,8 +308,8 @@ class MakeupRequestService {
 
       // Gửi notification cho giáo viên
       await notificationService.createNotification({
-        type: "makeup_request_result",
-        title: `Yêu cầu dạy bù đã được duyệt - ${lessonRequest.requestId}`,
+        type: "activity",
+        title: `Yêu cầu dạy bù đã được duyệt`,
         content: `Yêu cầu dạy bù của bạn đã được duyệt.`,
         sender: managerId,
         receiverScope: {
@@ -324,7 +326,7 @@ class MakeupRequestService {
       );
       if (students.length > 0) {
         await notificationService.createNotification({
-          type: "makeup_lesson",
+          type: "activity",
           title: `Thông báo dạy bù lớp`,
           content: `Lớp sẽ có tiết dạy bù vào ngày ${new Date(
             replacementLesson.scheduledDate
@@ -401,8 +403,8 @@ class MakeupRequestService {
 
       // Gửi notification cho giáo viên
       await notificationService.createNotification({
-        type: "makeup_request_result",
-        title: `Yêu cầu dạy bù đã bị từ chối - ${lessonRequest.requestId}`,
+        type: "activity",
+        title: `Yêu cầu dạy bù đã bị từ chối`,
         content: `Yêu cầu dạy bù của bạn đã bị từ chối.`,
         sender: managerId,
         receiverScope: {
@@ -459,8 +461,8 @@ class MakeupRequestService {
       // Gửi notification cho manager về việc huỷ yêu cầu
       const managers = await User.find({ role: "manager" }, "_id");
       await notificationService.createNotification({
-        type: "makeup_request_cancelled",
-        title: `Yêu cầu dạy bù đã bị huỷ - ${lessonRequest.requestId}`,
+        type: "activity",
+        title: `Yêu cầu dạy bù đã bị huỷ`,
         content: `Yêu cầu dạy bù đã bị huỷ bởi giáo viên.`,
         sender: teacherId,
         receiverScope: { type: "user", ids: managers.map((m) => m._id) },

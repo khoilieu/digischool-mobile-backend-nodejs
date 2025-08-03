@@ -1,6 +1,7 @@
 const User = require('../../auth/models/user.model');
 const Feedback = require('../models/feedback.model');
 const scheduleService = require('../../schedules/services/schedule.service');
+const NotificationService = require('../../notification/services/notification.service');
 
 class ParentService {
   // Lấy danh sách con của phụ huynh
@@ -257,7 +258,10 @@ class ParentService {
   // Cập nhật trạng thái feedback
   async updateFeedbackStatus(feedbackId, status, adminResponse, adminId) {
     try {
-      const feedback = await Feedback.findById(feedbackId);
+      const feedback = await Feedback.findById(feedbackId)
+        .populate('user', 'name email')
+        .populate('respondedBy', 'name email');
+      
       if (!feedback) {
         throw new Error('Feedback không tồn tại');
       }
@@ -281,6 +285,38 @@ class ParentService {
         { new: true }
       ).populate('user', 'name email')
        .populate('respondedBy', 'name email');
+
+      // Gửi notification cho phụ huynh khi admin phản hồi
+      if (adminResponse && feedback.user) {
+        const admin = await User.findById(adminId, 'name');
+        const adminName = admin ? admin.name : 'Admin';
+        
+        let notificationTitle = '';
+        let notificationContent = '';
+        
+        switch (status) {
+          case 'reviewed':
+            notificationTitle = 'Feedback đã được xem xét';
+            notificationContent = `Feedback của bạn đã được ${adminName} xem xét.`;
+            break;
+          case 'resolved':
+            notificationTitle = 'Feedback đã được giải quyết';
+            notificationContent = `Feedback của bạn đã được ${adminName} giải quyết với phản hồi: "${adminResponse}"`;
+            break;
+          default:
+            notificationTitle = 'Cập nhật trạng thái feedback';
+            notificationContent = `Trạng thái feedback của bạn đã được cập nhật thành "${status}".`;
+        }
+
+        await NotificationService.createNotification({
+          type: 'activity',
+          title: notificationTitle,
+          content: notificationContent,
+          sender: adminId,
+          receiverScope: { type: 'user', ids: [feedback.user._id.toString()] },
+          relatedObject: { id: feedbackId, requestType: 'feedback' },
+        });
+      }
 
       return {
         success: true,
