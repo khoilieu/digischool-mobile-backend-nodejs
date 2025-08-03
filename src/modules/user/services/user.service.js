@@ -240,12 +240,30 @@ class UserService {
         throw new Error('One-time password expired');
       }
 
+      // Tìm user nếu đã tồn tại (cho trường hợp user đã được tạo)
+      let user = await User.findOne({ email });
+      
+      // Invalidate previous session if user exists
+      if (user && user.currentSessionToken) {
+        if (!global.invalidTokens) {
+          global.invalidTokens = new Set();
+        }
+        global.invalidTokens.add(user.currentSessionToken);
+      }
+
       // Tạo token tạm thời để set password
       const tempToken = jwt.sign(
         { email, role: otpData.userData.role },
         process.env.JWT_SECRET,
         { expiresIn: '15m' } // Token hết hạn sau 15 phút
       );
+
+      // Cập nhật session token nếu user tồn tại
+      if (user) {
+        user.currentSessionToken = tempToken;
+        user.lastLoginAt = new Date();
+        await user.save();
+      }
 
       return {
         message: 'Login successful. Please set your password.',
@@ -343,12 +361,25 @@ class UserService {
 
         const updatedUser = await User.findByIdAndUpdate(userId, updateData, { new: true });
 
+        // Invalidate previous session if exists
+        if (updatedUser.currentSessionToken) {
+          if (!global.invalidTokens) {
+            global.invalidTokens = new Set();
+          }
+          global.invalidTokens.add(updatedUser.currentSessionToken);
+        }
+
         // Tạo token mới cho user
         const newToken = jwt.sign(
           { id: updatedUser._id, email: updatedUser.email, role: updatedUser.role },
           process.env.JWT_SECRET,
           { expiresIn: process.env.JWT_EXPIRES_IN }
         );
+
+        // Cập nhật session token
+        updatedUser.currentSessionToken = newToken;
+        updatedUser.lastLoginAt = new Date();
+        await updatedUser.save();
 
         console.log(`✅ Password set successfully for user: ${user.email} ${isResetPassword ? '(via reset)' : '(new user)'}`);
 
@@ -413,6 +444,18 @@ class UserService {
         global.invalidTokens = global.invalidTokens || new Set();
         global.invalidTokens.add(tokenOrTempToken);
 
+        // Tạo token mới cho user mới
+        const newToken = jwt.sign(
+          { id: user._id, email: user.email, role: user.role },
+          process.env.JWT_SECRET,
+          { expiresIn: process.env.JWT_EXPIRES_IN }
+        );
+
+        // Cập nhật session token cho user mới
+        user.currentSessionToken = newToken;
+        user.lastLoginAt = new Date();
+        await user.save();
+
         // Tạo response theo format mong muốn
         const response = {
           message: 'Teacher created successfully',
@@ -427,7 +470,8 @@ class UserService {
             active: user.active,
             status: 'active',
             createdAt: user.createdAt,
-            updatedAt: user.updatedAt
+            updatedAt: user.updatedAt,
+            token: newToken
           }
         };
 

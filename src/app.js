@@ -6,6 +6,9 @@ const { errorHandler } = require("./middleware/errorHandler");
 const routes = require("./routes");
 // const cors = require("cors");
 
+// Initialize global variables for session management
+global.invalidTokens = new Set();
+
 const app = express();
 
 // Middleware

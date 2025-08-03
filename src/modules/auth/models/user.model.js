@@ -102,9 +102,7 @@ const userSchema = new mongoose.Schema({
   homeroomClass: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Class',
-    required: function() {
-      return this.role.includes('homeroom_teacher') && !this.isNewUser;
-    },
+    required: false,
     default: undefined
   },
   
@@ -164,7 +162,19 @@ const userSchema = new mongoose.Schema({
     required: false,
     default: undefined
   },
-  active: { type: Boolean, default: true }
+  active: { type: Boolean, default: true },
+  
+  // Session management for single session
+  currentSessionToken: {
+    type: String,
+    required: false,
+    default: undefined
+  },
+  lastLoginAt: {
+    type: Date,
+    required: false,
+    default: undefined
+  }
 }, { timestamps: true });
 
 // Virtual field for classId alias

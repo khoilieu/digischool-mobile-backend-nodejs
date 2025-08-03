@@ -39,6 +39,14 @@ const protect = async (req, res, next) => {
         });
       }
 
+      // Kiểm tra session token có match không
+      if (user.currentSessionToken !== token) {
+        return res.status(401).json({
+          success: false,
+          message: 'Session expired. Please login again.'
+        });
+      }
+
       // Thêm user vào request
       req.user = user;
       next();

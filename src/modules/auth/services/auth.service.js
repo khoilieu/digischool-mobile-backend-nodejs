@@ -56,8 +56,22 @@ class AuthService {
         throw new Error('Invalid email or password');
       }
 
-      // Tạo token
+      // Invalidate previous session if exists
+      if (user.currentSessionToken) {
+        // Add old token to blacklist
+        if (!global.invalidTokens) {
+          global.invalidTokens = new Set();
+        }
+        global.invalidTokens.add(user.currentSessionToken);
+      }
+
+      // Tạo token mới
       const token = this.generateToken(user._id);
+
+      // Cập nhật session token và thời gian login
+      user.currentSessionToken = token;
+      user.lastLoginAt = new Date();
+      await user.save();
 
       return {
         user: {
@@ -293,8 +307,15 @@ class AuthService {
         throw new Error('User not found');
       }
 
-      // Thêm token vào blacklist (có thể lưu vào Redis hoặc database)
-      // TODO: Implement token blacklist storage
+      // Clear session token
+      user.currentSessionToken = undefined;
+      await user.save();
+
+      // Thêm token vào blacklist
+      if (!global.invalidTokens) {
+        global.invalidTokens = new Set();
+      }
+      global.invalidTokens.add(token);
       
       return {
         user: {
@@ -380,8 +401,21 @@ class AuthService {
         throw new Error('Invalid or expired reset token');
       }
       
+      // Invalidate previous session if exists
+      if (user.currentSessionToken) {
+        if (!global.invalidTokens) {
+          global.invalidTokens = new Set();
+        }
+        global.invalidTokens.add(user.currentSessionToken);
+      }
+      
       // Tạo temporary token để sử dụng với API set-password
       const tempToken = this.generateToken(user._id);
+      
+      // Cập nhật session token
+      user.currentSessionToken = tempToken;
+      user.lastLoginAt = new Date();
+      await user.save();
       
       console.log(`✅ Login successful with reset token for user: ${user.email}`);
       
