@@ -500,6 +500,62 @@ const validateUser = {
       }
       next();
     }
+  ],
+
+  updatePersonalInfo: [
+    protect,
+    body('name')
+      .optional()
+      .trim()
+      .isLength({ min: 2, max: 100 })
+      .withMessage('Tên phải có từ 2 đến 100 ký tự'),
+
+    body('dateOfBirth')
+      .optional()
+      .isISO8601()
+      .withMessage('Ngày sinh phải có định dạng YYYY-MM-DD')
+      .custom((value) => {
+        if (value) {
+          const birthDate = new Date(value);
+          const today = new Date();
+          const age = today.getFullYear() - birthDate.getFullYear();
+          if (age < 5 || age > 80) {
+            throw new Error('Tuổi phải từ 5 đến 80');
+          }
+        }
+        return true;
+      }),
+
+    body('gender')
+      .optional()
+      .trim()
+      .isIn(['male', 'female', 'other'])
+      .withMessage('Giới tính phải là male, female hoặc other'),
+
+    body('phone')
+      .optional()
+      .trim()
+      .matches(/^[0-9+\-\s()]+$/)
+      .withMessage('Số điện thoại chỉ được chứa số, dấu cách, dấu gạch ngang và dấu ngoặc')
+      .isLength({ min: 10, max: 15 })
+      .withMessage('Số điện thoại phải có từ 10 đến 15 ký tự'),
+
+    body('address')
+      .optional()
+      .trim()
+      .isLength({ max: 500 })
+      .withMessage('Địa chỉ không được vượt quá 500 ký tự'),
+
+    (req, res, next) => {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          errors: errors.array()
+        });
+      }
+      next();
+    }
   ]
 };
 

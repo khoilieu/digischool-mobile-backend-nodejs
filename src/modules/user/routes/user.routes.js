@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/user.controller');
 const { validateUser } = require('../middleware/user.validation');
-const { protect, authorize } = require('../../auth/middleware/auth.middleware');
 const upload = require('../middleware/user.upload');
 
 // Tạo user mới (chỉ admin và manager)
@@ -15,15 +14,21 @@ router.post(
 // Lấy danh sách users (chỉ admin và manager)
 router.get(
   '/',
-  protect,
+  // protect,
   // authorize('admin', 'manager'),
   userController.getUsers
+);
+
+// Cập nhật thông tin cá nhân của user hiện tại
+router.put('/personal-info', 
+  validateUser.updatePersonalInfo,
+  userController.updatePersonalInfo
 );
 
 // Lấy thông tin user theo ID (chỉ admin và manager)
 router.get(
   '/:id',
-  protect,
+  //  protect,
   // authorize('admin', 'manager'),
   userController.getUserById
 );
@@ -31,8 +36,8 @@ router.get(
 // Cập nhật thông tin user (chỉ admin và manager)
 router.put(
   '/:id',
-  protect,
-  authorize('admin', 'manager'),
+  // protect,
+  // authorize('admin', 'manager'),
   validateUser.updateUser,
   userController.updateUser
 );
@@ -40,8 +45,8 @@ router.put(
 // Xóa user (chỉ admin)
 router.delete(
   '/:id',
-  protect,
-  authorize('admin'),
+  // protect,
+  // authorize('admin'),
   userController.deleteUser
 );
 
@@ -69,31 +74,31 @@ router.post('/set-password',
 
 // Import teachers từ file Excel (chỉ manager)
 router.post('/import-teachers', 
-  protect,
-  authorize('manager'),
+  // protect,
+  // authorize('manager'),
   upload.single('file'),
   userController.importTeachers
 );
 
 // Import teachers từ base64 (chỉ manager)
 router.post('/import-teachers-base64', 
-  protect,
-  authorize('manager'),
+  // protect,
+  // authorize('manager'),
   userController.importTeachersBase64
 );
 
 // Import students từ file Excel (chỉ manager)
 router.post('/import-students', 
-  protect,
-  authorize('manager'),
+  // protect,
+  // authorize('manager'),
   upload.single('file'),
   userController.importStudents
 );
 
 // Import students từ base64 (chỉ manager)
 router.post('/import-students-base64', 
-  protect,
-  authorize('manager'),
+  // protect,
+  // authorize('manager'),
   userController.importStudentsBase64
 );
 
@@ -117,16 +122,16 @@ router.post('/create-parent',
 
 // Import parents từ file Excel (chỉ manager)
 router.post('/import-parents', 
-  protect,
-  authorize('manager'),
+  // protect,
+  // authorize('manager'),
   upload.single('file'),
   userController.importParents
 );
 
 // Import parents từ base64 (chỉ manager)
 router.post('/import-parents-base64', 
-  protect,
-  authorize('manager'),
+  // protect,
+  // authorize('manager'),
   userController.importParentsBase64
 );
 

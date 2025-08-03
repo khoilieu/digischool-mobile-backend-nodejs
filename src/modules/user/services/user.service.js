@@ -896,6 +896,65 @@ class UserService {
     }
   }
 
+  // Cập nhật thông tin cá nhân của user hiện tại
+  async updatePersonalInfo(userId, updateData) {
+    try {
+      const user = await User.findById(userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // Chỉ cho phép update các trường thông tin cá nhân
+      const allowedFields = ['name', 'dateOfBirth', 'gender', 'phone', 'address'];
+      const filteredData = {};
+      
+      for (const field of allowedFields) {
+        if (updateData.hasOwnProperty(field)) {
+          filteredData[field] = updateData[field];
+        }
+      }
+
+      // Nếu không có dữ liệu để update
+      if (Object.keys(filteredData).length === 0) {
+        throw new Error('No valid fields to update');
+      }
+
+      const updatedUser = await User.findByIdAndUpdate(
+        userId,
+        { $set: filteredData },
+        { new: true }
+      ).populate([
+        { path: 'subject', select: 'subjectName subjectCode' },
+        { path: 'class_id', select: 'className' },
+        { path: 'school', select: 'schoolName' }
+      ]);
+
+      return {
+        id: updatedUser._id,
+        email: updatedUser.email,
+        name: updatedUser.name,
+        role: updatedUser.role,
+        roleInfo: {
+          type: updatedUser.role[0],
+          role: updatedUser.role
+        },
+        dateOfBirth: updatedUser.dateOfBirth,
+        gender: updatedUser.gender,
+        phone: updatedUser.phone,
+        address: updatedUser.address,
+        subject: updatedUser.subject,
+        class: updatedUser.class_id,
+        school: updatedUser.school,
+        isNewUser: updatedUser.isNewUser,
+        active: updatedUser.active,
+        createdAt: updatedUser.createdAt,
+        updatedAt: updatedUser.updatedAt
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
   // Xóa user
   async deleteUser(id) {
     try {

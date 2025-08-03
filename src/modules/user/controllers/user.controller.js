@@ -486,6 +486,24 @@ class UserController {
     }
   }
 
+  // Cập nhật thông tin cá nhân của user hiện tại
+  async updatePersonalInfo(req, res, next) {
+    try {
+      const userId = req.user._id;
+      const updateData = req.body;
+      
+      const result = await userService.updatePersonalInfo(userId, updateData);
+      
+      res.status(200).json({
+        success: true,
+        message: 'Cập nhật thông tin cá nhân thành công',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
 }
 
 module.exports = new UserController(); 
