@@ -16,8 +16,8 @@ const NotificationSchema = new mongoose.Schema(
       required: true,
     },
     relatedObject: {
-      id: { type: mongoose.Schema.Types.ObjectId, required: true },
-      requestType: { type: String, required: true },
+      id: { type: mongoose.Schema.Types.ObjectId, required: false },
+      requestType: { type: String, required: false },
     },
     isReadBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   },

@@ -78,6 +78,55 @@ class NotificationService {
     }
   }
 
+  // Tạo notification thủ công
+  async createManualNotification({
+    title,
+    content,
+    sender,
+    receiverScope,
+  }) {
+    try {
+      console.log(
+        "\uD83D\uDCE2 Creating manual notification:",
+        JSON.stringify(
+          {
+            title,
+            content,
+            sender,
+            receiverScope,
+          },
+          null,
+          2
+        )
+      );
+      
+      const receivers = await this.getUserIdsFromScope(receiverScope);
+      const notificationData = {
+        type: "user", // Manual notifications are always type "user"
+        title,
+        content,
+        sender,
+        receivers,
+        receiverScope,
+        isReadBy: [],
+      };
+      
+      const notification = await Notification.create(notificationData);
+      console.log(
+        "\u2705 Manual notification created successfully:",
+        notification._id
+      );
+      
+      // Gửi notification realtime
+      await this.sendRealtimeNotification(notification);
+      
+      return notification;
+    } catch (error) {
+      console.error("\u274C Error creating manual notification:", error.message);
+      throw error;
+    }
+  }
+
   async getUserNotifications(userId, type, page = 1, limit = 20) {
     try {
       const query = { receivers: userId };
@@ -139,6 +188,9 @@ class NotificationService {
             ...notification.relatedObject,
             status,
           };
+        } else {
+          // Cho notification thủ công không có relatedObject
+          notification.relatedObject = null;
         }
       }
       return notifications;
@@ -201,6 +253,37 @@ class NotificationService {
         }
         case "school": {
           const users = await User.find({}, "_id");
+          return users.map((u) => u._id);
+        }
+        case "department": {
+          // Lấy tất cả giáo viên theo bộ môn
+          const Subject = require("../../subjects/models/subject.model");
+          const subjects = await Subject.find(
+            { subjectName: { $in: receiverScope.ids } },
+            "_id"
+          );
+          const subjectIds = subjects.map(subject => subject._id);
+          const users = await User.find(
+            { 
+              role: { $in: ["teacher", "homeroom_teacher"] },
+              subject: { $in: subjectIds }
+            },
+            "_id"
+          );
+          return users.map((u) => u._id);
+        }
+        case "grade": {
+          // Lấy tất cả học sinh theo khối
+          const Class = require("../../classes/models/class.model");
+          const classesInGrade = await Class.find(
+            { gradeLevel: { $in: receiverScope.ids } },
+            "_id"
+          );
+          const classIds = classesInGrade.map(cls => cls._id);
+          const users = await User.find(
+            { class_id: { $in: classIds } },
+            "_id"
+          );
           return users.map((u) => u._id);
         }
         default:

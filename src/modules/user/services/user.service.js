@@ -496,7 +496,7 @@ class UserService {
   }
 
   // Lấy danh sách users
-  async getUsers({ page = 1, limit = 10, role, search }) {
+  async getUsers({ page = 1, limit = 20, role, search }) {
     try {
       const query = {};
       

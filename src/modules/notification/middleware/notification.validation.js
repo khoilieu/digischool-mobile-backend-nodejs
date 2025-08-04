@@ -30,6 +30,45 @@ class NotificationValidation {
     ];
   }
 
+  validateCreateManualNotification() {
+    return [
+      body("title")
+        .isString()
+        .isLength({ min: 1, max: 200 })
+        .withMessage("title là bắt buộc, tối đa 200 ký tự"),
+      body("content")
+        .isString()
+        .isLength({ min: 1, max: 2000 })
+        .withMessage("content là bắt buộc, tối đa 2000 ký tự"),
+      body("scopeType")
+        .optional()
+        .isIn(["Toàn trường", "Bộ môn", "Khối", "Lớp"])
+        .withMessage("scopeType không hợp lệ"),
+      body("department")
+        .optional()
+        .isString()
+        .withMessage("department phải là string"),
+      body("grade")
+        .optional()
+        .isString()
+        .withMessage("grade phải là string"),
+      body("selectedClass")
+        .optional()
+        .isString()
+        .withMessage("selectedClass phải là string"),
+      (req, res, next) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+          return res.status(400).json({ 
+            success: false,
+            errors: errors.array() 
+          });
+        }
+        next();
+      },
+    ];
+  }
+
   validateGetUserNotifications() {
     return [
       query("type")

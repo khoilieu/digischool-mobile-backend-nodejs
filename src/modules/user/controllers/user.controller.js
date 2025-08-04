@@ -89,7 +89,7 @@ class UserController {
   // Lấy danh sách users
   async getUsers(req, res, next) {
     try {
-      const { page = 1, limit = 10, role, search } = req.query;
+      const { page = 1, limit = 20, role, search } = req.query;
       const result = await userService.getUsers({ page, limit, role, search });
       res.status(200).json({
         success: true,

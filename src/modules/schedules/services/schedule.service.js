@@ -586,9 +586,11 @@ class ScheduleService {
       const substituteRequests = await LessonRequest.find({
         requestType: "substitute",
         lesson: lesson._id,
+        status: { $in: ["pending", "approved"] }
       })
         .populate("requestingTeacher", "name email fullName")
         .populate("candidateTeachers.teacher", "name email fullName")
+        .sort({ createdAt: -1 })
         .lean();
       // Swap: originalLesson hoặc replacementLesson
       const swapRequests = await LessonRequest.find({
@@ -597,6 +599,7 @@ class ScheduleService {
           { originalLesson: lesson._id },
           { replacementLesson: lesson._id },
         ],
+        status: { $in: ["pending", "approved"] }
       })
         .populate("requestingTeacher", "name email fullName")
         .populate("replacementTeacher", "name email fullName")
@@ -605,6 +608,7 @@ class ScheduleService {
           "replacementLesson",
           "lessonId scheduledDate topic status type"
         )
+        .sort({ createdAt: -1 })
         .lean();
       // Makeup: originalLesson hoặc replacementLesson
       const makeupRequests = await LessonRequest.find({
@@ -613,6 +617,7 @@ class ScheduleService {
           { originalLesson: lesson._id },
           { replacementLesson: lesson._id },
         ],
+        status: { $in: ["pending", "approved"] }
       })
         .populate("requestingTeacher", "name email fullName")
         .populate("originalLesson", "lessonId scheduledDate topic status type")
@@ -620,6 +625,7 @@ class ScheduleService {
           "replacementLesson",
           "lessonId scheduledDate topic status type"
         )
+        .sort({ createdAt: -1 })
         .lean();
 
       // Student Leave Requests: lessonId field
