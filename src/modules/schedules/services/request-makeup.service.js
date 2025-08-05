@@ -7,6 +7,7 @@ const AcademicYear = require("../models/academic-year.model");
 const TimeSlot = require("../models/time-slot.model");
 const lessonReferenceSwapper = require("./lesson-reference-swapper.service");
 const notificationService = require("../../notification/services/notification.service");
+const parentNotificationService = require("../../notification/services/parent-notification.service");
 
 class MakeupRequestService {
   // Helper function to calculate week range from a date
@@ -339,6 +340,13 @@ class MakeupRequestService {
           },
         });
       }
+
+      // Gửi notification cho phụ huynh
+      await parentNotificationService.notifyMakeupApproved(
+        lessonRequest.originalLesson._id,
+        lessonRequest.replacementLesson._id,
+        lessonRequest.requestingTeacher._id
+      );
 
       console.log(`✅ Approved makeup request: ${requestId}`);
 

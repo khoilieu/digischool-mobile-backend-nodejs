@@ -80,12 +80,7 @@ router.post('/import-teachers',
   userController.importTeachers
 );
 
-// Import teachers từ base64 (chỉ manager)
-router.post('/import-teachers-base64', 
-  // protect,
-  // authorize('manager'),
-  userController.importTeachersBase64
-);
+
 
 // Import students từ file Excel (chỉ manager)
 router.post('/import-students', 
@@ -95,12 +90,7 @@ router.post('/import-students',
   userController.importStudents
 );
 
-// Import students từ base64 (chỉ manager)
-router.post('/import-students-base64', 
-  // protect,
-  // authorize('manager'),
-  userController.importStudentsBase64
-);
+
 
 // Tạo student mới (chỉ manager)
 router.post('/create-student', 
@@ -128,12 +118,7 @@ router.post('/import-parents',
   userController.importParents
 );
 
-// Import parents từ base64 (chỉ manager)
-router.post('/import-parents-base64', 
-  // protect,
-  // authorize('manager'),
-  userController.importParentsBase64
-);
+
 
 // ===== API QUẢN LÝ TÀI KHOẢN =====
 

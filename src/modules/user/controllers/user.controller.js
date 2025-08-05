@@ -187,40 +187,7 @@ class UserController {
     }
   }
 
-  // Import teachers từ base64
-  async importTeachersBase64(req, res, next) {
-    try {
-      const { base64Data, fileData } = req.body;
-      
-      // Chấp nhận cả hai tham số
-      const data = base64Data || fileData;
-      
-      if (!data) {
-        return res.status(400).json({
-          success: false,
-          message: 'No base64 data provided'
-        });
-      }
 
-      const token = req.headers.authorization?.split(' ')[1];
-      if (!token) {
-        return res.status(401).json({
-          success: false,
-          message: 'No token provided'
-        });
-      }
-
-      const result = await userService.importTeachersBase64(data, token);
-      
-      res.status(200).json({
-        success: true,
-        message: 'Import completed',
-        data: result
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
 
   // Import students từ file Excel
   async importStudents(req, res, next) {
@@ -252,40 +219,7 @@ class UserController {
     }
   }
 
-  // Import students từ base64
-  async importStudentsBase64(req, res, next) {
-    try {
-      const { base64Data, fileData } = req.body;
-      
-      // Chấp nhận cả hai tham số
-      const data = base64Data || fileData;
-      
-      if (!data) {
-        return res.status(400).json({
-          success: false,
-          message: 'No base64 data provided'
-        });
-      }
 
-      const token = req.headers.authorization?.split(' ')[1];
-      if (!token) {
-        return res.status(401).json({
-          success: false,
-          message: 'No token provided'
-        });
-      }
-
-      const result = await userService.importStudentsBase64(data, token);
-      
-      res.status(200).json({
-        success: true,
-        message: 'Student import completed',
-        data: result
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
 
   // Tạo student mới (chỉ manager)
   async createStudent(req, res, next) {
@@ -363,40 +297,7 @@ class UserController {
     }
   }
 
-  // Import parents từ base64 (chỉ manager)
-  async importParentsBase64(req, res, next) {
-    try {
-      const { base64Data, fileData } = req.body;
-      
-      // Chấp nhận cả hai tham số
-      const data = base64Data || fileData;
-      
-      if (!data) {
-        return res.status(400).json({
-          success: false,
-          message: 'No base64 data provided'
-        });
-      }
 
-      const token = req.headers.authorization?.split(' ')[1];
-      if (!token) {
-        return res.status(401).json({
-          success: false,
-          message: 'No token provided'
-        });
-      }
-
-      const result = await userService.importParentsBase64(data, token);
-      
-      res.status(200).json({
-        success: true,
-        message: 'Parent import completed',
-        data: result
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
 
   // Tạo parent mới (chỉ manager)
   async createParent(req, res, next) {

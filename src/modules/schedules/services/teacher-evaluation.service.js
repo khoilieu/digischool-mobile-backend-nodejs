@@ -1,6 +1,8 @@
 const TeacherLessonEvaluation = require("../models/teacher-lesson-evaluation.model");
 const Lesson = require("../models/lesson.model");
 const User = require("../../auth/models/user.model");
+const notificationService = require("../../notification/services/notification.service");
+const parentNotificationService = require("../../notification/services/parent-notification.service");
 
 class TeacherEvaluationService {
   async createEvaluation({ user, params, body }) {
@@ -505,6 +507,13 @@ class TeacherEvaluationService {
         await lessonRequestService.handleMakeupLessonCompleted(lesson._id);
       }
     }
+
+    // Gửi notification cho phụ huynh về đánh giá tiết học
+    await parentNotificationService.notifyLessonEvaluation(
+      evaluation._id,
+      evaluation.lesson,
+      teacherId
+    );
     return {
       status: 200,
       body: {

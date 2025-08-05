@@ -56,10 +56,10 @@ class UserService {
       const mailOptions = {
         from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
         to: email,
-        subject: 'Your One-Time Password for Account Creation - EcoSchool',
+        subject: 'Your One-Time Password for Account Creation - DigiSchool',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h1 style="color: #2c3e50;">EcoSchool - Account Creation</h1>
+            <h1 style="color: #2c3e50;">DigiSchool - Account Creation</h1>
             <p>Hello,</p>
             <p>Your account has been created by an administrator. Please use the following one-time password to set up your account:</p>
             <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; text-align: center; margin: 20px 0;">
@@ -73,7 +73,7 @@ class UserService {
             </ul>
             <p>If you did not request this account, please contact your administrator.</p>
             <hr style="margin: 30px 0;">
-            <p style="color: #7f8c8d; font-size: 12px;">This is an automated message from EcoSchool system.</p>
+            <p style="color: #7f8c8d; font-size: 12px;">This is an automated message from DigiSchool system.</p>
           </div>
         `
       };
@@ -111,10 +111,10 @@ class UserService {
       const mailOptions = {
         from: process.env.EMAIL_USER,
         to: email,
-        subject: 'Chào mừng giáo viên mới - EcoSchool',
+        subject: 'Chào mừng giáo viên mới - DigiSchool',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #4CAF50;">Chào mừng ${name} đến với EcoSchool!</h2>
+            <h2 style="color: #4CAF50;">Chào mừng ${name} đến với DigiSchool!</h2>
             <p>Bạn đã được thêm vào hệ thống với vai trò <strong>Giáo viên</strong> môn <strong>${subjectName || 'chưa xác định'}</strong>.</p>
             
             <div style="background-color: #f0f8fe; padding: 20px; border-left: 4px solid #4CAF50; margin: 20px 0;">
@@ -143,7 +143,7 @@ class UserService {
 
             <hr>
             <p style="color: #666; font-size: 12px;">
-              Email này được gửi tự động từ hệ thống EcoSchool. Vui lòng không phản hồi email này.<br>
+              Email này được gửi tự động từ hệ thống DigiSchool. Vui lòng không phản hồi email này.<br>
               Nếu bạn gặp vấn đề, vui lòng liên hệ quản trị viên hệ thống.
             </p>
           </div>
@@ -1046,6 +1046,8 @@ class UserService {
   async importTeachers(filePath, token) {
     const XLSX = require('xlsx');
     const fs = require('fs');
+    const Subject = require('../../subjects/models/subject.model');
+    const School = require('../../classes/models/school.model');
     
     try {
       // Verify token và kiểm tra role manager
@@ -1077,12 +1079,12 @@ class UserService {
         const teacher = teachers[i];
         
         try {
-          // Validate dữ liệu
-          if (!teacher.name || !teacher.email || !teacher.subjectId) {
+          // Validate dữ liệu bắt buộc
+          if (!teacher.name || !teacher.email || !teacher.teacherId || !teacher.subjectName || !teacher.school) {
             results.failed.push({
-              row: i + 2, // +2 vì hàng 1 là header, index bắt đầu từ 0
+              row: i + 2,
               data: teacher,
-              error: 'Missing required fields: name, email, or subjectId'
+              error: 'Missing required fields: name, email, teacherId, subjectName, or school'
             });
             continue;
           }
@@ -1098,20 +1100,58 @@ class UserService {
             continue;
           }
 
+          // Kiểm tra teacherId đã tồn tại
+          const existingTeacherId = await User.findOne({ teacherId: teacher.teacherId });
+          if (existingTeacherId) {
+            results.failed.push({
+              row: i + 2,
+              data: teacher,
+              error: 'Teacher ID already exists'
+            });
+            continue;
+          }
+
+          // Tìm trường học
+          const school = await School.findOne({ name: teacher.school });
+          if (!school) {
+            results.failed.push({
+              row: i + 2,
+              data: teacher,
+              error: `School '${teacher.school}' not found in database`
+            });
+            continue;
+          }
+
+          // Tìm môn học
+          const subject = await Subject.findOne({ subjectName: teacher.subjectName });
+          if (!subject) {
+            results.failed.push({
+              row: i + 2,
+              data: teacher,
+              error: `Subject '${teacher.subjectName}' not found in database`
+            });
+            continue;
+          }
+
           // Tạo mật khẩu tạm thời và hash
           const tempPassword = this.generateOTP();
           const passwordHash = await bcrypt.hash(tempPassword, 12);
 
-          // Tạo user mới với isNewUser = true (sẽ redirect tới set-password)
+          // Tạo user mới với đầy đủ trường theo yêu cầu
           const newUser = new User({
             name: teacher.name,
             email: teacher.email,
             passwordHash,
             dateOfBirth: teacher.dateOfBirth ? new Date(teacher.dateOfBirth) : null,
             gender: teacher.gender || 'other',
-            role: ['teacher'],
-            subject: teacher.subjectId,
-            isNewUser: true, // Sẽ redirect tới set-password khi login
+            phone: teacher.phone || null,
+            address: teacher.address || null,
+            school: school._id,
+            teacherId: teacher.teacherId,
+            subject: subject._id,
+            role: ['teacher'], // Chỉ tạo role teacher, homeroom_teacher sẽ được set khi import TKB
+            isNewUser: true,
+            isPending: false,
             active: teacher.active !== false
           });
 
@@ -1124,8 +1164,11 @@ class UserService {
             row: i + 2,
             email: teacher.email,
             name: teacher.name,
+            teacherId: teacher.teacherId,
+            subjectName: teacher.subjectName,
+            school: teacher.school,
             status: 'awaiting_first_login',
-            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
+            tempPassword: tempPassword
           });
 
         } catch (error) {
@@ -1153,110 +1196,7 @@ class UserService {
     }
   }
 
-  // Import teachers từ base64 string
-  async importTeachersBase64(fileData, token) {
-    const XLSX = require('xlsx');
-    const fs = require('fs');
-    
-    try {
-      // Verify token và kiểm tra role manager
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const currentUser = await User.findById(decoded.id);
-      
-      if (!currentUser || !currentUser.role.includes('manager')) {
-        throw new Error('Only managers can import teachers');
-      }
 
-      // Decode base64 và tạo buffer
-      const buffer = Buffer.from(fileData, 'base64');
-      
-      // Đọc Excel từ buffer
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const teachers = XLSX.utils.sheet_to_json(worksheet);
-
-      if (!teachers || teachers.length === 0) {
-        throw new Error('No data found in Excel file');
-      }
-
-      const results = {
-        success: [],
-        failed: [],
-        total: teachers.length
-      };
-
-      // Xử lý từng teacher
-      for (let i = 0; i < teachers.length; i++) {
-        const teacher = teachers[i];
-        
-        try {
-          // Validate dữ liệu
-          if (!teacher.name || !teacher.email || !teacher.subjectId) {
-            results.failed.push({
-              row: i + 2, // +2 vì hàng 1 là header, index bắt đầu từ 0
-              data: teacher,
-              error: 'Missing required fields: name, email, or subjectId'
-            });
-            continue;
-          }
-
-          // Kiểm tra email đã tồn tại
-          const existingUser = await User.findOne({ email: teacher.email });
-          if (existingUser) {
-            results.failed.push({
-              row: i + 2,
-              data: teacher,
-              error: 'Email already exists'
-            });
-            continue;
-          }
-
-          // Tạo mật khẩu tạm thời và hash
-          const tempPassword = this.generateOTP();
-          const passwordHash = await bcrypt.hash(tempPassword, 12);
-
-          // Tạo user mới với isNewUser = true (sẽ redirect tới set-password)
-          const newUser = new User({
-            name: teacher.name,
-            email: teacher.email,
-            passwordHash,
-            dateOfBirth: teacher.dateOfBirth ? new Date(teacher.dateOfBirth) : null,
-            gender: teacher.gender || 'other',
-            role: ['teacher'],
-            subject: teacher.subjectId,
-            isNewUser: true, // Sẽ redirect tới set-password khi login
-            active: teacher.active !== false
-          });
-
-          await newUser.save();
-
-          // Gửi email với mật khẩu tạm thời
-          await this.sendTeacherWelcomeEmail(teacher.email, teacher.name, tempPassword, teacher.subjectName);
-
-          results.success.push({
-            row: i + 2,
-            email: teacher.email,
-            name: teacher.name,
-            status: 'awaiting_first_login',
-            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
-          });
-
-        } catch (error) {
-          results.failed.push({
-            row: i + 2,
-            data: teacher,
-            error: error.message
-          });
-        }
-      }
-
-      return results;
-
-    } catch (error) {
-      throw error;
-    }
-  }
 
   // Gửi email chào mừng cho student mới import
   async sendStudentWelcomeEmail(email, name, tempPassword, className) {
@@ -1281,10 +1221,10 @@ class UserService {
       const mailOptions = {
         from: process.env.EMAIL_USER,
         to: email,
-        subject: 'Chào mừng học sinh mới - EcoSchool',
+        subject: 'Chào mừng học sinh mới - DigiSchool',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #4CAF50;">Chào mừng ${name} đến với EcoSchool! 🎓</h2>
+            <h2 style="color: #4CAF50;">Chào mừng ${name} đến với DigiSchool! 🎓</h2>
             <p>Bạn đã được thêm vào hệ thống với vai trò <strong>Học sinh</strong> lớp <strong>${className || 'chưa xác định'}</strong>.</p>
             
             <div style="background-color: #f0f8fe; padding: 20px; border-left: 4px solid #4CAF50; margin: 20px 0;">
@@ -1319,7 +1259,7 @@ class UserService {
 
             <hr>
             <p style="color: #666; font-size: 12px;">
-              Email này được gửi tự động từ hệ thống EcoSchool. Vui lòng không phản hồi email này.<br>
+              Email này được gửi tự động từ hệ thống DigiSchool. Vui lòng không phản hồi email này.<br>
               Nếu bạn gặp vấn đề, vui lòng liên hệ giáo viên chủ nhiệm hoặc quản trị viên hệ thống.
             </p>
           </div>
@@ -1343,6 +1283,7 @@ class UserService {
     const XLSX = require('xlsx');
     const fs = require('fs');
     const Class = require('../../classes/models/class.model');
+    const School = require('../../classes/models/school.model');
     
     try {
       // Verify token và kiểm tra role manager
@@ -1374,12 +1315,12 @@ class UserService {
         const student = students[i];
         
         try {
-          // Validate dữ liệu
-          if (!student.name || !student.email || !student.studentId || !student.className) {
+          // Validate dữ liệu bắt buộc
+          if (!student.name || !student.email || !student.studentId || !student.className || !student.school) {
             results.failed.push({
-              row: i + 2, // +2 vì hàng 1 là header, index bắt đầu từ 0
+              row: i + 2,
               data: student,
-              error: 'Missing required fields: name, email, studentId, or className'
+              error: 'Missing required fields: name, email, studentId, className, or school'
             });
             continue;
           }
@@ -1406,10 +1347,20 @@ class UserService {
             continue;
           }
 
-          // Tìm lớp học theo tên
+          // Tìm trường học
+          const school = await School.findOne({ name: student.school });
+          if (!school) {
+            results.failed.push({
+              row: i + 2,
+              data: student,
+              error: `School '${student.school}' not found in database`
+            });
+            continue;
+          }
+
+          // Tìm lớp học theo tên (không cần kiểm tra academicYear)
           const classInfo = await Class.findOne({ 
             className: student.className,
-            academicYear: student.schoolYear || '2024-2025',
             active: true
           });
 
@@ -1417,7 +1368,7 @@ class UserService {
             results.failed.push({
               row: i + 2,
               data: student,
-              error: `Class ${student.className} not found for academic year ${student.schoolYear || '2024-2025'}`
+              error: `Class ${student.className} not found in database`
             });
             continue;
           }
@@ -1426,17 +1377,22 @@ class UserService {
           const tempPassword = this.generateOTP();
           const passwordHash = await bcrypt.hash(tempPassword, 12);
 
-          // Tạo user mới với isNewUser = true (sẽ redirect tới set-password)
+          // Tạo user mới với đầy đủ trường theo yêu cầu
           const newUser = new User({
             name: student.name,
             email: student.email,
             passwordHash,
             dateOfBirth: student.dateOfBirth ? new Date(student.dateOfBirth) : null,
             gender: student.gender || 'other',
+            phone: student.phone || null,
+            address: student.address || null,
+            school: school._id,
             studentId: student.studentId,
             class_id: classInfo._id,
+            academicYear: student.academicYear || '2024-2025',
             role: ['student'],
-            isNewUser: true, // Sẽ redirect tới set-password khi login
+            isNewUser: true,
+            isPending: false,
             active: student.active !== false
           });
 
@@ -1451,8 +1407,9 @@ class UserService {
             name: student.name,
             studentId: student.studentId,
             className: student.className,
+            school: student.school,
             status: 'awaiting_first_login',
-            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
+            tempPassword: tempPassword
           });
 
         } catch (error) {
@@ -1480,140 +1437,7 @@ class UserService {
     }
   }
 
-  // Import students từ base64 string
-  async importStudentsBase64(fileData, token) {
-    const XLSX = require('xlsx');
-    const Class = require('../../classes/models/class.model');
-    
-    try {
-      // Verify token và kiểm tra role manager
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const currentUser = await User.findById(decoded.id);
-      
-      if (!currentUser || !currentUser.role.includes('manager')) {
-        throw new Error('Only managers can import students');
-      }
 
-      // Decode base64 và tạo buffer
-      const buffer = Buffer.from(fileData, 'base64');
-      
-      // Đọc Excel từ buffer
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const students = XLSX.utils.sheet_to_json(worksheet);
-
-      if (!students || students.length === 0) {
-        throw new Error('No data found in Excel file');
-      }
-
-      const results = {
-        success: [],
-        failed: [],
-        total: students.length
-      };
-
-      // Xử lý từng student
-      for (let i = 0; i < students.length; i++) {
-        const student = students[i];
-        
-        try {
-          // Validate dữ liệu
-          if (!student.name || !student.email || !student.studentId || !student.className) {
-            results.failed.push({
-              row: i + 2, // +2 vì hàng 1 là header, index bắt đầu từ 0
-              data: student,
-              error: 'Missing required fields: name, email, studentId, or className'
-            });
-            continue;
-          }
-
-          // Kiểm tra email đã tồn tại
-          const existingUser = await User.findOne({ email: student.email });
-          if (existingUser) {
-            results.failed.push({
-              row: i + 2,
-              data: student,
-              error: 'Email already exists'
-            });
-            continue;
-          }
-
-          // Kiểm tra studentId đã tồn tại
-          const existingStudentId = await User.findOne({ studentId: student.studentId });
-          if (existingStudentId) {
-            results.failed.push({
-              row: i + 2,
-              data: student,
-              error: 'Student ID already exists'
-            });
-            continue;
-          }
-
-          // Tìm lớp học theo tên
-          const classInfo = await Class.findOne({ 
-            className: student.className,
-            academicYear: student.schoolYear || '2024-2025',
-            active: true
-          });
-
-          if (!classInfo) {
-            results.failed.push({
-              row: i + 2,
-              data: student,
-              error: `Class ${student.className} not found for academic year ${student.schoolYear || '2024-2025'}`
-            });
-            continue;
-          }
-
-          // Tạo mật khẩu tạm thời và hash
-          const tempPassword = this.generateOTP();
-          const passwordHash = await bcrypt.hash(tempPassword, 12);
-
-          // Tạo user mới với isNewUser = true (sẽ redirect tới set-password)
-          const newUser = new User({
-            name: student.name,
-            email: student.email,
-            passwordHash,
-            dateOfBirth: student.dateOfBirth ? new Date(student.dateOfBirth) : null,
-            gender: student.gender || 'other',
-            studentId: student.studentId,
-            class_id: classInfo._id,
-            role: ['student'],
-            isNewUser: true, // Sẽ redirect tới set-password khi login
-            active: student.active !== false
-          });
-
-          await newUser.save();
-
-          // Gửi email với mật khẩu tạm thời
-          await this.sendStudentWelcomeEmail(student.email, student.name, tempPassword, student.className);
-
-          results.success.push({
-            row: i + 2,
-            email: student.email,
-            name: student.name,
-            studentId: student.studentId,
-            className: student.className,
-            status: 'awaiting_first_login',
-            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
-          });
-
-        } catch (error) {
-          results.failed.push({
-            row: i + 2,
-            data: student,
-            error: error.message
-          });
-        }
-      }
-
-      return results;
-
-    } catch (error) {
-      throw error;
-    }
-  }
 
   // Tạo student mới với thông tin đầy đủ (chỉ manager)
   async createStudent(studentData, token) {
@@ -1906,48 +1730,73 @@ class UserService {
         return;
       }
 
+      // Cấu hình transporter (sử dụng Gmail)
       const transporter = nodemailer.createTransport({
-        host: process.env.EMAIL_HOST,
-        port: process.env.EMAIL_PORT || 587,
-        secure: process.env.EMAIL_PORT == 465,
+        service: 'gmail',
         auth: {
           user: process.env.EMAIL_USER,
           pass: process.env.EMAIL_PASS
         }
       });
 
+      // Nội dung email
       const mailOptions = {
-        from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+        from: process.env.EMAIL_USER,
         to: email,
-        subject: 'Welcome to EcoSchool - Parent Account Created',
+        subject: 'Chào mừng phụ huynh mới - DigiSchool',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h1 style="color: #2c3e50;">EcoSchool - Parent Account</h1>
-            <p>Hello ${name},</p>
-            <p>Your parent account has been created successfully. You can now access information about your children's education.</p>
-            <p><strong>Children:</strong> ${childrenNames.join(', ')}</p>
-            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; text-align: center; margin: 20px 0;">
-              <h2 style="color: #e74c3c; font-size: 24px; letter-spacing: 2px;">${tempPassword}</h2>
-              <p style="margin: 0; color: #7f8c8d;">Your temporary password</p>
+            <h2 style="color: #4CAF50;">Chào mừng ${name} đến với DigiSchool! 👨‍👩‍👧‍👦</h2>
+            <p>Bạn đã được thêm vào hệ thống với vai trò <strong>Phụ huynh</strong>.</p>
+            
+            <div style="background-color: #f0f8fe; padding: 20px; border-left: 4px solid #4CAF50; margin: 20px 0;">
+              <h3 style="margin-top: 0;">Thông tin đăng nhập lần đầu:</h3>
+              <p><strong>Email:</strong> ${email}</p>
+              <p><strong>Mật khẩu tạm thời:</strong> <code style="background: #e8e8e8; padding: 4px 8px; border-radius: 4px; font-size: 16px;">${tempPassword}</code></p>
             </div>
-            <p><strong>Important:</strong></p>
-            <ul>
-              <li>Use this temporary password to log in for the first time</li>
-              <li>You will be prompted to set a new password on first login</li>
-              <li>Do not share this password with anyone</li>
-            </ul>
-            <p>If you have any questions, please contact the school administration.</p>
-            <hr style="margin: 30px 0;">
-            <p style="color: #7f8c8d; font-size: 12px;">This is an automated message from EcoSchool system.</p>
+
+            <div style="background-color: #fff3cd; padding: 15px; border: 1px solid #ffeaa7; border-radius: 5px; margin: 20px 0;">
+              <h4 style="margin-top: 0; color: #856404;">📋 Hướng dẫn đăng nhập:</h4>
+              <ol style="margin: 0; color: #856404;">
+                <li>Truy cập trang đăng nhập hệ thống</li>
+                <li>Sử dụng email và mật khẩu tạm thời ở trên</li>
+                <li>Hệ thống sẽ tự động chuyển đến trang thiết lập mật khẩu mới</li>
+                <li>Nhập mật khẩu mới theo yêu cầu</li>
+                <li>Hoàn tất và bắt đầu sử dụng hệ thống</li>
+              </ol>
+            </div>
+
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/login" 
+                 style="background-color: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                🚀 Đăng nhập ngay
+              </a>
+            </div>
+
+            <div style="background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <h4 style="margin-top: 0; color: #2e7d32;">👨‍👩‍👧‍👦 Thông tin con cái:</h4>
+              <p style="margin: 0; color: #2e7d32;">Bạn là phụ huynh của: <strong>${childrenNames.join(', ')}</strong></p>
+              <p style="margin: 0; color: #2e7d32;">Bạn có thể theo dõi thông tin học tập của con cái thông qua hệ thống</p>
+            </div>
+
+            <hr>
+            <p style="color: #666; font-size: 12px;">
+              Email này được gửi tự động từ hệ thống DigiSchool. Vui lòng không phản hồi email này.<br>
+              Nếu bạn gặp vấn đề, vui lòng liên hệ giáo viên chủ nhiệm hoặc quản trị viên hệ thống.
+            </p>
           </div>
         `
       };
 
+      // Gửi email
       await transporter.sendMail(mailOptions);
-      console.log(`📧 Parent welcome email successfully sent to ${email}`);
+      console.log(`📧 Parent welcome email sent to ${email}`);
+      
     } catch (error) {
-      console.error('❌ Parent welcome email sending failed:', error.message);
+      console.error('❌ Parent welcome email failed:', error.message);
+      // Log mật khẩu tạm thời để admin có thể thông báo cho parent
       console.log(`📧 [FALLBACK] Temp password for ${email}: ${tempPassword}`);
+      // Không throw error để không làm gián đoạn quá trình import
     }
   }
 
@@ -1955,6 +1804,7 @@ class UserService {
   async importParents(filePath, token) {
     const XLSX = require('xlsx');
     const fs = require('fs');
+    const School = require('../../classes/models/school.model');
     
     try {
       // Verify token và kiểm tra role manager
@@ -1989,12 +1839,12 @@ class UserService {
         const parentRow = parentsData[i];
         
         try {
-          // Validate dữ liệu
-          if (!parentRow.name || !parentRow.childId || !parentRow.phone) {
+          // Validate dữ liệu bắt buộc
+          if (!parentRow.name || !parentRow.phone || !parentRow.parentId || !parentRow.childStudentId || !parentRow.school) {
             results.failed.push({
               row: i + 2,
               data: parentRow,
-              error: 'Missing required fields: name, childId, or phone'
+              error: 'Missing required fields: name, phone, parentId, childStudentId, or school'
             });
             continue;
           }
@@ -2002,14 +1852,14 @@ class UserService {
           // Generate email if not provided
           const email = parentRow.email || this.generateParentEmail(parentRow.name);
           
-          // Find child by _id
-          const child = await User.findById(parentRow.childId);
+          // Find child by studentId
+          const child = await User.findOne({ studentId: parentRow.childStudentId });
           
           if (!child || !child.role.includes('student')) {
             results.failed.push({
               row: i + 2,
               data: parentRow,
-              error: `Child with ID '${parentRow.childId}' not found or is not a student`
+              error: `Child with studentId '${parentRow.childStudentId}' not found or is not a student`
             });
             continue;
           }
@@ -2023,6 +1873,8 @@ class UserService {
               gender: parentRow.gender || 'other',
               phone: parentRow.phone,
               address: parentRow.address || '',
+              parentId: parentRow.parentId,
+              school: parentRow.school,
               children: [],
               row: i + 2
             };
@@ -2053,6 +1905,28 @@ class UserService {
             continue;
           }
 
+          // Kiểm tra parentId đã tồn tại
+          const existingParentId = await User.findOne({ parentId: parentInfo.parentId });
+          if (existingParentId) {
+            results.failed.push({
+              row: parentInfo.row,
+              data: { parentId: parentInfo.parentId, name: parentInfo.name },
+              error: 'Parent ID already exists'
+            });
+            continue;
+          }
+
+          // Tìm trường học
+          const school = await School.findOne({ name: parentInfo.school });
+          if (!school) {
+            results.failed.push({
+              row: parentInfo.row,
+              data: { email: parentInfo.email, name: parentInfo.name },
+              error: `School '${parentInfo.school}' not found in database`
+            });
+            continue;
+          }
+
           // Tạo mật khẩu tạm thời và hash
           const tempPassword = this.generateOTP();
           const passwordHash = await bcrypt.hash(tempPassword, 12);
@@ -2061,19 +1935,22 @@ class UserService {
           const children = await User.find({ _id: { $in: parentInfo.children } });
           const childrenNames = children.map(child => child.name);
 
-          // Tạo parent mới
+          // Tạo parent mới với đầy đủ trường theo yêu cầu
           const newParent = new User({
             name: parentInfo.name,
             email: parentInfo.email,
             passwordHash,
             dateOfBirth: parentInfo.dateOfBirth,
             gender: parentInfo.gender,
-            role: ['parent'],
-            children: parentInfo.children,
             phone: parentInfo.phone,
             address: parentInfo.address,
+            school: school._id,
+            parentId: parentInfo.parentId,
+            children: parentInfo.children,
+            role: ['parent'],
             isNewUser: true,
-            active: true
+            isPending: false,
+            active: parentInfo.active !== false
           });
 
           await newParent.save();
@@ -2085,10 +1962,12 @@ class UserService {
             row: parentInfo.row,
             email: parentInfo.email,
             name: parentInfo.name,
+            parentId: parentInfo.parentId,
             childrenCount: parentInfo.children.length,
             childrenNames: childrenNames,
+            school: parentInfo.school,
             status: 'awaiting_first_login',
-            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
+            tempPassword: tempPassword
           });
 
         } catch (error) {
@@ -2117,160 +1996,7 @@ class UserService {
   }
 
   // Import parents từ base64
-  async importParentsBase64(fileData, token) {
-    const XLSX = require('xlsx');
-    
-    try {
-      // Verify token và kiểm tra role manager
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const currentUser = await User.findById(decoded.id);
-      
-      if (!currentUser || !currentUser.role.includes('manager')) {
-        throw new Error('Only managers can import parents');
-      }
 
-      // Decode base64 data
-      const buffer = Buffer.from(fileData, 'base64');
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const parentsData = XLSX.utils.sheet_to_json(worksheet);
-
-      if (!parentsData || parentsData.length === 0) {
-        throw new Error('No data found in Excel file');
-      }
-
-      const results = {
-        success: [],
-        failed: [],
-        total: parentsData.length
-      };
-
-      // Group parents by email to handle multiple children
-      const parentsByEmail = {};
-      
-      // Process each row
-      for (let i = 0; i < parentsData.length; i++) {
-        const parentRow = parentsData[i];
-        
-        try {
-          // Validate dữ liệu
-          if (!parentRow.name || !parentRow.childId || !parentRow.phone) {
-            results.failed.push({
-              row: i + 2,
-              data: parentRow,
-              error: 'Missing required fields: name, childId, or phone'
-            });
-            continue;
-          }
-
-          // Generate email if not provided
-          const email = parentRow.email || this.generateParentEmail(parentRow.name);
-          
-          // Find child by _id
-          const child = await User.findById(parentRow.childId);
-          
-          if (!child || !child.role.includes('student')) {
-            results.failed.push({
-              row: i + 2,
-              data: parentRow,
-              error: `Child with ID '${parentRow.childId}' not found or is not a student`
-            });
-            continue;
-          }
-
-          // Group by email to handle multiple children
-          if (!parentsByEmail[email]) {
-            parentsByEmail[email] = {
-              name: parentRow.name,
-              email: email,
-              dateOfBirth: parentRow.dateOfBirth ? new Date(parentRow.dateOfBirth) : null,
-              gender: parentRow.gender || 'other',
-              phone: parentRow.phone,
-              address: parentRow.address || '',
-              children: [],
-              row: i + 2
-            };
-          }
-          
-          parentsByEmail[email].children.push(child._id);
-
-        } catch (error) {
-          results.failed.push({
-            row: i + 2,
-            data: parentRow,
-            error: error.message
-          });
-        }
-      }
-
-      // Process unique parents
-      for (const [email, parentInfo] of Object.entries(parentsByEmail)) {
-        try {
-          // Kiểm tra email đã tồn tại
-          const existingUser = await User.findOne({ email });
-          if (existingUser) {
-            results.failed.push({
-              row: parentInfo.row,
-              data: { email, name: parentInfo.name },
-              error: 'Email already exists'
-            });
-            continue;
-          }
-
-          // Tạo mật khẩu tạm thời và hash
-          const tempPassword = this.generateOTP();
-          const passwordHash = await bcrypt.hash(tempPassword, 12);
-
-          // Get children names for email
-          const children = await User.find({ _id: { $in: parentInfo.children } });
-          const childrenNames = children.map(child => child.name);
-
-          // Tạo parent mới
-          const newParent = new User({
-            name: parentInfo.name,
-            email: parentInfo.email,
-            passwordHash,
-            dateOfBirth: parentInfo.dateOfBirth,
-            gender: parentInfo.gender,
-            role: ['parent'],
-            children: parentInfo.children,
-            phone: parentInfo.phone,
-            address: parentInfo.address,
-            isNewUser: true,
-            active: true
-          });
-
-          await newParent.save();
-
-          // Gửi email với mật khẩu tạm thời
-          await this.sendParentWelcomeEmail(parentInfo.email, parentInfo.name, tempPassword, childrenNames);
-
-          results.success.push({
-            row: parentInfo.row,
-            email: parentInfo.email,
-            name: parentInfo.name,
-            childrenCount: parentInfo.children.length,
-            childrenNames: childrenNames,
-            status: 'awaiting_first_login',
-            tempPassword: tempPassword // Tạm thời để test, production nên bỏ
-          });
-
-        } catch (error) {
-          results.failed.push({
-            row: parentInfo.row,
-            data: { email: parentInfo.email, name: parentInfo.name },
-            error: error.message
-          });
-        }
-      }
-
-      return results;
-
-    } catch (error) {
-      throw error;
-    }
-  }
 
   // Generate parent email from name
   generateParentEmail(name) {

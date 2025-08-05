@@ -8,6 +8,7 @@ const AcademicYear = require("../models/academic-year.model");
 const TimeSlot = require("../models/time-slot.model");
 // const emailService = require("../../auth/services/email.service");
 const notificationService = require("../../notification/services/notification.service");
+const parentNotificationService = require("../../notification/services/parent-notification.service");
 
 class SubstituteRequestService {
   // Create a new substitute request
@@ -166,6 +167,13 @@ class SubstituteRequestService {
         teacher: teacherId, // Thay thế giáo viên gốc
         substituteTeacher: request.lesson.teacher, // Lưu giáo viên gốc vào substituteTeacher để backup
       });
+
+      // Gửi notification cho phụ huynh
+      await parentNotificationService.notifySubstituteApproved(
+        request.lesson._id,
+        teacherId,
+        request.lesson.teacher
+      );
       // Cancel other pending requests from this teacher
       await this.cancelOtherTeacherRequests(teacherId, requestId);
       // ==== Gửi notification thay cho email ====

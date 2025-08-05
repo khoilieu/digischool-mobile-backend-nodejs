@@ -8,6 +8,7 @@ const TimeSlot = require("../models/time-slot.model");
 const emailService = require("../../auth/services/email.service");
 const lessonReferenceSwapper = require("./lesson-reference-swapper.service");
 const notificationService = require("../../notification/services/notification.service");
+const parentNotificationService = require("../../notification/services/parent-notification.service");
 
 class SwapRequestService {
   // Helper function to calculate week range from a date
@@ -363,6 +364,14 @@ class SwapRequestService {
           relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
         });
       }
+
+      // Gửi notification cho phụ huynh
+      await parentNotificationService.notifySwapApproved(
+        lessonRequest.originalLesson._id,
+        lessonRequest.replacementLesson._id,
+        lessonRequest.requestingTeacher._id,
+        lessonRequest.replacementTeacher._id
+      );
       // =========================================
 
       return {

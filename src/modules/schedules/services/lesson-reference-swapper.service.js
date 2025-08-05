@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const Lesson = require("../models/lesson.model");
 
 class LessonReferenceSwapperService {
   constructor() {
@@ -30,6 +31,7 @@ class LessonReferenceSwapperService {
         modelPath: "../../note/models/note.model",
         lessonField: "lesson",
         description: "User notes",
+        hasReminder: true, // Đánh dấu collection này có reminder cần cập nhật
       },
       // Dễ dàng thêm collection mới ở đây khi cần
       // {
@@ -39,6 +41,60 @@ class LessonReferenceSwapperService {
       //   description: "New collection description"
       // }
     ];
+  }
+
+  /**
+   * Tính toán lại remindAt cho note dựa trên lesson mới
+   * @param {Object} note - Note object
+   * @param {Object} lesson - Lesson object với timeSlot đã populate
+   * @returns {Date|null} remindAt mới hoặc null nếu không có reminder
+   */
+  calculateNewRemindAt(note, lesson) {
+    // Chỉ tính toán nếu note có reminder và lesson có timeSlot
+    if (!note.remindAt || !note.time || !lesson.timeSlot || !lesson.timeSlot.startTime) {
+      return null;
+    }
+
+    try {
+      const [hour, minute] = lesson.timeSlot.startTime.split(":").map(Number);
+      const scheduledDate = new Date(lesson.scheduledDate);
+      scheduledDate.setHours(hour, minute, 0, 0);
+      
+      const newRemindAt = new Date(scheduledDate.getTime() - note.time * 60000);
+      
+      // Kiểm tra tính hợp lệ
+      if (isNaN(newRemindAt.getTime())) {
+        console.warn(`⚠️ Invalid remindAt calculated for note ${note._id}`);
+        return null;
+      }
+      
+      return newRemindAt;
+    } catch (error) {
+      console.error(`❌ Error calculating new remindAt for note ${note._id}:`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Test method để kiểm tra logic tính toán remindAt
+   * @param {Object} note - Note object với remindAt và time
+   * @param {Object} lesson - Lesson object với timeSlot
+   * @returns {Object} Kết quả test
+   */
+  testRemindAtCalculation(note, lesson) {
+    console.log("🧪 Testing remindAt calculation:");
+    console.log(`Note: remindAt=${note.remindAt}, time=${note.time} minutes`);
+    console.log(`Lesson: scheduledDate=${lesson.scheduledDate}, timeSlot=${lesson.timeSlot?.startTime}`);
+    
+    const newRemindAt = this.calculateNewRemindAt(note, lesson);
+    
+    console.log(`Result: ${newRemindAt ? newRemindAt.toISOString() : 'null'}`);
+    
+    return {
+      originalRemindAt: note.remindAt,
+      newRemindAt: newRemindAt,
+      timeDifference: newRemindAt ? (newRemindAt.getTime() - note.remindAt.getTime()) / 60000 : null
+    };
   }
 
   /**
@@ -58,6 +114,7 @@ class LessonReferenceSwapperService {
       swappedCollections: [],
       errors: [],
       totalSwapped: 0,
+      reminderUpdates: 0,
     };
 
     console.log(
@@ -78,9 +135,11 @@ class LessonReferenceSwapperService {
             collection: collectionConfig.modelName,
             field: collectionConfig.lessonField,
             swapped: swapResult.swapped,
+            reminderUpdates: swapResult.reminderUpdates || 0,
             description: collectionConfig.description,
           });
           results.totalSwapped += swapResult.swapped;
+          results.reminderUpdates += swapResult.reminderUpdates || 0;
         } else {
           results.errors.push({
             collection: collectionConfig.modelName,
@@ -105,7 +164,7 @@ class LessonReferenceSwapperService {
     }
 
     console.log(
-      `✅ Lesson reference swap completed: ${results.totalSwapped} records swapped`
+      `✅ Lesson reference swap completed: ${results.totalSwapped} records swapped, ${results.reminderUpdates} reminders updated`
     );
     return results;
   }
@@ -139,40 +198,72 @@ class LessonReferenceSwapperService {
       });
 
       let swapped = 0;
+      let reminderUpdates = 0;
+
+      // Cache lesson data để tránh query nhiều lần
+      let originalLesson = null;
+      let replacementLesson = null;
+      
+      if (collectionConfig.hasReminder && (originalRecords.length > 0 || replacementRecords.length > 0)) {
+        // Chỉ query lesson nếu có note cần cập nhật reminder
+        [originalLesson, replacementLesson] = await Promise.all([
+          Lesson.findById(originalLessonId).populate("timeSlot"),
+          Lesson.findById(replacementLessonId).populate("timeSlot")
+        ]);
+      }
 
       // Hoán đổi original records sang replacement lesson
       for (const record of originalRecords) {
-        await Model.updateOne(
-          { _id: record._id },
-          {
-            [lessonField]: replacementLessonId,
-            lastModifiedBy: processedBy,
-            updatedAt: new Date(),
+        const updateData = {
+          [lessonField]: replacementLessonId,
+          lastModifiedBy: processedBy,
+          updatedAt: new Date(),
+        };
+
+        // Nếu là Note và có reminder, tính toán lại remindAt
+        if (collectionConfig.hasReminder && record.remindAt && record.time && replacementLesson) {
+          const newRemindAt = this.calculateNewRemindAt(record, replacementLesson);
+          if (newRemindAt) {
+            updateData.remindAt = newRemindAt;
+            reminderUpdates++;
+            console.log(`📝 Updated reminder for note ${record._id}: ${record.remindAt.toISOString()} → ${newRemindAt.toISOString()}`);
           }
-        );
+        }
+
+        await Model.updateOne({ _id: record._id }, updateData);
         swapped++;
       }
 
       // Hoán đổi replacement records sang original lesson
       for (const record of replacementRecords) {
-        await Model.updateOne(
-          { _id: record._id },
-          {
-            [lessonField]: originalLessonId,
-            lastModifiedBy: processedBy,
-            updatedAt: new Date(),
+        const updateData = {
+          [lessonField]: originalLessonId,
+          lastModifiedBy: processedBy,
+          updatedAt: new Date(),
+        };
+
+        // Nếu là Note và có reminder, tính toán lại remindAt
+        if (collectionConfig.hasReminder && record.remindAt && record.time && originalLesson) {
+          const newRemindAt = this.calculateNewRemindAt(record, originalLesson);
+          if (newRemindAt) {
+            updateData.remindAt = newRemindAt;
+            reminderUpdates++;
+            console.log(`📝 Updated reminder for note ${record._id}: ${record.remindAt.toISOString()} → ${newRemindAt.toISOString()}`);
           }
-        );
+        }
+
+        await Model.updateOne({ _id: record._id }, updateData);
         swapped++;
       }
 
       console.log(
-        `✅ Swapped ${swapped} records in ${collectionConfig.modelName}`
+        `✅ Swapped ${swapped} records in ${collectionConfig.modelName}${reminderUpdates > 0 ? `, updated ${reminderUpdates} reminders` : ''}`
       );
 
       return {
         success: true,
         swapped: swapped,
+        reminderUpdates: reminderUpdates,
         collection: collectionConfig.modelName,
       };
     } catch (error) {

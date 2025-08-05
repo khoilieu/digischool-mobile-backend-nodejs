@@ -5,6 +5,7 @@ const Subject = require("../../subjects/models/subject.model");
 const User = require("../../auth/models/user.model");
 const mongoose = require("mongoose");
 const notificationService = require("../../notification/services/notification.service");
+const parentNotificationService = require("../../notification/services/parent-notification.service");
 
 class TeacherLeaveRequestService {
   // Tạo đơn xin nghỉ cho nhiều tiết học của giáo viên
@@ -340,6 +341,14 @@ class TeacherLeaveRequestService {
           lessonError.message
         );
       }
+
+      // Gửi notification cho phụ huynh
+      await parentNotificationService.notifyTeacherLeaveApproved(
+        request.teacherId._id,
+        request.classId._id,
+        request._id,
+        request.reason
+      );
 
       return {
         success: true,

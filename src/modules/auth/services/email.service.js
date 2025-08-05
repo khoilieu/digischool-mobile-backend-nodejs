@@ -56,12 +56,12 @@ class EmailService {
       const mailOptions = {
         from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
         to: email,
-        subject: 'Your One-Time Password for Password Reset - EcoSchool',
+        subject: 'Your One-Time Password for Password Reset - DigiSchool',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h1 style="color: #2c3e50;">EcoSchool - Password Reset</h1>
+            <h1 style="color: #2c3e50;">DigiSchool - Password Reset</h1>
             <p>Xin chào,</p>
-            <p>Bạn đã yêu cầu reset mật khẩu cho tài khoản EcoSchool của mình. Vui lòng sử dụng mật khẩu tạm thời sau để đăng nhập:</p>
+            <p>Bạn đã yêu cầu reset mật khẩu cho tài khoản DigiSchool của mình. Vui lòng sử dụng mật khẩu tạm thời sau để đăng nhập:</p>
             <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; text-align: center; margin: 20px 0;">
               <h2 style="color: #e74c3c; font-size: 24px; letter-spacing: 2px; font-family: monospace; word-break: break-all;">${resetToken}</h2>
             </div>
@@ -81,7 +81,7 @@ class EmailService {
               <li>Nếu bạn không yêu cầu reset password, vui lòng bỏ qua email này</li>
             </ul>
             <hr style="margin: 30px 0;">
-            <p style="color: #7f8c8d; font-size: 12px;">Email này được gửi tự động từ hệ thống EcoSchool. Vui lòng không phản hồi email này.</p>
+            <p style="color: #7f8c8d; font-size: 12px;">Email này được gửi tự động từ hệ thống DigiSchool. Vui lòng không phản hồi email này.</p>
           </div>
         `
       };

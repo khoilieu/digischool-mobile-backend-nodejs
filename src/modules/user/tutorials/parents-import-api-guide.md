@@ -2,7 +2,7 @@
 
 ## Tổng quan
 
-API import parents cho phép manager import danh sách phụ huynh từ file Excel vào hệ thống EcoSchool. Mỗi phụ huynh sẽ được tạo tài khoản với mật khẩu tạm thời và gửi qua email.
+API import parents cho phép manager import danh sách phụ huynh từ file Excel vào hệ thống DigiSchool. Mỗi phụ huynh sẽ được tạo tài khoản với mật khẩu tạm thời và gửi qua email.
 
 ## Cấu trúc dữ liệu
 

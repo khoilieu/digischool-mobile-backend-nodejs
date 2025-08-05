@@ -58,6 +58,7 @@ class TeacherLeaveRequestController {
       });
     } catch (error) {
       console.error("❌ Error in createTeacherLeaveRequest:", error.message);
+      console.log(error);
       next(error);
     }
   }

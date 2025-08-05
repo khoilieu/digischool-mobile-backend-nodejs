@@ -5,6 +5,7 @@ const Subject = require("../../subjects/models/subject.model");
 const User = require("../../auth/models/user.model");
 const mongoose = require("mongoose");
 const notificationService = require("../../notification/services/notification.service");
+const parentNotificationService = require("../../notification/services/parent-notification.service");
 
 class StudentLeaveRequestService {
   // Tạo đơn xin vắng cho nhiều tiết cùng lúc
@@ -157,6 +158,9 @@ class StudentLeaveRequestService {
               },
             });
           }
+
+          // Gửi notification cho phụ huynh
+          await parentNotificationService.notifyStudentLeaveRequest(studentId, leaveRequest._id, reason);
         } catch (lessonError) {
           console.error(
             `❌ Error processing lesson ${lessonId}:`,
