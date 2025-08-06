@@ -36,38 +36,62 @@ class ScheduleController {
         className,
         academicYear,
         parseInt(weekNumber),
-        token
+        token,
+        req.user // Truyền thông tin user hiện tại
       );
 
-      // Bổ sung: cá nhân hóa hoạt động cá nhân cho lesson trống
+      // Tối ưu: Chỉ thêm personal activity cho lesson empty nếu cần thiết
       if (
         result.weeklySchedule &&
         Array.isArray(result.weeklySchedule.lessons) &&
         req.user &&
         req.user._id
       ) {
-        for (const lesson of result.weeklySchedule.lessons) {
-          if (lesson.type === "empty") {
-            if (
-              req.user.role.includes("teacher") ||
-              req.user.role.includes("homeroom_teacher")
-            ) {
-              // Giáo viên: lấy theo user, date, period
-              const activity = await PersonalActivity.findOne({
-                user: req.user._id,
-                date: lesson.scheduledDate,
-                period: lesson.timeSlot?.period,
-              });
-              lesson.personalActivity = activity;
-            } else {
-              // Học sinh: lấy theo user, lessonId
-              const activity = await PersonalActivity.findOne({
-                user: req.user._id,
-                lesson: lesson._id || lesson.id,
-              });
-              lesson.personalActivity = activity;
-            }
+        // Tối ưu: Batch query cho personal activities thay vì query từng lesson
+        const emptyLessons = result.weeklySchedule.lessons.filter(lesson => lesson.type === "empty");
+        
+        if (emptyLessons.length > 0) {
+          const lessonIds = emptyLessons.map(lesson => lesson._id || lesson.id);
+          const dates = emptyLessons.map(lesson => lesson.scheduledDate);
+          const periods = emptyLessons.map(lesson => lesson.timeSlot?.period).filter(Boolean);
+          
+          let personalActivities = [];
+          
+          if (req.user.role.includes("teacher") || req.user.role.includes("homeroom_teacher")) {
+            // Giáo viên: lấy theo user, date, period
+            personalActivities = await PersonalActivity.find({
+              user: req.user._id,
+              date: { $in: dates },
+              period: { $in: periods }
+            });
+          } else {
+            // Học sinh: lấy theo user, lessonId
+            personalActivities = await PersonalActivity.find({
+              user: req.user._id,
+              lesson: { $in: lessonIds }
+            });
           }
+          
+          // Tạo map để lookup nhanh
+          const activityMap = new Map();
+          personalActivities.forEach(activity => {
+            if (req.user.role.includes("teacher") || req.user.role.includes("homeroom_teacher")) {
+              const key = `${activity.date.toISOString().split('T')[0]}_${activity.period}`;
+              activityMap.set(key, activity);
+            } else {
+              activityMap.set(activity.lesson.toString(), activity);
+            }
+          });
+          
+          // Gán personal activity cho từng lesson
+          emptyLessons.forEach(lesson => {
+            if (req.user.role.includes("teacher") || req.user.role.includes("homeroom_teacher")) {
+              const key = `${lesson.scheduledDate.split('T')[0]}_${lesson.timeSlot?.period}`;
+              lesson.personalActivity = activityMap.get(key);
+            } else {
+              lesson.personalActivity = activityMap.get(lesson._id.toString());
+            }
+          });
         }
       }
 

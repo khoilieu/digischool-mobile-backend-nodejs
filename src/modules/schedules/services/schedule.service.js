@@ -287,52 +287,160 @@ class ScheduleService {
     className,
     academicYear,
     weekNumber,
-    token
+    token,
+    currentUser = null
   ) {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const currentUser = await User.findById(decoded.id);
-      if (!currentUser) {
+      const user = currentUser || await User.findById(decoded.id);
+      if (!user) {
         throw new Error("User not found");
       }
 
-      const classInfo = await Class.findOne({ className, academicYear });
-      if (!classInfo) {
-        throw new Error(
-          `Class ${className} not found in academic year ${academicYear}`
-        );
-      }
+      // Tối ưu: Batch queries cho class và academic year
+      const [classInfo, academicYearDoc] = await Promise.all([
+        Class.findOne({ className, academicYear }),
+        AcademicYear.findOne({ name: academicYear })
+      ]);
 
-      const academicYearDoc = await AcademicYear.findOne({
-        name: academicYear,
-      });
+      if (!classInfo) {
+        throw new Error(`Class ${className} not found for academic year ${academicYear}`);
+      }
       if (!academicYearDoc) {
         throw new Error(`Academic year ${academicYear} not found`);
       }
 
-      const weeklySchedule = await WeeklySchedule.findOne({
-        class: classInfo._id,
-        academicYear: academicYearDoc._id,
-        weekNumber: weekNumber,
-      }).populate({
-        path: "lessons",
-        populate: [
-          { path: "subject", select: "subjectName subjectCode" },
-          { path: "academicYear", select: "name" },
-          { path: "teacher", select: "name email" },
-          { path: "substituteTeacher", select: "name email" },
-          { path: "timeSlot", select: "period startTime endTime type" },
-        ],
-      });
+      // Tối ưu: Sử dụng aggregation pipeline thay vì populate
+      const weeklySchedule = await WeeklySchedule.aggregate([
+        { $match: { class: classInfo._id, academicYear: academicYearDoc._id, weekNumber: weekNumber } },
+        { $lookup: { from: "lessons", localField: "lessons", foreignField: "_id", as: "lessonDetails" } },
+        { $lookup: { from: "subjects", localField: "lessonDetails.subject", foreignField: "_id", as: "subjectDetails" } },
+        { $lookup: { from: "users", localField: "lessonDetails.teacher", foreignField: "_id", as: "teacherDetails" } },
+        { $lookup: { from: "users", localField: "lessonDetails.substituteTeacher", foreignField: "_id", as: "substituteTeacherDetails" } },
+        { $lookup: { from: "timeslots", localField: "lessonDetails.timeSlot", foreignField: "_id", as: "timeSlotDetails" } },
+        { $lookup: { from: "academicyears", localField: "lessonDetails.academicYear", foreignField: "_id", as: "academicYearDetails" } }
+      ]);
 
-      if (!weeklySchedule) {
-        throw new Error(
-          `Weekly schedule not found for class ${className}, week ${weekNumber}`
-        );
+      if (!weeklySchedule || weeklySchedule.length === 0) {
+        throw new Error(`Weekly schedule not found for class ${className}, week ${weekNumber}`);
       }
 
-      const lessonsWithDayInfo = weeklySchedule.lessons.map((lesson) => {
-        const lessonObj = lesson.toObject();
+      const scheduleData = weeklySchedule[0];
+
+      // Tối ưu: Tạo maps cho các details để lookup nhanh
+      const subjectMap = new Map();
+      scheduleData.subjectDetails.forEach(subject => {
+        subjectMap.set(subject._id.toString(), {
+          _id: subject._id,
+          subjectName: subject.subjectName,
+          subjectCode: subject.subjectCode
+        });
+      });
+
+      const teacherMap = new Map();
+      scheduleData.teacherDetails.forEach(teacher => {
+        teacherMap.set(teacher._id.toString(), {
+          _id: teacher._id,
+          name: teacher.name,
+          email: teacher.email,
+          fullName: teacher.fullName
+        });
+      });
+
+      const substituteTeacherMap = new Map();
+      scheduleData.substituteTeacherDetails.forEach(teacher => {
+        substituteTeacherMap.set(teacher._id.toString(), {
+          _id: teacher._id,
+          name: teacher.name,
+          email: teacher.email,
+          fullName: teacher.fullName
+        });
+      });
+
+      const timeSlotMap = new Map();
+      scheduleData.timeSlotDetails.forEach(timeSlot => {
+        timeSlotMap.set(timeSlot._id.toString(), {
+          _id: timeSlot._id,
+          period: timeSlot.period,
+          startTime: timeSlot.startTime,
+          endTime: timeSlot.endTime,
+          type: timeSlot.type
+        });
+      });
+
+      const academicYearMap = new Map();
+      scheduleData.academicYearDetails.forEach(academicYear => {
+        academicYearMap.set(academicYear._id.toString(), {
+          _id: academicYear._id,
+          name: academicYear.name
+        });
+      });
+
+      // Tối ưu: Batch queries cho testInfo và student leave requests
+      const lessonIds = scheduleData.lessonDetails.map(lesson => lesson._id);
+      
+      const [testInfos, studentLeaveRequests, usersInClass] = await Promise.all([
+        TestInfo.find({ lesson: { $in: lessonIds } }),
+        StudentLeaveRequest.find({ 
+          lessonId: { $in: lessonIds },
+          status: { $in: ["pending", "approved"] }
+        }),
+        User.find({ class_id: classInfo._id }).select("_id")
+      ]);
+
+      // Tạo maps cho lookup nhanh
+      const testInfoMap = new Map();
+      testInfos.forEach(testInfo => {
+        testInfoMap.set(testInfo.lesson.toString(), true);
+      });
+
+      // Tối ưu: Filter student leave requests theo current user nếu là student
+      const studentLeaveRequestMap = new Map();
+      if (user.role.includes("student")) {
+        // Nếu là student, chỉ lấy requests của chính mình
+        const userStudentLeaveRequests = studentLeaveRequests.filter(
+          request => request.studentId.toString() === user._id.toString()
+        );
+        userStudentLeaveRequests.forEach(request => {
+          studentLeaveRequestMap.set(request.lessonId.toString(), true);
+        });
+      } else {
+        // Nếu là teacher/admin, lấy tất cả requests
+        studentLeaveRequests.forEach(request => {
+          studentLeaveRequestMap.set(request.lessonId.toString(), true);
+        });
+      }
+
+      // Tối ưu: Query personal activities với batch
+      const userIds = usersInClass.map((u) => u._id);
+      const studentPersonalActivities = await PersonalActivity.find({
+        user: { $in: userIds },
+        date: { $gte: scheduleData.startDate, $lte: scheduleData.endDate },
+      });
+
+      // Tối ưu: Process lessons với data đã được map
+      const lessonsWithDayInfo = scheduleData.lessonDetails.map((lesson) => {
+        // Tạo lesson object từ aggregation result
+        const lessonObj = {
+          _id: lesson._id,
+          lessonId: lesson.lessonId,
+          class: lesson.class,
+          subject: lesson.subject,
+          teacher: lesson.teacher,
+          substituteTeacher: lesson.substituteTeacher,
+          academicYear: lesson.academicYear,
+          timeSlot: lesson.timeSlot,
+          scheduledDate: lesson.scheduledDate,
+          type: lesson.type,
+          status: lesson.status,
+          topic: lesson.topic,
+          description: lesson.description,
+          createdBy: lesson.createdBy,
+          createdAt: lesson.createdAt,
+          updatedAt: lesson.updatedAt,
+          __v: lesson.__v
+        };
+
         const scheduledDate = new Date(lesson.scheduledDate);
         const dayOfWeek = scheduledDate.getDay();
 
@@ -348,19 +456,28 @@ class ScheduleService {
         lessonObj.dayOfWeek = dayNames[dayOfWeek];
         lessonObj.dayNumber = dayOfWeek === 0 ? 7 : dayOfWeek;
 
-        return lessonObj;
-      });
+        // Populate từ maps thay vì database queries
+        if (lesson.subject) {
+          lessonObj.subject = subjectMap.get(lesson.subject.toString());
+        }
+        if (lesson.teacher) {
+          lessonObj.teacher = teacherMap.get(lesson.teacher.toString());
+        }
+        if (lesson.substituteTeacher) {
+          lessonObj.substituteTeacher = substituteTeacherMap.get(lesson.substituteTeacher.toString());
+        }
+        if (lesson.timeSlot) {
+          lessonObj.timeSlot = timeSlotMap.get(lesson.timeSlot.toString());
+        }
+        if (lesson.academicYear) {
+          lessonObj.academicYear = academicYearMap.get(lesson.academicYear.toString());
+        }
 
-      // Lấy studentPersonalActivities: các PersonalActivity của user có class_id.className = className và date trong tuần
-      const startDate = weeklySchedule.startDate;
-      const endDate = weeklySchedule.endDate;
-      const usersInClass = await User.find({ class_id: classInfo._id }).select(
-        "_id"
-      );
-      const userIds = usersInClass.map((u) => u._id);
-      const studentPersonalActivities = await PersonalActivity.find({
-        user: { $in: userIds },
-        date: { $gte: startDate, $lte: endDate },
+        // Thêm trạng thái testInfo và student leave request
+        lessonObj.hasTestInfo = testInfoMap.has(lesson._id.toString());
+        lessonObj.hasStudentLeaveRequest = studentLeaveRequestMap.has(lesson._id.toString());
+
+        return lessonObj;
       });
 
       return {
@@ -370,9 +487,9 @@ class ScheduleService {
           gradeLevel: classInfo.gradeLevel,
         },
         weeklySchedule: {
-          weekNumber: weeklySchedule.weekNumber,
-          startDate: weeklySchedule.startDate,
-          endDate: weeklySchedule.endDate,
+          weekNumber: scheduleData.weekNumber,
+          startDate: scheduleData.startDate,
+          endDate: scheduleData.endDate,
           lessons: lessonsWithDayInfo,
         },
         studentPersonalActivities,
@@ -426,24 +543,202 @@ class ScheduleService {
         console.log(`⚠️ No weekly schedule found, using calculated dates: ${startDate.toISOString()} - ${endDate.toISOString()}`);
       }
 
-      const lessons = await Lesson.find({
-        teacher: teacherId,
-        academicYear: academicYearDoc._id,
-        scheduledDate: {
-          $gte: startDate,
-          $lte: endDate,
+      // Đảm bảo teacherId là ObjectId
+      const teacherObjectId = typeof teacherId === 'string' ? new mongoose.Types.ObjectId(teacherId) : teacherId;
+
+      // Tối ưu: Sử dụng aggregation pipeline thay vì populate
+      const lessons = await Lesson.aggregate([
+        {
+          $match: {
+            teacher: teacherObjectId,
+            academicYear: academicYearDoc._id,
+            scheduledDate: {
+              $gte: startDate,
+              $lte: endDate,
+            },
+          }
         },
-      })
-        .populate("class", "className gradeLevel")
-        .populate("subject", "subjectName subjectCode")
-        .populate("timeSlot", "period startTime endTime type")
-        .sort("scheduledDate timeSlot.period");
+        {
+          $lookup: {
+            from: "classes",
+            localField: "class",
+            foreignField: "_id",
+            as: "classDetails"
+          }
+        },
+        {
+          $lookup: {
+            from: "subjects",
+            localField: "subject",
+            foreignField: "_id",
+            as: "subjectDetails"
+          }
+        },
+        {
+          $lookup: {
+            from: "timeslots",
+            localField: "timeSlot",
+            foreignField: "_id",
+            as: "timeSlotDetails"
+          }
+        },
+        {
+          $sort: {
+            scheduledDate: 1,
+            "timeSlotDetails.period": 1
+          }
+        }
+      ]);
 
+      console.log(`🔍 Found ${lessons.length} lessons for teacher ${teacherObjectId}`);
 
+      if (!lessons || lessons.length === 0) {
+        return {
+          teacherId,
+          academicYear,
+          weekNumber,
+          startDate: startDate,
+          endDate: endDate,
+          totalLessons: 0,
+          lessons: [],
+          teacherPersonalActivities: [],
+        };
+      }
 
-      // Không gán personalActivity vào từng lesson nữa
+      // Tối ưu: Tạo maps cho các details để lookup nhanh
+      const classMap = new Map();
+      const subjectMap = new Map();
+      const timeSlotMap = new Map();
+
+      lessons.forEach(lesson => {
+        // Process class details
+        if (lesson.classDetails && lesson.classDetails.length > 0) {
+          const classDetail = lesson.classDetails[0];
+          classMap.set(lesson.class.toString(), {
+            _id: classDetail._id,
+            className: classDetail.className,
+            gradeLevel: classDetail.gradeLevel
+          });
+        }
+
+        // Process subject details
+        if (lesson.subjectDetails && lesson.subjectDetails.length > 0) {
+          const subjectDetail = lesson.subjectDetails[0];
+          subjectMap.set(lesson.subject.toString(), {
+            _id: subjectDetail._id,
+            subjectName: subjectDetail.subjectName,
+            subjectCode: subjectDetail.subjectCode
+          });
+        }
+
+        // Process timeSlot details
+        if (lesson.timeSlotDetails && lesson.timeSlotDetails.length > 0) {
+          const timeSlotDetail = lesson.timeSlotDetails[0];
+          timeSlotMap.set(lesson.timeSlot.toString(), {
+            _id: timeSlotDetail._id,
+            period: timeSlotDetail.period,
+            startTime: timeSlotDetail.startTime,
+            endTime: timeSlotDetail.endTime,
+            type: timeSlotDetail.type
+          });
+        }
+      });
+
+      // Tối ưu: Batch queries cho tất cả các trạng thái
+      const lessonIds = lessons.map(lesson => lesson._id);
+      
+      const [testInfos, teacherLeaveRequests, substituteRequests, swapRequests, makeupRequests, teacherPersonalActivities] = await Promise.all([
+        TestInfo.find({ lesson: { $in: lessonIds } }),
+        TeacherLeaveRequest.find({ 
+          lessonId: { $in: lessonIds },
+          status: { $in: ["pending", "approved"] }
+        }),
+        LessonRequest.find({
+          requestType: "substitute",
+          lesson: { $in: lessonIds },
+          status: "pending"
+        }),
+        LessonRequest.find({
+          requestType: "swap",
+          $or: [
+            { originalLesson: { $in: lessonIds } },
+            { replacementLesson: { $in: lessonIds } },
+          ],
+          status: "pending"
+        }),
+        LessonRequest.find({
+          requestType: "makeup",
+          $or: [
+            { originalLesson: { $in: lessonIds } },
+            { replacementLesson: { $in: lessonIds } },
+          ],
+          status: "pending"
+        }),
+        PersonalActivity.find({
+          user: teacherObjectId,
+          date: { $gte: startDate, $lte: endDate },
+        })
+      ]);
+
+      // Tạo maps cho lookup nhanh
+      const testInfoMap = new Map();
+      testInfos.forEach(testInfo => {
+        testInfoMap.set(testInfo.lesson.toString(), true);
+      });
+
+      const teacherLeaveRequestMap = new Map();
+      teacherLeaveRequests.forEach(request => {
+        teacherLeaveRequestMap.set(request.lessonId.toString(), true);
+      });
+
+      const substituteRequestMap = new Map();
+      substituteRequests.forEach(request => {
+        substituteRequestMap.set(request.lesson.toString(), true);
+      });
+
+      const swapRequestMap = new Map();
+      swapRequests.forEach(request => {
+        if (request.originalLesson) {
+          swapRequestMap.set(request.originalLesson.toString(), true);
+        }
+        if (request.replacementLesson) {
+          swapRequestMap.set(request.replacementLesson.toString(), true);
+        }
+      });
+
+      const makeupRequestMap = new Map();
+      makeupRequests.forEach(request => {
+        if (request.originalLesson) {
+          makeupRequestMap.set(request.originalLesson.toString(), true);
+        }
+        if (request.replacementLesson) {
+          makeupRequestMap.set(request.replacementLesson.toString(), true);
+        }
+      });
+
+      // Tối ưu: Process lessons với data đã được map
       const lessonsWithDayInfo = lessons.map((lesson) => {
-        const lessonObj = lesson.toObject();
+        // Tạo lesson object từ aggregation result
+        const lessonObj = {
+          _id: lesson._id,
+          lessonId: lesson.lessonId,
+          class: lesson.class,
+          subject: lesson.subject,
+          teacher: lesson.teacher,
+          substituteTeacher: lesson.substituteTeacher,
+          academicYear: lesson.academicYear,
+          timeSlot: lesson.timeSlot,
+          scheduledDate: lesson.scheduledDate,
+          type: lesson.type,
+          status: lesson.status,
+          topic: lesson.topic,
+          description: lesson.description,
+          createdBy: lesson.createdBy,
+          createdAt: lesson.createdAt,
+          updatedAt: lesson.updatedAt,
+          __v: lesson.__v
+        };
+
         const scheduledDate = new Date(lesson.scheduledDate);
         const dayOfWeek = scheduledDate.getDay();
         const dayNames = [
@@ -457,23 +752,36 @@ class ScheduleService {
         ];
         lessonObj.dayOfWeek = dayNames[dayOfWeek];
         lessonObj.dayNumber = dayOfWeek === 0 ? 7 : dayOfWeek;
+
+        // Populate từ maps thay vì database queries
+        if (lesson.class) {
+          lessonObj.class = classMap.get(lesson.class.toString());
+        }
+        if (lesson.subject) {
+          lessonObj.subject = subjectMap.get(lesson.subject.toString());
+        }
+        if (lesson.timeSlot) {
+          lessonObj.timeSlot = timeSlotMap.get(lesson.timeSlot.toString());
+        }
+
+        // Thêm các trạng thái boolean
+        lessonObj.hasTestInfo = testInfoMap.has(lesson._id.toString());
+        lessonObj.hasTeacherLeaveRequest = teacherLeaveRequestMap.has(lesson._id.toString());
+        lessonObj.hasSubstituteRequest = substituteRequestMap.has(lesson._id.toString());
+        lessonObj.hasSwapRequest = swapRequestMap.has(lesson._id.toString());
+        lessonObj.hasMakeupRequest = makeupRequestMap.has(lesson._id.toString());
+
         return lessonObj;
       });
 
-      // Lấy tất cả hoạt động cá nhân của giáo viên trong tuần (theo date, period)
-      // Sử dụng cùng startDate và endDate như lessons để đảm bảo khớp
-      let teacherPersonalActivities = await PersonalActivity.find({
-        user: teacherId,
-        date: { $gte: startDate, $lte: endDate },
-      });
-
-      // Nếu không tìm thấy personal activities với date range mới, thử với date range cũ
+      // Fallback cho personal activities nếu không tìm thấy
+      let finalTeacherPersonalActivities = teacherPersonalActivities;
       if (teacherPersonalActivities.length === 0) {
         const oldStartDate = this.calculateWeekStartDate(academicYearDoc.startDate, weekNumber);
         const oldEndDate = this.calculateWeekEndDate(oldStartDate, "MONDAY_TO_SATURDAY");
         
-        teacherPersonalActivities = await PersonalActivity.find({
-          user: teacherId,
+        finalTeacherPersonalActivities = await PersonalActivity.find({
+          user: teacherObjectId,
           date: { $gte: oldStartDate, $lte: oldEndDate },
         });
       }
@@ -486,7 +794,7 @@ class ScheduleService {
         endDate: endDate,
         totalLessons: lessonsWithDayInfo.length,
         lessons: lessonsWithDayInfo,
-        teacherPersonalActivities,
+        teacherPersonalActivities: finalTeacherPersonalActivities,
       };
     } catch (error) {
       console.error("❌ Error in getTeacherWeeklySchedule:", error.message);

@@ -84,6 +84,11 @@ weeklyScheduleSchema.index(
 weeklyScheduleSchema.index({ startDate: 1, endDate: 1 });
 weeklyScheduleSchema.index({ createdBy: 1 });
 
+// Thêm index cho aggregation queries
+weeklyScheduleSchema.index({ "lessons": 1 });
+weeklyScheduleSchema.index({ class: 1, academicYear: 1 });
+weeklyScheduleSchema.index({ weekNumber: 1 });
+
 // ===== VIRTUALS =====
 
 /**
