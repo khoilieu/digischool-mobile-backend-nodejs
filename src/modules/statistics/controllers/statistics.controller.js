@@ -2,7 +2,7 @@ const StatisticsService = require("../services/statistics.service");
 
 class StatisticsController {
   /**
-   * Lấy thống kê sĩ số toàn trường theo ngày
+   * Lấy thống kê sĩ số toàn trường theo ngày (cập nhật theo yêu cầu mới)
    */
   getDailySchoolStatistics = async (req, res, next) => {
     try {
@@ -10,11 +10,11 @@ class StatisticsController {
       const targetDate = date ? new Date(date) : new Date();
       
       const statisticsService = new StatisticsService();
-      const statistics = await statisticsService.getDailyStatistics(targetDate);
+      const statistics = await statisticsService.getDailySchoolStatistics(targetDate);
       
       res.status(200).json({
         success: true,
-        message: "Lấy thống kê sĩ số ngày thành công",
+        message: "Lấy thống kê sĩ số toàn trường thành công",
         data: statistics
       });
     } catch (error) {
@@ -54,7 +54,7 @@ class StatisticsController {
   };
 
   /**
-   * Lấy thống kê điểm danh giáo viên
+   * Lấy thống kê điểm danh giáo viên (cập nhật theo yêu cầu mới)
    */
   getTeacherAttendanceStatistics = async (req, res, next) => {
     try {
@@ -62,12 +62,47 @@ class StatisticsController {
       const targetDate = date ? new Date(date) : new Date();
       
       const statisticsService = new StatisticsService();
-      const statistics = await statisticsService.getTeacherAttendanceStatistics(targetDate);
+      const statistics = await statisticsService.getTeacherAttendanceForDay(targetDate);
       
       res.status(200).json({
         success: true,
         message: "Lấy thống kê điểm danh giáo viên thành công",
         data: statistics
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Lấy thống kê sĩ số giáo viên điểm danh cho UI ChartSchoolTopday
+   */
+  getTeacherRollcallSummary = async (req, res, next) => {
+    try {
+      const { date } = req.query;
+      const targetDate = date ? new Date(date) : new Date();
+      
+      const statisticsService = new StatisticsService();
+      const teacherAttendance = await statisticsService.getTeacherAttendanceForDay(targetDate);
+      
+      // Format dữ liệu cho UI
+      const summary = {
+        date: targetDate.toISOString().split('T')[0],
+        totalTeachers: teacherAttendance.total,
+        attendedTeachers: teacherAttendance.attended,
+        attendanceRate: teacherAttendance.total > 0 ? 
+          Math.round((teacherAttendance.attended / teacherAttendance.total) * 100) : 0,
+        breakdown: {
+          attended: teacherAttendance.attended,
+          absent: teacherAttendance.absent,
+          late: teacherAttendance.late
+        }
+      };
+      
+      res.status(200).json({
+        success: true,
+        message: "Lấy thống kê điểm danh giáo viên thành công",
+        data: summary
       });
     } catch (error) {
       next(error);

@@ -86,7 +86,7 @@ class ScheduleController {
           // Gán personal activity cho từng lesson
           emptyLessons.forEach(lesson => {
             if (req.user.role.includes("teacher") || req.user.role.includes("homeroom_teacher")) {
-              const key = `${lesson.scheduledDate.split('T')[0]}_${lesson.timeSlot?.period}`;
+              const key = `${lesson.scheduledDate.toISOString().split('T')[0]}_${lesson.timeSlot?.period}`;
               lesson.personalActivity = activityMap.get(key);
             } else {
               lesson.personalActivity = activityMap.get(lesson._id.toString());

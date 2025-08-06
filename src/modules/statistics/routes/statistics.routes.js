@@ -25,6 +25,12 @@ router.get('/teacher-attendance',
   statisticsController.getTeacherAttendanceStatistics
 );
 
+// Thống kê sĩ số giáo viên điểm danh cho UI
+router.get('/teacher-rollcall-summary', 
+  authMiddleware.authorize("admin", "manager"), 
+  statisticsController.getTeacherRollcallSummary
+);
+
 // Biểu đồ học sinh theo buổi
 router.get('/student-chart', 
   authMiddleware.authorize("admin", "manager"), 

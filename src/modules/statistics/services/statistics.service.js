@@ -1003,6 +1003,203 @@ class StatisticsService {
     }
   }
 
+  /**
+   * Lấy thống kê sĩ số toàn trường theo ngày (cập nhật theo yêu cầu mới)
+   */
+  async getDailySchoolStatistics(targetDate) {
+    try {
+      // Lấy ngày bắt đầu và kết thúc của ngày
+      const startOfDay = new Date(targetDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      
+      const endOfDay = new Date(targetDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // 1. Tính sĩ số quản lý (đơn giản - tổng số account quản lý)
+      const managers = await User.countDocuments({ 
+        role: { $in: ['manager', 'admin'] }, 
+        active: true 
+      });
+
+      // 2. Tính sĩ số giáo viên (số giáo viên đã điểm danh trong ngày)
+      const teacherAttendance = await this.getTeacherAttendanceForDay(targetDate);
+      const teachersPresent = teacherAttendance.attended; // Chỉ tính giáo viên đã điểm danh
+
+      // 3. Tính sĩ số học sinh (dựa trên đánh giá tiết học mới nhất của từng lớp)
+      const studentsPresent = await this.getStudentAttendanceForDay(targetDate);
+
+      const total = studentsPresent + teachersPresent + managers;
+
+      return {
+        date: targetDate,
+        total,
+        breakdown: {
+          students: studentsPresent,
+          teachers: teachersPresent,
+          managers
+        },
+        teacherAttendance: {
+          total: teacherAttendance.total,
+          attended: teacherAttendance.attended,
+          absent: teacherAttendance.absent,
+          late: teacherAttendance.late
+        }
+      };
+    } catch (error) {
+      throw new Error(`Lỗi khi lấy thống kê sĩ số toàn trường: ${error.message}`);
+    }
+  }
+
+  /**
+   * Lấy thống kê điểm danh giáo viên cho một ngày cụ thể
+   */
+  async getTeacherAttendanceForDay(targetDate) {
+    try {
+      const startOfDay = new Date(targetDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      
+      const endOfDay = new Date(targetDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Lấy tất cả tiết học trong ngày (bao gồm cả completed và scheduled)
+      const lessonsInDay = await Lesson.find({
+        scheduledDate: {
+          $gte: startOfDay,
+          $lte: endOfDay
+        }
+      }).populate('teacher', 'name');
+
+      // Lấy danh sách giáo viên có tiết dạy trong ngày
+      const teachersWithLessons = [...new Set(lessonsInDay.map(lesson => lesson.teacher?._id?.toString()).filter(Boolean))];
+      const totalTeachers = teachersWithLessons.length;
+
+      // Lấy đánh giá tiết học để xác định trạng thái điểm danh
+      const evaluations = await TeacherLessonEvaluation.find({
+        lesson: { $in: lessonsInDay.map(l => l._id) }
+      }).populate('lesson');
+
+      // Tính toán trạng thái điểm danh
+      let attended = 0;
+      let absent = 0;
+      let late = 0;
+
+      for (const teacherId of teachersWithLessons) {
+        const teacherLessons = lessonsInDay.filter(l => l.teacher?._id?.toString() === teacherId);
+        const teacherEvaluations = evaluations.filter(e => 
+          teacherLessons.some(l => l._id.toString() === e.lesson?._id?.toString())
+        );
+
+        if (teacherEvaluations.length > 0) {
+          // Giáo viên đã đánh giá ít nhất 1 tiết -> đã điểm danh
+          attended++;
+        } else {
+          // Kiểm tra xem có tiết nào đã hoàn thành mà chưa đánh giá không
+          const completedLessons = teacherLessons.filter(l => l.status === 'completed');
+          if (completedLessons.length > 0) {
+            // Có tiết đã hoàn thành nhưng chưa đánh giá -> chưa điểm danh
+            absent++;
+          } else {
+            // Tất cả tiết đều chưa hoàn thành -> chưa điểm danh
+            // Nhưng vẫn tính là có tiết dạy trong ngày
+            absent++;
+          }
+        }
+      }
+
+      return {
+        total: totalTeachers,
+        attended,
+        absent,
+        late
+      };
+    } catch (error) {
+      throw new Error(`Lỗi khi lấy thống kê điểm danh giáo viên: ${error.message}`);
+    }
+  }
+
+  /**
+   * Lấy sĩ số học sinh hiện tại dựa trên đánh giá tiết học mới nhất
+   */
+  async getStudentAttendanceForDay(targetDate) {
+    try {
+      const startOfDay = new Date(targetDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      
+      const endOfDay = new Date(targetDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Lấy tất cả lớp học
+      const allClasses = await Class.find({ active: true });
+
+      let totalStudentsPresent = 0;
+
+
+
+      for (const classItem of allClasses) {
+        // Lấy tiết học đã completed của lớp này trong ngày
+        const completedLesson = await Lesson.findOne({
+          class: classItem._id,
+          scheduledDate: {
+            $gte: startOfDay,
+            $lte: endOfDay
+          },
+          status: 'completed'
+        }).sort({ scheduledDate: -1 });
+
+        if (completedLesson) {
+          // Lấy đánh giá tiết học đã completed
+          const completedEvaluation = await TeacherLessonEvaluation.findOne({
+            lesson: completedLesson._id
+          }).populate('oralTests.student violations.student');
+
+          if (completedEvaluation) {
+            // Tính số học sinh có mặt dựa trên đánh giá
+            const totalStudentsInClass = await User.countDocuments({
+              class_id: classItem._id,
+              role: 'student',
+              active: true
+            });
+
+            // Số học sinh vắng = số học sinh trong danh sách vắng + số học sinh vi phạm
+            const absentStudents = new Set();
+            
+            // Thêm học sinh vắng từ summary (nếu có)
+            if (completedEvaluation.summary && completedEvaluation.summary.totalAbsent) {
+              // Sử dụng totalAbsent từ summary để tính số học sinh vắng
+              const absentCount = completedEvaluation.summary.totalAbsent;
+              // Thêm vào danh sách học sinh vắng (ước tính)
+              for (let i = 0; i < Math.min(absentCount, totalStudentsInClass); i++) {
+                absentStudents.add(`absent_${i}`);
+              }
+            }
+
+            // Thêm học sinh vi phạm (nếu có)
+            completedEvaluation.violations.forEach(violation => {
+              if (violation.student) {
+                absentStudents.add(violation.student._id.toString());
+              }
+            });
+
+            // Tính số học sinh có mặt = tổng sĩ số - số học sinh vắng
+            const studentsPresent = Math.max(0, totalStudentsInClass - absentStudents.size);
+            totalStudentsPresent += studentsPresent;
+            
+          } else {
+            // Chưa có đánh giá, không tính học sinh nào (vì chưa có đánh giá trong ngày)
+            totalStudentsPresent += 0;
+          }
+        } else {
+          // Không có tiết học nào trong ngày, không tính học sinh nào
+          totalStudentsPresent += 0;
+        }
+      }
+
+      return totalStudentsPresent;
+    } catch (error) {
+      throw new Error(`Lỗi khi lấy sĩ số học sinh: ${error.message}`);
+    }
+  }
+
 }
 
 module.exports = StatisticsService;
