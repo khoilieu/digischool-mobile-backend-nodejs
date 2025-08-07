@@ -33,6 +33,7 @@ router.get('/teacher-rollcall-summary',
 );
 
 // Biểu đồ học sinh theo buổi
+//API: /api/statistics/student-chart
 router.get('/student-chart', 
   authMiddleware.authorize("admin", "manager"), 
   statisticsController.getStudentChartData

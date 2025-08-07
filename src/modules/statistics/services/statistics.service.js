@@ -105,6 +105,8 @@ class StatisticsService {
 
   /**
    * Lấy thống kê điểm danh giáo viên theo ngày
+   * Giáo viên được tính là đã điểm danh khi họ xác nhận lesson completed
+   * (không phải khi đánh giá tiết học)
    */
   async getTeacherAttendanceStatistics(targetDate) {
     try {
@@ -122,6 +124,7 @@ class StatisticsService {
       });
 
       // Tìm các giáo viên đã điểm danh (có lesson completed trong ngày)
+      // Giáo viên được tính là đã điểm danh khi họ xác nhận lesson completed
       const attendedTeachers = await Lesson.distinct('teacher', {
         scheduledDate: { $gte: startOfDay, $lte: endOfDay },
         status: 'completed',
@@ -171,10 +174,9 @@ class StatisticsService {
           grade12: 0
         };
 
-        // Lấy các lesson trong tiết này dựa trên timeSlot
+        // Lấy các lesson trong tiết này dựa trên timeSlot (bao gồm cả scheduled và completed)
         const lessons = await Lesson.find({
-          scheduledDate: { $gte: startOfDay, $lte: endOfDay },
-          status: 'completed'
+          scheduledDate: { $gte: startOfDay, $lte: endOfDay }
         }).populate([
           { path: 'class', select: 'className gradeLevel' },
           { path: 'timeSlot', select: 'period type' }
@@ -187,25 +189,37 @@ class StatisticsService {
                  lesson.timeSlot.type === session;
         });
 
-        // Tính số học sinh theo khối
+        // Tính số học sinh theo khối (có mặt, không tính vắng)
         for (const lesson of relevantLessons) {
           if (lesson.class && lesson.class.gradeLevel) {
-            const studentCount = await User.countDocuments({
+            // Lấy tổng sĩ số của lớp
+            const totalStudents = await User.countDocuments({
               class_id: lesson.class._id,
               role: 'student',
               active: true
             });
 
-            switch (lesson.class.gradeLevel) {
-              case 10:
-                periodData.grade10 += studentCount;
-                break;
-              case 11:
-                periodData.grade11 += studentCount;
-                break;
-              case 12:
-                periodData.grade12 += studentCount;
-                break;
+            // Nếu lesson đã completed, kiểm tra evaluation để tính học sinh vắng
+            let studentsPresent = totalStudents;
+            if (lesson.status === 'completed') {
+              const evaluation = await TeacherLessonEvaluation.findOne({
+                lesson: lesson._id
+              });
+              
+              if (evaluation && evaluation.absentStudents) {
+                // Trừ số học sinh vắng
+                studentsPresent = Math.max(0, totalStudents - evaluation.absentStudents.length);
+              }
+            }
+
+            // Thêm vào theo khối
+            const gradeLevel = lesson.class.gradeLevel;
+            if (gradeLevel === 'grade10' || gradeLevel === 10) {
+              periodData.grade10 += studentsPresent;
+            } else if (gradeLevel === 'grade11' || gradeLevel === 11) {
+              periodData.grade11 += studentsPresent;
+            } else if (gradeLevel === 'grade12' || gradeLevel === 12) {
+              periodData.grade12 += studentsPresent;
             }
           }
         }
@@ -226,25 +240,50 @@ class StatisticsService {
   /**
    * Lấy thống kê sĩ số toàn trường theo tuần
    */
-  async getWeeklyStatistics(startDate, endDate) {
+  async getWeeklyStatistics(weekNumber, academicYearId) {
     try {
+      // Lấy thông tin tuần học từ database
+      const weeklySchedule = await WeeklySchedule.findOne({
+        weekNumber,
+        academicYear: academicYearId
+      }).populate('academicYear');
+
+      if (!weeklySchedule) {
+        throw new Error(`Không tìm thấy thời khóa biểu tuần ${weekNumber} của năm học ${academicYearId}`);
+      }
+
+      const { startDate, endDate } = weeklySchedule;
       const weeklyData = [];
       const currentDate = new Date(startDate);
 
-      // Duyệt qua từng ngày trong tuần
+      // Duyệt qua từng ngày trong tuần học
       while (currentDate <= endDate) {
+        // Lấy thống kê học sinh có mặt thực tế
+        const studentsPresent = await this.getStudentAttendanceForDay(currentDate);
+        
+        // Lấy thống kê giáo viên có mặt thực tế
+        const teacherStats = await this.getTeacherAttendanceForDay(currentDate);
+        
+        // Lấy thống kê tổng quan
         const dayStats = await this.getDailyStatistics(currentDate);
+        
         weeklyData.push({
           date: new Date(currentDate),
           dayOfWeek: currentDate.getDay(),
           dayName: this.getDayName(currentDate.getDay()),
-          ...dayStats
+          total: dayStats.total,
+          breakdown: dayStats.breakdown,
+          gradeLevels: dayStats.gradeLevels,
+          studentsPresent,
+          teacherStats
         });
 
         currentDate.setDate(currentDate.getDate() + 1);
       }
 
       return {
+        weekNumber,
+        academicYear: weeklySchedule.academicYear.name,
         startDate,
         endDate,
         weeklyData
@@ -257,8 +296,20 @@ class StatisticsService {
   /**
    * Lấy tỷ lệ hoàn thành của học sinh và giáo viên
    */
-  async getCompletionRates(startDate, endDate) {
+  async getCompletionRates(weekNumber, academicYearId) {
     try {
+      // Lấy thông tin tuần học từ database
+      const weeklySchedule = await WeeklySchedule.findOne({
+        weekNumber,
+        academicYear: academicYearId
+      }).populate('academicYear');
+
+      if (!weeklySchedule) {
+        throw new Error(`Không tìm thấy thời khóa biểu tuần ${weekNumber} của năm học ${academicYearId}`);
+      }
+
+      const { startDate, endDate } = weeklySchedule;
+
       // Lấy tổng số học sinh và giáo viên
       const [totalStudents, totalTeachers] = await Promise.all([
         User.countDocuments({ 
@@ -271,44 +322,69 @@ class StatisticsService {
         })
       ]);
 
-      // Lấy số học sinh có lesson completed trong khoảng thời gian
-      const studentsWithCompletedLessons = await Lesson.distinct('class', {
+      // Lấy lessons completed trong khoảng thời gian của tuần học
+      const completedLessons = await Lesson.find({
         scheduledDate: { $gte: startDate, $lte: endDate },
         status: 'completed'
       });
 
-      // Lấy số học sinh từ các lớp có lesson completed
-      const studentsWithEvaluations = await User.distinct('_id', {
-        class_id: { $in: studentsWithCompletedLessons },
+      // Lấy evaluations trong khoảng thời gian của tuần học
+      const evaluations = await TeacherLessonEvaluation.find({
+        createdAt: { $gte: startDate, $lte: endDate }
+      });
+
+      // Tính số học sinh có evaluation (đã được đánh giá)
+      const studentsWithEvaluations = new Set();
+      evaluations.forEach(evaluation => {
+        if (evaluation.absentStudents) {
+          evaluation.absentStudents.forEach(absentStudent => {
+            if (absentStudent.student) {
+              studentsWithEvaluations.add(absentStudent.student.toString());
+            }
+          });
+        }
+      });
+
+      // Lấy tất cả học sinh từ các lớp có lesson completed
+      const studentsInCompletedClasses = await User.find({
+        class_id: { $in: completedLessons.map(l => l.class) },
         role: 'student',
         active: true
       });
 
-      // Lấy số giáo viên có lesson completed trong khoảng thời gian
-      const teachersWithEvaluations = await Lesson.distinct('teacher', {
-        scheduledDate: { $gte: startDate, $lte: endDate },
-        status: 'completed',
-        teacher: { $exists: true, $ne: null }
+      // Tính số học sinh đã hoàn thành (có mặt trong lesson completed)
+      const studentsCompleted = studentsInCompletedClasses.filter(student => 
+        !studentsWithEvaluations.has(student._id.toString())
+      ).length;
+
+      // Tính số giáo viên có evaluation
+      const teachersWithEvaluations = new Set();
+      evaluations.forEach(evaluation => {
+        if (evaluation.teacher) {
+          teachersWithEvaluations.add(evaluation.teacher.toString());
+        }
       });
 
       const studentCompletionRate = totalStudents > 0 
-        ? Math.round((studentsWithEvaluations.length / totalStudents) * 100) 
+        ? Math.round((studentsCompleted / totalStudents) * 100) 
         : 0;
 
       const teacherCompletionRate = totalTeachers > 0 
-        ? Math.round((teachersWithEvaluations.length / totalTeachers) * 100) 
+        ? Math.round((teachersWithEvaluations.size / totalTeachers) * 100) 
         : 0;
 
       return {
+        weekNumber,
+        academicYear: weeklySchedule.academicYear.name,
         period: { startDate, endDate },
         students: {
           total: totalStudents,
-          completed: studentsWithEvaluations.length,
+          completed: studentsCompleted,
           rate: studentCompletionRate
         },
         teachers: {
           total: totalTeachers,
-          completed: teachersWithEvaluations.length,
+          completed: teachersWithEvaluations.size,
           rate: teacherCompletionRate
         }
       };
@@ -1026,7 +1102,8 @@ class StatisticsService {
       const teachersPresent = teacherAttendance.attended; // Chỉ tính giáo viên đã điểm danh
 
       // 3. Tính sĩ số học sinh (dựa trên đánh giá tiết học mới nhất của từng lớp)
-      const studentsPresent = await this.getStudentAttendanceForDay(targetDate);
+      const studentAttendance = await this.getStudentAttendanceForDay(targetDate);
+      const studentsPresent = studentAttendance.present || 0;
 
       const total = studentsPresent + teachersPresent + managers;
 
@@ -1052,6 +1129,8 @@ class StatisticsService {
 
   /**
    * Lấy thống kê điểm danh giáo viên cho một ngày cụ thể
+   * Giáo viên được tính là đã điểm danh khi họ xác nhận lesson completed
+   * (không phải khi đánh giá tiết học)
    */
   async getTeacherAttendanceForDay(targetDate) {
     try {
@@ -1073,36 +1152,21 @@ class StatisticsService {
       const teachersWithLessons = [...new Set(lessonsInDay.map(lesson => lesson.teacher?._id?.toString()).filter(Boolean))];
       const totalTeachers = teachersWithLessons.length;
 
-      // Lấy đánh giá tiết học để xác định trạng thái điểm danh
-      const evaluations = await TeacherLessonEvaluation.find({
-        lesson: { $in: lessonsInDay.map(l => l._id) }
-      }).populate('lesson');
-
-      // Tính toán trạng thái điểm danh
+      // Tính toán trạng thái điểm danh dựa trên lesson completed
       let attended = 0;
       let absent = 0;
       let late = 0;
 
       for (const teacherId of teachersWithLessons) {
         const teacherLessons = lessonsInDay.filter(l => l.teacher?._id?.toString() === teacherId);
-        const teacherEvaluations = evaluations.filter(e => 
-          teacherLessons.some(l => l._id.toString() === e.lesson?._id?.toString())
-        );
+        const completedLessons = teacherLessons.filter(l => l.status === 'completed');
 
-        if (teacherEvaluations.length > 0) {
-          // Giáo viên đã đánh giá ít nhất 1 tiết -> đã điểm danh
+        if (completedLessons.length > 0) {
+          // Giáo viên có ít nhất 1 lesson completed -> đã điểm danh
           attended++;
         } else {
-          // Kiểm tra xem có tiết nào đã hoàn thành mà chưa đánh giá không
-          const completedLessons = teacherLessons.filter(l => l.status === 'completed');
-          if (completedLessons.length > 0) {
-            // Có tiết đã hoàn thành nhưng chưa đánh giá -> chưa điểm danh
-            absent++;
-          } else {
-            // Tất cả tiết đều chưa hoàn thành -> chưa điểm danh
-            // Nhưng vẫn tính là có tiết dạy trong ngày
-            absent++;
-          }
+          // Giáo viên chưa có lesson nào completed -> chưa điểm danh
+          absent++;
         }
       }
 
@@ -1134,8 +1198,8 @@ class StatisticsService {
       const allClasses = await Class.find({ active: true });
 
       let totalStudentsPresent = 0;
-
-
+      let totalStudentsAbsent = 0;
+      let totalStudentsInAllClasses = 0;
 
       for (const classItem of allClasses) {
         // Lấy tiết học đã completed của lớp này trong ngày
@@ -1173,6 +1237,8 @@ class StatisticsService {
             active: true
           });
 
+          totalStudentsInAllClasses += totalStudentsInClass;
+
           // Số học sinh vắng = chỉ tính học sinh trong danh sách vắng (không tính vi phạm)
           const absentStudents = new Set();
           
@@ -1187,11 +1253,20 @@ class StatisticsService {
 
           // Tính số học sinh có mặt = tổng sĩ số - số học sinh vắng
           const studentsPresent = Math.max(0, totalStudentsInClass - absentStudents.size);
+          const studentsAbsent = absentStudents.size;
+          
           totalStudentsPresent += studentsPresent;
+          totalStudentsAbsent += studentsAbsent;
         }
       }
 
-      return totalStudentsPresent;
+      return {
+        date: targetDate,
+        total: totalStudentsInAllClasses,
+        present: totalStudentsPresent,
+        absent: totalStudentsAbsent,
+        attendanceRate: totalStudentsInAllClasses > 0 ? Math.round((totalStudentsPresent / totalStudentsInAllClasses) * 100) : 0
+      };
     } catch (error) {
       throw new Error(`Lỗi khi lấy sĩ số học sinh: ${error.message}`);
     }
