@@ -878,7 +878,7 @@ class ScheduleService {
       if (teacherLessonEvaluation) {
         lessonObj.teacherEvaluation = {
           teacherLessonEvaluationId: teacherLessonEvaluation._id,
-          rating: teacherLessonEvaluation.evaluation.rating,
+          rating: teacherLessonEvaluation.rating,
         };
       }
 

@@ -8,6 +8,7 @@ const teachingProgressValidation = require("../middleware/teaching-progress.vali
 router.use(authMiddleware.protect);
 
 // Thống kê sĩ số toàn trường theo ngày
+//API: /api/statistics/daily
 router.get('/daily', 
   authMiddleware.authorize("admin", "manager"), 
   statisticsController.getDailySchoolStatistics

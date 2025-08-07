@@ -39,78 +39,91 @@ const teacherLessonEvaluationSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Thông tin tiết học
-    lessonContent: {
-      // Tiết chương trình (lesson number in curriculum)
-      curriculumLesson: {
-        type: String,
-        required: true,
-        trim: true,
-        maxlength: 100,
-      },
+    // Thông tin tiết học theo UI
+    curriculumLesson: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 100,
+    },
 
-      // Nội dung bài học
-      content: {
-        type: String,
-        required: true,
-        trim: true,
-        maxlength: 1000,
-      },
+    content: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 1000,
+    },
 
-      // Mô tả thêm (optional)
-      description: {
-        type: String,
-        trim: true,
-        maxlength: 500,
+    comments: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+    },
+
+    rating: {
+      type: String,
+      required: true,
+      enum: ["A+", "A", "B+", "B", "C"],
+      validate: {
+        validator: function (value) {
+          return ["A+", "A", "B+", "B", "C"].includes(value);
+        },
+        message: "Rating must be one of: A+, A, B+, B, C",
       },
     },
 
-    // Đánh giá chất lượng tiết học
-    evaluation: {
-      // Xếp hạng: A+, A, B+, B, C
-      rating: {
-        type: String,
-        required: true,
-        enum: ["A+", "A", "B+", "B", "C"],
-        validate: {
-          validator: function (value) {
-            return ["A+", "A", "B+", "B", "C"].includes(value);
+    // Học sinh vắng
+    absentStudents: [
+      {
+        student: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+          validate: {
+            validator: async function (studentId) {
+              const User = mongoose.model("User");
+              const student = await User.findById(studentId);
+              return student && student.role.includes("student");
+            },
+            message: "Student ID must reference a valid student user",
           },
-          message: "Rating must be one of: A+, A, B+, B, C",
+        },
+        isApprovedLeave: {
+          type: Boolean,
+          default: false,
+        },
+        reason: {
+          type: String,
+          trim: true,
+          maxlength: 200,
         },
       },
+    ],
 
-      // Nhận xét của giáo viên
-      comments: {
-        type: String,
-        trim: true,
-        maxlength: 1000,
-      },
-
-      // Đánh giá chi tiết (optional)
-      details: {
-        // Mức độ tương tác của học sinh
-        studentEngagement: {
-          type: String,
-          enum: ["excellent", "good", "average", "poor"],
-          default: "average",
+    // Học sinh vi phạm
+    violations: [
+      {
+        student: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+          validate: {
+            validator: async function (studentId) {
+              const User = mongoose.model("User");
+              const student = await User.findById(studentId);
+              return student && student.role.includes("student");
+            },
+            message: "Student ID must reference a valid student user",
+          },
         },
-
-        // Mức độ hiểu bài của lớp
-        comprehensionLevel: {
+        description: {
           type: String,
-          enum: ["excellent", "good", "average", "poor"],
-          default: "average",
-        },
-
-        // Hoàn thành mục tiêu bài học
-        objectiveCompletion: {
-          type: String,
-          enum: ["fully", "mostly", "partially", "not_completed"],
-          default: "fully",
+          required: true,
+          trim: true,
+          maxlength: 500,
         },
       },
-    },
+    ],
 
     // Kiểm tra miệng
     oralTests: [
@@ -128,8 +141,6 @@ const teacherLessonEvaluationSchema = new mongoose.Schema(
             message: "Student ID must reference a valid student user",
           },
         },
-
-        // Điểm số (0-10)
         score: {
           type: Number,
           required: true,
@@ -137,118 +148,25 @@ const teacherLessonEvaluationSchema = new mongoose.Schema(
           max: 10,
           validate: {
             validator: function (value) {
-              // Cho phép điểm với 1 chữ số thập phân
               return Number.isFinite(value) && value >= 0 && value <= 10;
             },
             message: "Score must be a number between 0 and 10",
           },
-        },
-
-        // Nội dung câu hỏi/bài kiểm tra
-        question: {
-          type: String,
-          trim: true,
-          maxlength: 500,
-        },
-
-        // Nhận xét
-        comment: {
-          type: String,
-          trim: true,
-          maxlength: 300,
-        },
-
-        // Thời gian kiểm tra
-        testedAt: {
-          type: Date,
-          default: Date.now,
-        },
-      },
-    ],
-
-    // Vi phạm của học sinh
-    violations: [
-      {
-        student: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: "User",
-          required: true,
-          validate: {
-            validator: async function (studentId) {
-              const User = mongoose.model("User");
-              const student = await User.findById(studentId);
-              return student && student.role.includes("student");
-            },
-            message: "Student ID must reference a valid student user",
-          },
-        },
-
-        // Mô tả vi phạm
-        description: {
-          type: String,
-          required: true,
-          trim: true,
-          maxlength: 500,
-        },
-
-        // Loại vi phạm
-        type: {
-          type: String,
-          enum: [
-            "late",
-            "disruptive",
-            "unprepared",
-            "disrespectful",
-            "cheating",
-            "other",
-          ],
-          default: "other",
-        },
-
-        // Mức độ nghiêm trọng
-        severity: {
-          type: String,
-          enum: ["minor", "moderate", "serious"],
-          default: "minor",
-        },
-
-        // Biện pháp xử lý
-        action: {
-          type: String,
-          trim: true,
-          maxlength: 300,
-        },
-
-        // Thời gian ghi nhận vi phạm
-        recordedAt: {
-          type: Date,
-          default: Date.now,
         },
       },
     ],
 
     // Thống kê tổng quan
     summary: {
-      // Tổng số học sinh vắng
       totalAbsent: {
         type: Number,
         default: 0,
       },
-
-      // Số học sinh kiểm tra miệng
-      totalOralTests: {
-        type: Number,
-        default: 0,
-      },
-
-      // Điểm trung bình kiểm tra miệng
-      averageOralScore: {
-        type: Number,
-        default: 0,
-      },
-
-      // Tổng số vi phạm
       totalViolations: {
+        type: Number,
+        default: 0,
+      },
+      totalOralTests: {
         type: Number,
         default: 0,
       },
@@ -261,12 +179,10 @@ const teacherLessonEvaluationSchema = new mongoose.Schema(
       default: "draft",
     },
 
-    // Thời gian hoàn thành đánh giá
     completedAt: {
       type: Date,
     },
 
-    // Thời gian submit đánh giá
     submittedAt: {
       type: Date,
     },
@@ -280,33 +196,23 @@ const teacherLessonEvaluationSchema = new mongoose.Schema(
 teacherLessonEvaluationSchema.index(
   { lesson: 1, teacher: 1 },
   { unique: true }
-); // Mỗi giáo viên chỉ đánh giá 1 lần cho 1 tiết
+);
 teacherLessonEvaluationSchema.index({ teacher: 1, createdAt: -1 });
 teacherLessonEvaluationSchema.index({ class: 1, createdAt: -1 });
 teacherLessonEvaluationSchema.index({ subject: 1, createdAt: -1 });
 teacherLessonEvaluationSchema.index({ status: 1 });
-teacherLessonEvaluationSchema.index({ "evaluation.rating": 1 });
+teacherLessonEvaluationSchema.index({ rating: 1 });
 
 // Pre-save middleware để tính toán summary
 teacherLessonEvaluationSchema.pre("save", function (next) {
   // Tính thống kê kiểm tra miệng
   this.summary.totalOralTests = this.oralTests.length;
-  if (this.oralTests.length > 0) {
-    const totalScore = this.oralTests.reduce(
-      (sum, test) => sum + test.score,
-      0
-    );
-    this.summary.averageOralScore =
-      Math.round((totalScore / this.oralTests.length) * 10) / 10;
-  } else {
-    this.summary.averageOralScore = 0;
-  }
 
   // Tính tổng số vi phạm
   this.summary.totalViolations = this.violations.length;
 
-  // Tính số học sinh vắng (cần lấy từ lesson)
-  // Sẽ được tính trong controller khi có thông tin đầy đủ
+  // Tính số học sinh vắng
+  this.summary.totalAbsent = this.absentStudents.length;
 
   next();
 });
@@ -317,18 +223,18 @@ teacherLessonEvaluationSchema.pre("save", async function (next) {
     const Lesson = mongoose.model("Lesson");
     const User = mongoose.model("User");
 
-    // Kiểm tra lesson tồn tại và giáo viên có quyền đánh giá
+    // Kiểm tra lesson tồn tại
     const lesson = await Lesson.findById(this.lesson);
     if (!lesson) {
       throw new Error("Lesson not found");
     }
 
-    // Kiểm tra giáo viên có phải là giáo viên dạy tiết này không
+    // Kiểm tra giáo viên có quyền đánh giá
     if (lesson.teacher.toString() !== this.teacher.toString()) {
       throw new Error("Teacher can only evaluate their own lessons");
     }
 
-    // Kiểm tra lesson có thể đánh giá không (chỉ đánh giá lesson scheduled)
+    // Kiểm tra lesson có thể đánh giá không
     if (lesson.status !== "completed") {
       throw new Error("Can only evaluate completed lessons");
     }
@@ -346,17 +252,13 @@ teacherLessonEvaluationSchema.pre("save", async function (next) {
     const allStudentIds = [
       ...this.oralTests.map((o) => o.student),
       ...this.violations.map((v) => v.student),
+      ...this.absentStudents.map((a) => a.student),
     ];
 
     if (allStudentIds.length > 0) {
-      // Loại bỏ duplicate student IDs
       const uniqueStudentIds = [
         ...new Set(allStudentIds.map((id) => id.toString())),
       ];
-
-      console.log("🔍 Debug validation:");
-      console.log("- Class ID:", this.class.toString());
-      console.log("- Unique Student IDs:", uniqueStudentIds);
 
       const students = await User.find({
         _id: { $in: uniqueStudentIds },
@@ -364,22 +266,11 @@ teacherLessonEvaluationSchema.pre("save", async function (next) {
         role: "student",
       });
 
-      console.log("- Found students:", students.length);
-      console.log(
-        "- Students found:",
-        students.map((s) => ({
-          id: s._id.toString(),
-          name: s.name,
-          class_id: s.class_id.toString(),
-        }))
-      );
-
       if (students.length !== uniqueStudentIds.length) {
         const foundIds = students.map((s) => s._id.toString());
         const missingIds = uniqueStudentIds.filter(
           (id) => !foundIds.includes(id)
         );
-        console.log("- Missing student IDs:", missingIds);
         throw new Error(
           `Some students do not belong to this class. Missing: ${missingIds.join(
             ", "
@@ -404,7 +295,7 @@ teacherLessonEvaluationSchema.statics.getTeacherEvaluations = function (
   if (options.classId) query.class = options.classId;
   if (options.subjectId) query.subject = options.subjectId;
   if (options.status) query.status = options.status;
-  if (options.rating) query["evaluation.rating"] = options.rating;
+  if (options.rating) query.rating = options.rating;
   if (options.startDate) query.createdAt = { $gte: options.startDate };
   if (options.endDate) {
     query.createdAt = { ...query.createdAt, $lte: options.endDate };
@@ -416,6 +307,7 @@ teacherLessonEvaluationSchema.statics.getTeacherEvaluations = function (
     .populate("subject", "subjectName subjectCode")
     .populate("oralTests.student", "name studentId")
     .populate("violations.student", "name studentId")
+    .populate("absentStudents.student", "name studentId")
     .sort({ createdAt: -1 });
 };
 
@@ -437,11 +329,10 @@ teacherLessonEvaluationSchema.statics.getTeacherEvaluationStats =
         $group: {
           _id: null,
           totalEvaluations: { $sum: 1 },
-          avgOralScore: { $avg: "$summary.averageOralScore" },
           totalAbsences: { $sum: "$summary.totalAbsent" },
           totalViolations: { $sum: "$summary.totalViolations" },
           ratingDistribution: {
-            $push: "$evaluation.rating",
+            $push: "$rating",
           },
         },
       },
@@ -450,7 +341,6 @@ teacherLessonEvaluationSchema.statics.getTeacherEvaluationStats =
     if (stats.length === 0) {
       return {
         totalEvaluations: 0,
-        avgOralScore: 0,
         totalAbsences: 0,
         totalViolations: 0,
         ratingDistribution: {},
@@ -467,7 +357,6 @@ teacherLessonEvaluationSchema.statics.getTeacherEvaluationStats =
 
     return {
       totalEvaluations: result.totalEvaluations,
-      avgOralScore: Math.round(result.avgOralScore * 10) / 10,
       totalAbsences: result.totalAbsences,
       totalViolations: result.totalViolations,
       ratingDistribution: ratingCounts,
@@ -475,42 +364,6 @@ teacherLessonEvaluationSchema.statics.getTeacherEvaluationStats =
   };
 
 // Instance methods
-teacherLessonEvaluationSchema.methods.addOralTest = function (
-  studentId,
-  score,
-  question = "",
-  comment = ""
-) {
-  this.oralTests.push({
-    student: studentId,
-    score,
-    question,
-    comment,
-    testedAt: new Date(),
-  });
-
-  return this.save();
-};
-
-teacherLessonEvaluationSchema.methods.addViolation = function (
-  studentId,
-  description,
-  type = "other",
-  severity = "minor",
-  action = ""
-) {
-  this.violations.push({
-    student: studentId,
-    description,
-    type,
-    severity,
-    action,
-    recordedAt: new Date(),
-  });
-
-  return this.save();
-};
-
 teacherLessonEvaluationSchema.methods.complete = function () {
   this.status = "completed";
   this.completedAt = new Date();
