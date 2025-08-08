@@ -68,18 +68,44 @@ class ParentService {
         throw new Error('Học sinh chưa được phân lớp');
       }
 
-      // Sử dụng service schedule để lấy thời khóa biểu với custom dates
+      // Tính toán weekNumber từ startOfWeek và endOfWeek
+      const startDate = new Date(startOfWeek);
+      const endDate = new Date(endOfWeek);
+      
+      // Validate dates
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        throw new Error('Ngày bắt đầu hoặc kết thúc tuần không hợp lệ');
+      }
+      
+      if (endDate < startDate) {
+        throw new Error('Ngày kết thúc tuần phải sau ngày bắt đầu tuần');
+      }
+      
+      // Tính weekNumber dựa trên ngày bắt đầu tuần
+      // Sử dụng logic tương tự như trong schedule service
+      const academicYearStart = new Date(academicYear.split('-')[0] + '-09-01'); // Giả sử năm học bắt đầu từ tháng 9
+      const weekNumber = Math.ceil((startDate - academicYearStart) / (7 * 24 * 60 * 60 * 1000)) + 1;
+      
+      // Đảm bảo weekNumber không âm và hợp lý
+      const validatedWeekNumber = Math.max(1, Math.min(52, weekNumber));
+
+      // Sử dụng service schedule để lấy thời khóa biểu với cấu trúc mới (không bao gồm personal activities)
+      console.log(`📅 Parent requesting schedule for child ${child.name} (${child.studentId})`);
+      console.log(`📚 Class: ${child.class_id.className}, Academic Year: ${academicYear}, Week: ${validatedWeekNumber}`);
+      
       const scheduleResult = await scheduleService.getWeeklyScheduleByClassAndWeek(
         child.class_id.className,
-        child.class_id.academicYear,
-        1, // weekNumber không quan trọng khi có custom dates
-        token, // truyền token vào đây
-        {
-          startDate: startOfWeek,
-          endDate: endOfWeek
-        }
+        academicYear,
+        validatedWeekNumber,
+        token,
+        null // Không truyền thông tin học sinh để không lấy personal activities (bảo vệ quyền riêng tư)
       );
+      
+      console.log(`✅ Successfully retrieved schedule with ${scheduleResult.weeklySchedule?.lessons?.length || 0} lessons`);
 
+      // Loại bỏ studentPersonalActivities khỏi response để bảo vệ quyền riêng tư
+      const { studentPersonalActivities, ...scheduleDataWithoutPersonalActivities } = scheduleResult;
+      
       return {
         success: true,
         data: {
@@ -89,10 +115,11 @@ class ParentService {
             studentId: child.studentId,
             class: child.class_id
           },
-          schedule: scheduleResult,
+          schedule: scheduleDataWithoutPersonalActivities,
           dateRange: {
             startOfWeek: startOfWeek,
-            endOfWeek: endOfWeek
+            endOfWeek: endOfWeek,
+            weekNumber: validatedWeekNumber
           }
         }
       };

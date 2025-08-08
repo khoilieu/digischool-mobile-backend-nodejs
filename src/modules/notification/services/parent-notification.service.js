@@ -50,6 +50,10 @@ class ParentNotificationService {
             type: "user",
             ids: [parent._id],
           },
+          relatedObject: {
+            id: leaveRequestId,
+            requestType: "student_leave_request",
+          },
         });
       }
     } catch (error) {
@@ -86,6 +90,10 @@ class ParentNotificationService {
           receiverScope: {
             type: "user",
             ids: [parent._id],
+          },
+          relatedObject: {
+            id: leaveRequestId,
+            requestType: "teacher_leave_request",
           },
         });
       }
@@ -130,6 +138,10 @@ class ParentNotificationService {
           receiverScope: {
             type: "user",
             ids: [parent._id],
+          },
+          relatedObject: {
+            id: lessonId,
+            requestType: "substitute_request",
           },
         });
       }
@@ -180,6 +192,10 @@ class ParentNotificationService {
             type: "user",
             ids: [parent._id],
           },
+          relatedObject: {
+            id: originalLessonId,
+            requestType: "swap_request",
+          },
         });
       }
     } catch (error) {
@@ -228,6 +244,10 @@ class ParentNotificationService {
             type: "user",
             ids: [parent._id],
           },
+          relatedObject: {
+            id: originalLessonId,
+            requestType: "makeup_request",
+          },
         });
       }
     } catch (error) {
@@ -241,55 +261,146 @@ class ParentNotificationService {
       const TeacherLessonEvaluation = require("../../schedules/models/teacher-lesson-evaluation.model");
       const Lesson = require("../../schedules/models/lesson.model");
       
-      const evaluation = await TeacherLessonEvaluation.findById(evaluationId);
+      const evaluation = await TeacherLessonEvaluation.findById(evaluationId)
+        .populate("oralTests.student", "name studentId")
+        .populate("violations.student", "name studentId")
+        .populate("absentStudents.student", "name studentId");
+      
       const lesson = await Lesson.findById(lessonId)
         .populate("class", "className")
         .populate("subject", "subjectName");
 
       if (!evaluation || !lesson || !lesson.class) return;
 
-      // Lấy danh sách học sinh trong lớp
-      const students = await User.find({
-        role: "student",
-        class_id: lesson.class._id,
-      }).select("_id name studentId");
-
-      if (students.length === 0) return;
-
       // Lấy thông tin giáo viên
       const teacher = await User.findById(teacherId).select("name");
 
-      // Tạo nội dung thông báo dựa trên loại đánh giá
-      let content = `Giáo viên ${teacher.name} đã đánh giá tiết ${lesson.subject.subjectName} lớp ${lesson.class.className}.`;
-
+      // Tạo map để lưu thông tin của từng học sinh
+      const studentInfoMap = new Map();
+      
+      // Xử lý học sinh có điểm kiểm tra miệng
       if (evaluation.oralTests && evaluation.oralTests.length > 0) {
-        content += `\n- Điểm kiểm tra miệng: ${evaluation.oralTests.map(test => `${test.studentName}: ${test.score}`).join(", ")}`;
-      }
-
-      if (evaluation.violations && evaluation.violations.length > 0) {
-        content += `\n- Vi phạm: ${evaluation.violations.map(violation => `${violation.studentName}: ${violation.description}`).join(", ")}`;
-      }
-
-      if (evaluation.absentStudents && evaluation.absentStudents.length > 0) {
-        content += `\n- Học sinh vắng: ${evaluation.absentStudents.map(student => student.studentName).join(", ")}`;
-      }
-
-      // Lấy phụ huynh của tất cả học sinh trong lớp
-      const studentIds = students.map(s => s._id);
-      const parents = await this.getParentsOfStudents(studentIds);
-
-      for (const parent of parents) {
-        await notificationService.createNotification({
-          type: "school",
-          title: "Thông báo đánh giá tiết học",
-          content: content,
-          sender: teacherId,
-          receiverScope: {
-            type: "user",
-            ids: [parent._id],
-          },
+        evaluation.oralTests.forEach(test => {
+          if (test.student) {
+            const studentId = test.student._id.toString();
+            if (!studentInfoMap.has(studentId)) {
+              studentInfoMap.set(studentId, { student: test.student, oralTest: test, violations: [], absent: null });
+            } else {
+              studentInfoMap.get(studentId).oralTest = test;
+            }
+          }
         });
       }
+
+      // Xử lý học sinh vi phạm
+      if (evaluation.violations && evaluation.violations.length > 0) {
+        evaluation.violations.forEach(violation => {
+          if (violation.student) {
+            const studentId = violation.student._id.toString();
+            if (!studentInfoMap.has(studentId)) {
+              studentInfoMap.set(studentId, { student: violation.student, oralTest: null, violations: [violation], absent: null });
+            } else {
+              studentInfoMap.get(studentId).violations.push(violation);
+            }
+          }
+        });
+      }
+
+      // Xử lý học sinh vắng
+      if (evaluation.absentStudents && evaluation.absentStudents.length > 0) {
+        evaluation.absentStudents.forEach(absent => {
+          if (absent.student) {
+            const studentId = absent.student._id.toString();
+            if (!studentInfoMap.has(studentId)) {
+              studentInfoMap.set(studentId, { student: absent.student, oralTest: null, violations: [], absent: absent });
+            } else {
+              studentInfoMap.get(studentId).absent = absent;
+            }
+          }
+        });
+      }
+
+      // Nếu không có học sinh cụ thể, gửi cho tất cả học sinh trong lớp
+      if (studentInfoMap.size === 0) {
+        const allStudents = await User.find({
+          role: "student",
+          class_id: lesson.class._id,
+        }).select("_id name studentId");
+        
+        allStudents.forEach(student => {
+          studentInfoMap.set(student._id.toString(), { 
+            student: student, 
+            oralTest: null, 
+            violations: [], 
+            absent: null 
+          });
+        });
+      }
+
+      console.log(`🔍 Processing ${studentInfoMap.size} students for notifications`);
+
+      // Gửi notification cho từng học sinh có liên quan
+      for (const [studentId, studentInfo] of studentInfoMap) {
+        const student = studentInfo.student;
+        
+        // Tạo nội dung thông báo cho học sinh cụ thể
+        let content = `Giáo viên ${teacher.name} đã đánh giá tiết ${lesson.subject.subjectName} lớp ${lesson.class.className}.`;
+        let hasSpecificInfo = false;
+
+        // Thêm thông tin điểm kiểm tra miệng
+        if (studentInfo.oralTest) {
+          content += `\n- Điểm kiểm tra miệng của ${student.name}: ${studentInfo.oralTest.score}`;
+          hasSpecificInfo = true;
+        }
+
+        // Thêm thông tin vi phạm
+        if (studentInfo.violations && studentInfo.violations.length > 0) {
+          studentInfo.violations.forEach(violation => {
+            content += `\n- Vi phạm của ${student.name}: ${violation.description}`;
+          });
+          hasSpecificInfo = true;
+        }
+
+        // Thêm thông tin vắng mặt
+        if (studentInfo.absent) {
+          content += `\n- ${student.name} vắng mặt trong tiết học này`;
+          hasSpecificInfo = true;
+        }
+
+        // Nếu không có thông tin cụ thể, gửi thông báo chung
+        if (!hasSpecificInfo) {
+          content += `\n- Con bạn có tham gia tiết học này.`;
+        }
+
+        console.log(`📝 Creating notification for ${student.name}:`);
+        console.log(`   - Oral test: ${studentInfo.oralTest ? studentInfo.oralTest.score : 'None'}`);
+        console.log(`   - Violations: ${studentInfo.violations.length}`);
+        console.log(`   - Absent: ${studentInfo.absent ? 'Yes' : 'No'}`);
+
+        // Lấy phụ huynh của học sinh này
+        const parents = await this.getParentsOfStudent(student._id);
+        console.log(`   - Parents found: ${parents.length}`);
+        
+        // Gửi notification cho tất cả phụ huynh của học sinh này
+        for (const parent of parents) {
+          await notificationService.createNotification({
+            type: "school",
+            title: "Thông báo đánh giá tiết học",
+            content: content,
+            sender: teacherId,
+            receiverScope: {
+              type: "user",
+              ids: [parent._id],
+            },
+            relatedObject: {
+              id: evaluationId,
+              requestType: "lesson_evaluation",
+            },
+          });
+        }
+      }
+
+      console.log(`✅ Parent notifications sent for lesson evaluation: ${evaluationId}`);
     } catch (error) {
       console.error("❌ Error notifying parents about lesson evaluation:", error.message);
     }

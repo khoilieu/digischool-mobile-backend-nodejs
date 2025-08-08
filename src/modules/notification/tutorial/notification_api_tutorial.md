@@ -14,14 +14,22 @@ GET /api/notifications/get-by-user
 
 **Query Params (tùy chọn):**
 
-- `type`: Lọc theo loại thông báo (`user`, `activity`, `system`)
+- `type`: Lọc theo loại thông báo (`user`, `activity`, `system`, `school`, `teacher`)
 - `page`: Số trang (mặc định 1)
 - `limit`: Số lượng mỗi trang (mặc định 20)
+
+**Các loại notification type:**
+
+- `user`: Thông báo cá nhân cho user
+- `activity`: Thông báo về hoạt động (yêu cầu, đơn từ, etc.)
+- `system`: Thông báo hệ thống
+- `school`: Thông báo cho phụ huynh về hoạt động của con cái
+- `teacher`: Thông báo cho giáo viên
 
 **Ví dụ:**
 
 ```
-GET /api/notifications/get-by-user?type=activity&page=1&limit=10
+GET /api/notifications/get-by-user?type=school&page=1&limit=10
 ```
 
 **Response mẫu:**
@@ -33,9 +41,9 @@ GET /api/notifications/get-by-user?type=activity&page=1&limit=10
   "data": [
     {
       "_id": "665f1a2b3c4d5e6f7a8b9c0d",
-      "type": "activity",
-      "title": "Yêu cầu dạy thay mới",
-      "content": "Bạn đã được đề xuất dạy thay cho tiết Toán lớp 10A1 vào ngày 10/06/2024 (Tiết 2)\nLý do: Giáo viên bận công tác",
+      "type": "school",
+      "title": "Thông báo đánh giá tiết học",
+      "content": "Giáo viên Nguyễn Thị Kim Huệ đã đánh giá tiết Chào cờ lớp 12A2.\n- Điểm kiểm tra miệng của Trần Thị B: 8.5\n- Vi phạm của Trần Thị B: Nói chuyện riêng",
       "sender": "665f1a2b3c4d5e6f7a8b9c01",
       "receivers": ["665f1a2b3c4d5e6f7a8b9c02", "665f1a2b3c4d5e6f7a8b9c03"],
       "receiverScope": {
@@ -44,7 +52,7 @@ GET /api/notifications/get-by-user?type=activity&page=1&limit=10
       },
       "relatedObject": {
         "id": "665f1a2b3c4d5e6f7a8b9c99",
-        "requestType": "substitute_request"
+        "requestType": "lesson_evaluation"
       },
       "isReadBy": ["665f1a2b3c4d5e6f7a8b9c02"],
       "createdAt": "2024-06-10T08:00:00.000Z",
@@ -73,13 +81,13 @@ POST /api/notifications/create
 
 ```json
 {
-  "type": "activity",
-  "title": "Thông báo họp phụ huynh",
-  "content": "Kính mời quý phụ huynh tham dự buổi họp vào lúc 8h sáng ngày 15/06/2024 tại phòng hội trường.",
-  "receiverScope": { "type": "class", "ids": ["665f1a2b3c4d5e6f7a8b9c10"] },
+  "type": "school",
+  "title": "Thông báo đánh giá tiết học",
+  "content": "Giáo viên Nguyễn Thị Kim Huệ đã đánh giá tiết Chào cờ lớp 12A2.\n- Điểm kiểm tra miệng của Trần Thị B: 8.5",
+  "receiverScope": { "type": "user", "ids": ["665f1a2b3c4d5e6f7a8b9c10"] },
   "relatedObject": {
     "id": "665f1a2b3c4d5e6f7a8b9c20",
-    "requestType": "parent_meeting"
+    "requestType": "lesson_evaluation"
   }
 }
 ```

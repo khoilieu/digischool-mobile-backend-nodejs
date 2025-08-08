@@ -4,8 +4,8 @@ class NotificationValidation {
   validateCreateNotification() {
     return [
       body("type")
-        .isIn(["user", "activity", "system"])
-        .withMessage("type phải là user, activity hoặc system"),
+        .isIn(["user", "activity", "system", "school", "teacher"])
+        .withMessage("type phải là user, activity, system, school hoặc teacher"),
       body("title")
         .isString()
         .isLength({ min: 1, max: 200 })
@@ -73,7 +73,7 @@ class NotificationValidation {
     return [
       query("type")
         .optional()
-        .isIn(["user", "activity", "system"])
+        .isIn(["user", "activity", "system", "school", "teacher"])
         .withMessage("type không hợp lệ"),
       query("page")
         .optional()

@@ -119,6 +119,18 @@ class TeacherEvaluationService {
       { path: "absentStudents.student", select: "name studentId" },
     ]);
 
+    // Gửi notification cho phụ huynh khi giáo viên đánh giá tiết học
+    try {
+      await parentNotificationService.notifyLessonEvaluation(
+        evaluation._id,
+        lessonId,
+        teacherId
+      );
+      console.log(`✅ Parent notification sent for lesson evaluation: ${evaluation._id}`);
+    } catch (notificationError) {
+      console.error("❌ Error sending parent notification for lesson evaluation:", notificationError.message);
+    }
+
     return {
       status: 201,
       body: {
