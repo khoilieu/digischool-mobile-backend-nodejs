@@ -71,6 +71,9 @@ class NotificationService {
       // Gửi notification realtime
       await this.sendRealtimeNotification(notification);
       
+      // Gửi push notification
+      await this.sendPushNotification(notification);
+      
       return notification;
     } catch (error) {
       console.error("\u274C Error creating notification:", error.message);
@@ -119,6 +122,9 @@ class NotificationService {
       
       // Gửi notification realtime
       await this.sendRealtimeNotification(notification);
+
+      // Gửi push notification
+      await this.sendPushNotification(notification);
       
       return notification;
     } catch (error) {
@@ -317,6 +323,25 @@ class NotificationService {
       }
     } catch (error) {
       console.error("❌ Realtime notification failed:", error);
+    }
+  }
+
+  // Gửi push notification
+  async sendPushNotification(notification) {
+    try {
+      const pushService = require("../../push/services/push.service");
+      if (notification.receivers && notification.receivers.length > 0) {
+        const result = await pushService.sendPushNotification(notification.receivers, notification);
+        if (result.success) {
+          console.log("✅ Push notification sent to", notification.receivers.length, "receivers");
+        } else {
+          console.log("⚠️ Push notification failed:", result.message);
+        }
+      } else {
+        console.log("⚠️ No receivers for push notification");
+      }
+    } catch (error) {
+      console.error("❌ Push notification failed:", error.message);
     }
   }
 }

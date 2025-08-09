@@ -19,6 +19,7 @@ const notificationRoutes = require("../modules/notification/routes/notification.
 const personalActivityRoutes = require("../modules/schedules/routes/personal-activity.routes");
 const parentRoutes = require("../modules/parents/routes/parent.routes");
 const statisticsRoutes = require("../modules/statistics/routes/statistics.routes");
+const pushRoutes = require("../modules/push/routes/push.routes");
 
 // Health check route
 router.get("/health", (req, res) => {
@@ -58,5 +59,7 @@ router.use("/personal-activity", personalActivityRoutes);
 router.use("/parents", parentRoutes);
 // /api/statistics
 router.use("/statistics", statisticsRoutes);
+// /api/push
+router.use("/push", pushRoutes);
 
 module.exports = router;
