@@ -1577,6 +1577,120 @@ class ScheduleService {
       totalTeacherMappings: teacherMapping.size,
     };
   }
+
+  /**
+   * Lấy danh sách năm học và tuần có sẵn trong database
+   * @returns {Promise<Object>} Object chứa danh sách năm học và tuần
+   */
+  async getAvailableAcademicYearsAndWeeks() {
+    try {
+      // Lấy tất cả năm học
+      const academicYears = await AcademicYear.find({})
+        .select('name startDate endDate totalWeeks isActive')
+        .sort({ name: -1 }); // Sắp xếp theo thứ tự mới nhất trước
+
+      // Lấy năm học hiện tại
+      const currentAcademicYear = await AcademicYear.getCurrentAcademicYear();
+
+      // Lấy danh sách tuần có sẵn từ WeeklySchedule
+      const weeklySchedules = await WeeklySchedule.aggregate([
+        {
+          $group: {
+            _id: {
+              academicYear: '$academicYear',
+              weekNumber: '$weekNumber'
+            },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $lookup: {
+            from: 'academicyears',
+            localField: '_id.academicYear',
+            foreignField: '_id',
+            as: 'academicYearInfo'
+          }
+        },
+        {
+          $unwind: '$academicYearInfo'
+        },
+        {
+          $group: {
+            _id: '$academicYearInfo.name',
+            academicYearId: { $first: '$_id.academicYear' },
+            weeks: {
+              $push: {
+                weekNumber: '$_id.weekNumber',
+                count: '$count'
+              }
+            },
+            totalWeeks: { $first: '$academicYearInfo.totalWeeks' },
+            isActive: { $first: '$academicYearInfo.isActive' },
+            startDate: { $first: '$academicYearInfo.startDate' },
+            endDate: { $first: '$academicYearInfo.endDate' }
+          }
+        },
+        {
+          $sort: { _id: -1 } // Sắp xếp theo tên năm học giảm dần
+        }
+      ]);
+
+      // Sắp xếp tuần trong mỗi năm học
+      weeklySchedules.forEach(year => {
+        year.weeks.sort((a, b) => a.weekNumber - b.weekNumber);
+      });
+
+      // Tạo response object
+      const result = {
+        currentAcademicYear: currentAcademicYear ? {
+          name: currentAcademicYear.name,
+          startDate: currentAcademicYear.startDate,
+          endDate: currentAcademicYear.endDate,
+          totalWeeks: currentAcademicYear.totalWeeks,
+          isActive: currentAcademicYear.isActive
+        } : null,
+        availableAcademicYears: weeklySchedules.map(year => {
+          const totalAvailableWeeks = year.weeks.length;
+          const totalClasses = year.weeks.reduce((sum, week) => sum + week.count, 0);
+          
+          return {
+            name: year._id,
+            academicYearId: year.academicYearId,
+            totalWeeks: year.totalWeeks,
+            isActive: year.isActive,
+            startDate: year.startDate,
+            endDate: year.endDate,
+            totalAvailableWeeks: totalAvailableWeeks,
+            totalClasses: totalClasses,
+            availableWeeks: year.weeks.map(week => ({
+              weekNumber: week.weekNumber,
+              classCount: week.count
+            })),
+            weekNumbers: year.weeks.map(week => week.weekNumber).sort((a, b) => a - b)
+          };
+        }),
+        allAcademicYears: academicYears.map(year => ({
+          name: year.name,
+          startDate: year.startDate,
+          endDate: year.endDate,
+          totalWeeks: year.totalWeeks,
+          isActive: year.isActive
+        })),
+        summary: {
+          totalAcademicYears: academicYears.length,
+          totalAvailableWeeks: weeklySchedules.reduce((sum, year) => sum + year.weeks.length, 0),
+          totalClasses: weeklySchedules.reduce((sum, year) => 
+            sum + year.weeks.reduce((weekSum, week) => weekSum + week.count, 0), 0
+          )
+        }
+      };
+
+      return result;
+    } catch (error) {
+      console.error('❌ Error in getAvailableAcademicYearsAndWeeks:', error.message);
+      throw new Error(`Failed to get available academic years and weeks: ${error.message}`);
+    }
+  }
 }
 
 module.exports = new ScheduleService();

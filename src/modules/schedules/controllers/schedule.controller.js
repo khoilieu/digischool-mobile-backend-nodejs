@@ -368,6 +368,27 @@ class ScheduleController {
       });
     }
   };
+
+  /**
+   * Lấy danh sách năm học và tuần có sẵn trong database
+   */
+  getAvailableAcademicYearsAndWeeks = async (req, res) => {
+    try {
+      const result = await scheduleService.getAvailableAcademicYearsAndWeeks();
+
+      res.status(200).json({
+        success: true,
+        message: "Available academic years and weeks retrieved successfully",
+        data: result,
+      });
+    } catch (error) {
+      console.error("❌ Error in getAvailableAcademicYearsAndWeeks:", error.message);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
 }
 
 module.exports = new ScheduleController();

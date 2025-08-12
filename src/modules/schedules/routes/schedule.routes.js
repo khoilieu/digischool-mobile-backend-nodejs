@@ -8,6 +8,13 @@ const multer = require("multer");
 const upload = multer({ dest: "/tmp/" }); // Thư mục tạm lưu file
 
 router.use("/lesson-request", lessonRequestRoutes);
+
+// Lấy danh sách năm học và tuần có sẵn trong database
+router.get(
+  "/available-academic-years-weeks",
+  scheduleController.getAvailableAcademicYearsAndWeeks
+);
+
 router.use(authMiddleware.protect);
 
 // Tạo thời khóa biểu tuần
