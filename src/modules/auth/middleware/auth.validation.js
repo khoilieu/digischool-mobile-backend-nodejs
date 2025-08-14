@@ -6,22 +6,23 @@ const validateAuth = {
     body('email')
       .trim()
       .notEmpty()
-      .withMessage('Email is required')
+      .withMessage('Email không được để trống')
       .isEmail()
-      .withMessage('Please enter a valid email'),
+      .withMessage('Email không đúng định dạng'),
     
     body('password')
       .trim()
       .notEmpty()
-      .withMessage('Password is required')
+      .withMessage('Mật khẩu không được để trống')
       .isLength({ min: 6 })
-      .withMessage('Password must be at least 6 characters long'),
+      .withMessage('Mật khẩu phải có ít nhất 6 ký tự'),
 
     (req, res, next) => {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,
+          message: errors.array()[0].msg,
           errors: errors.array()
         });
       }
@@ -33,20 +34,21 @@ const validateAuth = {
     body('email')
       .trim()
       .notEmpty()
-      .withMessage('Email is required')
+      .withMessage('Email không được để trống')
       .isEmail()
-      .withMessage('Please enter a valid email'),
+      .withMessage('Email không đúng định dạng'),
     
     body('password')
       .trim()
       .notEmpty()
-      .withMessage('Password is required'),
+      .withMessage('Mật khẩu không được để trống'),
 
     (req, res, next) => {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,
+          message: errors.array()[0].msg,
           errors: errors.array()
         });
       }
@@ -100,15 +102,16 @@ const validateAuth = {
     body('email')
       .trim()
       .notEmpty()
-      .withMessage('Email is required')
+      .withMessage('Email không được để trống')
       .isEmail()
-      .withMessage('Please enter a valid email'),
+      .withMessage('Email không đúng định dạng'),
 
     (req, res, next) => {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,
+          message: errors.array()[0].msg,
           errors: errors.array()
         });
       }

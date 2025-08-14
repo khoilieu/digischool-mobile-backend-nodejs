@@ -52,6 +52,14 @@ class AuthController {
           }
         });
       } catch (loginError) {
+        // Kiểm tra nếu lỗi là do tài khoản không active
+        if (loginError.message === 'Tài khoản đã ngừng hoạt động') {
+          return res.status(401).json({
+            success: false,
+            message: loginError.message
+          });
+        }
+        
         // Nếu login thất bại, thử OTP login (cho trường hợp tạo tài khoản mới bằng OTP)
         try {
           const otpResult = await userService.loginWithOTP(email, password);
@@ -73,10 +81,18 @@ class AuthController {
               data: resetTokenResult
             });
           } catch (resetTokenError) {
+            // Kiểm tra nếu lỗi là do tài khoản không active
+            if (resetTokenError.message === 'Tài khoản đã ngừng hoạt động') {
+              return res.status(401).json({
+                success: false,
+                message: resetTokenError.message
+              });
+            }
+            
             // Nếu tất cả đều thất bại, trả về lỗi
             return res.status(401).json({
               success: false,
-              message: 'Invalid email or password'
+              message: 'Email hoặc mật khẩu không đúng'
             });
           }
         }
@@ -213,6 +229,7 @@ class AuthController {
   async forgotPassword(req, res, next) {
     try {
       const { email } = req.body;
+      
       const result = await authService.forgotPassword(email);
       
       res.status(200).json({

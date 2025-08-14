@@ -110,9 +110,6 @@ curl -X PUT \
   -H 'Authorization: Bearer <your-token>' \
   -H 'Content-Type: application/json' \
   -d '{
-    "name": "Nguyễn Văn A",
-    "dateOfBirth": "2005-01-15",
-    "gender": "male",
     "phone": "0123456789",
     "address": "123 Đường ABC, Quận 1, TP.HCM"
   }'
@@ -146,9 +143,6 @@ const updatePersonalInfo = async (data) => {
 
 // Sử dụng
 updatePersonalInfo({
-  name: "Nguyễn Văn A",
-  dateOfBirth: "2005-01-15",
-  gender: "male",
   phone: "0123456789",
   address: "123 Đường ABC, Quận 1, TP.HCM"
 });
@@ -187,14 +181,11 @@ const updatePersonalInfo = async (data) => {
 
 1. **Bảo mật**: API này chỉ cho phép user cập nhật thông tin cá nhân của chính mình (dựa trên token authentication).
 
-2. **Validation**: Tất cả các trường đều được validate nghiêm ngặt:
-   - `name`: 2-100 ký tự
-   - `dateOfBirth`: Định dạng YYYY-MM-DD, tuổi từ 5-80
-   - `gender`: Chỉ chấp nhận 'male', 'female', 'other'
+2. **Validation**: Chỉ các trường được phép update mới được validate:
    - `phone`: 10-15 ký tự, chỉ chứa số, dấu cách, dấu gạch ngang và dấu ngoặc
    - `address`: Tối đa 500 ký tự
 
-3. **Trường được phép update**: Chỉ các trường `name`, `dateOfBirth`, `gender`, `phone`, `address` được phép cập nhật. Các trường khác sẽ bị bỏ qua.
+3. **Trường được phép update**: Chỉ các trường `phone` và `address` được phép cập nhật. Các trường khác sẽ bị bỏ qua hoặc trả về lỗi.
 
 4. **Response format**: Response trả về đầy đủ thông tin user sau khi cập nhật, bao gồm cả các thông tin liên quan (subject, class, school).
 

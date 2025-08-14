@@ -948,8 +948,8 @@ class UserService {
         throw new Error('User not found');
       }
 
-      // Chỉ cho phép update các trường thông tin cá nhân
-      const allowedFields = ['name', 'dateOfBirth', 'gender', 'phone', 'address'];
+      // Chỉ cho phép update các trường phone và address
+      const allowedFields = ['phone', 'address'];
       const filteredData = {};
       
       for (const field of allowedFields) {
@@ -960,7 +960,7 @@ class UserService {
 
       // Nếu không có dữ liệu để update
       if (Object.keys(filteredData).length === 0) {
-        throw new Error('No valid fields to update');
+        throw new Error('Chỉ có thể cập nhật số điện thoại và địa chỉ');
       }
 
       const updatedUser = await User.findByIdAndUpdate(

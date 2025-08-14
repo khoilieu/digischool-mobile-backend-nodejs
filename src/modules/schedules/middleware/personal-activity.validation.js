@@ -24,14 +24,14 @@ class PersonalActivityValidation {
         .trim()
         .notEmpty()
         .withMessage("Title is required")
-        .isLength({ min: 1, max: 200 })
-        .withMessage("Title must be between 1 and 200 characters"),
+        .isLength({ min: 1, max: 50 })
+        .withMessage("Title must be between 1 and 50 characters"),
       body("content")
         .trim()
         .notEmpty()
         .withMessage("Content is required")
-        .isLength({ min: 1, max: 5000 })
-        .withMessage("Content must be between 1 and 5000 characters"),
+        .isLength({ min: 1, max: 200 })
+        .withMessage("Content must be between 1 and 200 characters"),
       body("date").notEmpty().withMessage("Date is required"),
       body("period").notEmpty().withMessage("Period is required"),
       body("remindMinutes")

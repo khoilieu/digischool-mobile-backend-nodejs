@@ -47,13 +47,18 @@ class AuthService {
       const user = await User.findOne({ email }).select('+password');
       
       if (!user) {
-        throw new Error('Invalid email or password');
+        throw new Error('Email không tồn tại');
+      }
+
+      // Kiểm tra trạng thái active của tài khoản
+      if (user.active === false) {
+        throw new Error('Tài khoản đã ngừng hoạt động');
       }
 
       // Kiểm tra mật khẩu
       const isMatch = await user.comparePassword(password);
       if (!isMatch) {
-        throw new Error('Invalid email or password');
+        throw new Error('Email hoặc mật khẩu không đúng');
       }
 
       // Invalidate previous session if exists
@@ -345,21 +350,11 @@ class AuthService {
     try {
       console.log(`🔐 Forgot password request for email: ${email}`);
       
-      // Theo yêu cầu: không cần kiểm tra email có tồn tại trong database hay không
-      // Cứ gửi mã reset password cho email đó
-      
-      // Tạo user tạm thời nếu không tồn tại (để lưu reset token)
-      let user = await User.findOne({ email });
+      // Kiểm tra email có tồn tại trong database hay không
+      const user = await User.findOne({ email });
       
       if (!user) {
-        // Tạo user tạm thời với thông tin tối thiểu
-        user = new User({
-          email: email,
-          passwordHash: 'temp_hash', // Sẽ được thay thế khi set password
-          name: email.split('@')[0],
-          role: ['manager'],
-          isNewUser: true
-        });
+        throw new Error('Email không tồn tại, liên hệ nhà trường để được hỗ trợ');
       }
       
       // Tạo reset token (6 số ngẫu nhiên)
@@ -381,7 +376,7 @@ class AuthService {
       
     } catch (error) {
       console.error('❌ Error in forgotPassword:', error.message);
-      throw new Error(`Failed to process forgot password request: ${error.message}`);
+      throw new Error(`${error.message}`);
     }
   }
 
@@ -393,12 +388,17 @@ class AuthService {
       const user = await User.findOne({ email });
       
       if (!user) {
-        throw new Error('Invalid email or reset token');
+        throw new Error('Email không tồn tại');
+      }
+      
+      // Kiểm tra trạng thái active của tài khoản
+      if (user.active === false) {
+        throw new Error('Tài khoản đã ngừng hoạt động');
       }
       
       // Verify reset token
       if (!user.verifyResetPasswordToken(resetToken)) {
-        throw new Error('Invalid or expired reset token');
+        throw new Error('Mã reset không hợp lệ');
       }
       
       // Invalidate previous session if exists

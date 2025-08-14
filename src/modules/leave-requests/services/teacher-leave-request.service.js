@@ -350,6 +350,29 @@ class TeacherLeaveRequestService {
         request.reason
       );
 
+      // Gửi notification cho học sinh trong lớp
+      const students = await User.find(
+        { 
+          role: "student", 
+          class_id: request.classId._id 
+        },
+        "_id name"
+      );
+      
+      if (students.length > 0) {
+        await notificationService.createNotification({
+          type: "activity",
+          title: `Thông báo: Giáo viên nghỉ dạy - ${request.subjectId.subjectName}`,
+          content: `Tiết ${request.subjectId.subjectName} lớp ${request.classId.className} ngày ${new Date(request.lessonId.scheduledDate).toLocaleDateString("vi-VN")} sẽ được nghỉ do giáo viên vắng mặt.`,
+          sender: managerId,
+          receiverScope: { type: "user", ids: students.map(s => s._id) },
+          relatedObject: {
+            id: request._id,
+            requestType: "teacher_leave_request",
+          },
+        });
+      }
+
       return {
         success: true,
         message: "Teacher leave request approved successfully",
