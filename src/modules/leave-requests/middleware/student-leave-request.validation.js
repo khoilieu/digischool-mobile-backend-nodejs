@@ -19,8 +19,8 @@ const createLeaveRequests = [
   body("reason")
     .notEmpty()
     .withMessage("Reason is required")
-    .isLength({ min: 1, max: 1000 })
-    .withMessage("Reason must be between 10-500 characters")
+    .isLength({ min: 1, max: 200 })
+    .withMessage("Reason must be between 1-200 characters")
     .trim(),
 ];
 

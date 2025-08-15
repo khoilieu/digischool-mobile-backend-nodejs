@@ -13,8 +13,8 @@ const validateCreateTeacherLeaveRequest = [
   body("reason")
     .notEmpty()
     .withMessage("Reason is required")
-    .isLength({ min: 1, max: 300 })
-    .withMessage("Reason must be between 1-300 characters")
+    .isLength({ min: 1, max: 200 })
+    .withMessage("Reason must be between 1-200 characters")
     .trim(),
 ];
 

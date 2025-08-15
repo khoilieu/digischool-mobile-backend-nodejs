@@ -138,21 +138,14 @@ class NotificationService {
       const query = { receivers: userId };
       if (type) query.type = type;
       const notifications = await Notification.find(query)
+        .populate('sender', 'name gender role')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean();
 
+      // Không cần populate sender nữa vì đã có thông tin đầy đủ
       for (let notification of notifications) {
-        const sender = await User.findById(notification.sender, "name gender role");
-        if (sender) {
-          notification.sender = {
-            id: sender._id,
-            name: sender.name,
-            gender: sender.gender,
-            role: sender.role,
-          };
-        }
         if (
           notification.relatedObject &&
           notification.relatedObject.id &&
@@ -212,7 +205,8 @@ class NotificationService {
         notificationId,
         { $addToSet: { isReadBy: userId } },
         { new: true }
-      );
+      ).populate('sender', 'name gender role');
+      
       if (notification) {
         console.log("\u2705 Notification marked as read");
       } else {
@@ -305,16 +299,21 @@ class NotificationService {
     try {
       const io = require("../../../server").io;
       if (io && notification.receivers && notification.receivers.length > 0) {
+        // Populate sender trước khi gửi realtime
+        const populatedNotification = await Notification.findById(notification._id)
+          .populate('sender', 'name gender role')
+          .lean();
+        
         notification.receivers.forEach(receiverId => {
           io.to(String(receiverId)).emit("new_notification", {
-            _id: notification._id,
-            type: notification.type,
-            title: notification.title,
-            content: notification.content,
-            sender: notification.sender,
-            createdAt: notification.createdAt,
-            receivers: notification.receivers,
-            relatedObject: notification.relatedObject
+            _id: populatedNotification._id,
+            type: populatedNotification.type,
+            title: populatedNotification.title,
+            content: populatedNotification.content,
+            sender: populatedNotification.sender,
+            createdAt: populatedNotification.createdAt,
+            receivers: populatedNotification.receivers,
+            relatedObject: populatedNotification.relatedObject
           });
         });
         console.log("✅ Realtime notification sent to", notification.receivers.length, "receivers");
@@ -331,7 +330,12 @@ class NotificationService {
     try {
       const pushService = require("../../push/services/push.service");
       if (notification.receivers && notification.receivers.length > 0) {
-        const result = await pushService.sendPushNotification(notification.receivers, notification);
+        // Populate sender trước khi gửi push notification
+        const populatedNotification = await Notification.findById(notification._id)
+          .populate('sender', 'name gender role')
+          .lean();
+        
+        const result = await pushService.sendPushNotification(notification.receivers, populatedNotification);
         if (result.success) {
           console.log("✅ Push notification sent to", notification.receivers.length, "receivers");
         } else {

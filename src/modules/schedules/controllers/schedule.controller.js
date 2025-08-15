@@ -370,6 +370,30 @@ class ScheduleController {
   };
 
   /**
+   * Lấy thông tin tuần hiện tại dựa trên ngày hôm nay
+   */
+  getCurrentWeek = async (req, res) => {
+    try {
+      const { date } = req.query;
+      const targetDate = date ? new Date(date) : new Date();
+      
+      const result = await scheduleService.getCurrentWeek(targetDate);
+
+      res.status(200).json({
+        success: true,
+        message: "Current week information retrieved successfully",
+        data: result,
+      });
+    } catch (error) {
+      console.error("❌ Error in getCurrentWeek:", error.message);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
+
+  /**
    * Lấy danh sách năm học và tuần có sẵn trong database
    */
   getAvailableAcademicYearsAndWeeks = async (req, res) => {

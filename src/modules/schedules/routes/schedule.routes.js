@@ -9,6 +9,12 @@ const upload = multer({ dest: "/tmp/" }); // Thư mục tạm lưu file
 
 router.use("/lesson-request", lessonRequestRoutes);
 
+// Lấy thông tin tuần hiện tại (API riêng biệt để tối ưu performance)
+router.get(
+  "/current-week",
+  scheduleController.getCurrentWeek
+);
+
 // Lấy danh sách năm học và tuần có sẵn trong database
 router.get(
   "/available-academic-years-weeks",
