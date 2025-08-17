@@ -68,15 +68,10 @@ const userSchema = new mongoose.Schema({
     default: undefined
   },
   academicYear: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AcademicYear',
     required: function() {
       return this.role.includes('student') && !this.isNewUser;
-    },
-    validate: {
-      validator: function(v) {
-        return /^\d{4}-\d{4}$/.test(v);
-      },
-      message: 'Academic year must be in format YYYY-YYYY (e.g., 2024-2025)'
     },
     default: undefined
   },
@@ -184,6 +179,14 @@ userSchema.virtual('classId').get(function() {
 
 userSchema.virtual('classId').set(function(value) {
   this.class_id = value;
+});
+
+// Virtual field for academicYearName to maintain backward compatibility
+userSchema.virtual('academicYearName').get(function() {
+  if (this.academicYear && typeof this.academicYear === 'object') {
+    return this.academicYear.name;
+  }
+  return this.academicYear;
 });
 
 // Ensure virtual fields are included in JSON output

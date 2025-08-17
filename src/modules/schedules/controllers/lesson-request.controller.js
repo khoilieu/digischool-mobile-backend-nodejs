@@ -41,10 +41,11 @@ class LessonRequestController {
   async createMakeupRequest(req, res) {
     try {
       const errors = validationResult(req);
+      console.log(errors);
       if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,
-          message: "Validation errors",
+          message: "Lỗi validation",
           errors: errors.array(),
         });
       }

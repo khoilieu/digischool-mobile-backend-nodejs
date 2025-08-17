@@ -839,7 +839,7 @@ class UserService {
           class: {
             name: user.class_id?.className || user.className || 'Chưa phân lớp',
             gradeLevel: user.class_id?.gradeLevel || user.gradeLevel,
-            academicYear: user.class_id?.academicYear || user.academicYear
+            academicYear: user.class_id?.academicYearName || user.academicYearName
           },
           subjects: [],
           roleInfo: { type: 'student' }
@@ -865,7 +865,7 @@ class UserService {
             id: homeroomClass._id,
             name: homeroomClass.className,
             gradeLevel: homeroomClass.gradeLevel,
-            academicYear: homeroomClass.academicYear
+            academicYear: homeroomClass.academicYearName
           } : null,
           roleInfo: { 
             type: 'teacher',
@@ -2013,7 +2013,7 @@ class UserService {
   }
 
   // Tạo giáo viên tự động khi import TKB
-  async createTeacherFromSchedule(teacherName, subjectName, schoolId) {
+  async createTeacherFromSchedule(teacherName, subjectName, schoolId, teacherEmail = null) {
     try {
       // Kiểm tra giáo viên đã tồn tại
       const existingTeacher = await User.findOne({ 
@@ -2059,7 +2059,17 @@ class UserService {
       }
 
       // Tạo email và password theo format yêu cầu
-      const email = this.generateTeacherEmail(teacherName);
+      let email;
+      if (teacherEmail && teacherEmail.trim()) {
+        // Sử dụng email từ tham số (từ Excel)
+        email = teacherEmail.trim();
+        console.log(`📧 Sử dụng email từ Excel: ${email}`);
+      } else {
+        // Tự động tạo email nếu không có
+        email = this.generateTeacherEmail(teacherName);
+        console.log(`📧 Tự động tạo email: ${email}`);
+      }
+      
       const password = this.generateTeacherPassword();
       const passwordHash = await bcrypt.hash(password, 12);
 

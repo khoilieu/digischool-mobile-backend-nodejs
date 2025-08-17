@@ -14,9 +14,17 @@ const validateCreateClass = [
   body('academicYear')
     .notEmpty()
     .withMessage('Academic year is required')
-    .matches(/^\d{4}-\d{4}$/)
-    .withMessage('Academic year must be in format YYYY-YYYY (e.g., 2023-2024)')
     .custom((value) => {
+      // Chấp nhận cả ObjectId và string format
+      if (require('mongoose').Types.ObjectId.isValid(value)) {
+        return true; // ObjectId hợp lệ
+      }
+      
+      // Kiểm tra string format
+      if (!/^\d{4}-\d{4}$/.test(value)) {
+        throw new Error('Academic year must be in format YYYY-YYYY (e.g., 2023-2024) or valid ObjectId');
+      }
+      
       const [startYear, endYear] = value.split('-').map(Number);
       if (endYear !== startYear + 1) {
         throw new Error('Academic year must be consecutive years (e.g., 2023-2024)');
@@ -51,10 +59,18 @@ const validateUpdateClass = [
 
   body('academicYear')
     .optional()
-    .matches(/^\d{4}-\d{4}$/)
-    .withMessage('Academic year must be in format YYYY-YYYY (e.g., 2023-2024)')
     .custom((value) => {
       if (value) {
+        // Chấp nhận cả ObjectId và string format
+        if (require('mongoose').Types.ObjectId.isValid(value)) {
+          return true; // ObjectId hợp lệ
+        }
+        
+        // Kiểm tra string format
+        if (!/^\d{4}-\d{4}$/.test(value)) {
+          throw new Error('Academic year must be in format YYYY-YYYY (e.g., 2023-2024) or valid ObjectId');
+        }
+        
         const [startYear, endYear] = value.split('-').map(Number);
         if (endYear !== startYear + 1) {
           throw new Error('Academic year must be consecutive years (e.g., 2023-2024)');
@@ -92,8 +108,20 @@ const validateGetClasses = [
 
   query('academicYear')
     .optional()
-    .matches(/^\d{4}-\d{4}$/)
-    .withMessage('Academic year must be in format YYYY-YYYY (e.g., 2023-2024)'),
+    .custom((value) => {
+      if (value) {
+        // Chấp nhận cả ObjectId và string format
+        if (require('mongoose').Types.ObjectId.isValid(value)) {
+          return true; // ObjectId hợp lệ
+        }
+        
+        // Kiểm tra string format
+        if (!/^\d{4}-\d{4}$/.test(value)) {
+          throw new Error('Academic year must be in format YYYY-YYYY (e.g., 2023-2024) or valid ObjectId');
+        }
+      }
+      return true;
+    }),
 
   query('search')
     .optional()

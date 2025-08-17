@@ -9,15 +9,9 @@ const classSchema = new mongoose.Schema(
       unique: true,
     },
     academicYear: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AcademicYear",
       required: true,
-      validate: {
-        validator: function (v) {
-          // Kiểm tra format năm học (VD: "2023-2024")
-          return /^\d{4}-\d{4}$/.test(v);
-        },
-        message: "Academic year must be in format YYYY-YYYY (e.g., 2023-2024)",
-      },
     },
     gradeLevel: {
       type: Number,
@@ -69,6 +63,14 @@ classSchema.virtual("studentCount", {
   match: { role: "student", active: true },
 });
 
+// Virtual field for academicYearName to maintain backward compatibility
+classSchema.virtual("academicYearName").get(function() {
+  if (this.academicYear && typeof this.academicYear === 'object') {
+    return this.academicYear.name;
+  }
+  return this.academicYear;
+});
+
 // Method để lấy danh sách học sinh trong lớp
 classSchema.methods.getStudents = function () {
   return mongoose
@@ -80,6 +82,10 @@ classSchema.methods.getStudents = function () {
     })
     .select("name email studentId dateOfBirth gender");
 };
+
+// Ensure virtual fields are included in JSON output
+classSchema.set('toJSON', { virtuals: true });
+classSchema.set('toObject', { virtuals: true });
 
 const Class = mongoose.model("Class", classSchema);
 

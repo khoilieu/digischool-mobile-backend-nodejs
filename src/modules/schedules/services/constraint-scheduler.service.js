@@ -701,7 +701,8 @@ class ConstraintSchedulerService {
         
         // Tạo giáo viên mới với tên môn học gốc
         const teacherName = `Giáo viên ${subject.subjectName}`;
-        const newTeacher = await userService.createTeacherFromSchedule(teacherName, subject.subjectName, school._id);
+        // Không có email từ Excel, để null để tự động tạo
+        const newTeacher = await userService.createTeacherFromSchedule(teacherName, subject.subjectName, school._id, null);
         
         console.log(`✅ Đã tạo giáo viên mới cho môn ${subject.subjectName}: ${newTeacher.name}`);
         return newTeacher;

@@ -41,8 +41,20 @@ class ScheduleService {
       console.log(`🚀 Creating weekly schedule for week ${weekNumber}...`);
       console.log(`📋 Request data:`, JSON.stringify(data, null, 2));
 
+      // Xử lý academicYear có thể là string hoặc ObjectId
+      let academicYearDoc;
+      if (mongoose.Types.ObjectId.isValid(academicYear)) {
+        academicYearDoc = await AcademicYear.findById(academicYear);
+      } else {
+        academicYearDoc = await AcademicYear.findOne({ name: academicYear });
+      }
+      
+      if (!academicYearDoc) {
+        throw new Error(`Academic year ${academicYear} not found`);
+      }
+
       const classes = await Class.find({
-        academicYear: academicYear,
+        academicYear: academicYearDoc._id,
         gradeLevel: gradeLevel,
       }).populate("homeroomTeacher", "name email");
 
@@ -56,12 +68,7 @@ class ScheduleService {
         `📚 Found ${classes.length} classes for grade level ${gradeLevel}`
       );
 
-      const academicYearDoc = await AcademicYear.findOne({
-        name: academicYear,
-      });
-      if (!academicYearDoc) {
-        throw new Error(`Academic year ${academicYear} not found`);
-      }
+      // academicYearDoc đã được khai báo ở trên
 
       let startDate, endDate;
 
@@ -298,10 +305,23 @@ class ScheduleService {
       }
 
       // Tối ưu: Batch queries cho class và academic year
-      const [classInfo, academicYearDoc] = await Promise.all([
-        Class.findOne({ className, academicYear }),
-        AcademicYear.findOne({ name: academicYear })
-      ]);
+      let academicYearDoc;
+      let classInfo;
+      
+      // Xử lý academicYear có thể là string hoặc ObjectId
+      if (mongoose.Types.ObjectId.isValid(academicYear)) {
+        // Nếu là ObjectId, tìm trực tiếp
+        academicYearDoc = await AcademicYear.findById(academicYear);
+        if (academicYearDoc) {
+          classInfo = await Class.findOne({ className, academicYear: academicYearDoc._id });
+        }
+      } else {
+        // Nếu là string, tìm theo name
+        academicYearDoc = await AcademicYear.findOne({ name: academicYear });
+        if (academicYearDoc) {
+          classInfo = await Class.findOne({ className, academicYear: academicYearDoc._id });
+        }
+      }
 
       if (!classInfo) {
         throw new Error(`Class ${className} not found for academic year ${academicYear}`);
@@ -625,9 +645,14 @@ class ScheduleService {
         throw new Error("User not found");
       }
 
-      const academicYearDoc = await AcademicYear.findOne({
-        name: academicYear,
-      });
+      // Xử lý academicYear có thể là string hoặc ObjectId
+      let academicYearDoc;
+      if (mongoose.Types.ObjectId.isValid(academicYear)) {
+        academicYearDoc = await AcademicYear.findById(academicYear);
+      } else {
+        academicYearDoc = await AcademicYear.findOne({ name: academicYear });
+      }
+      
       if (!academicYearDoc) {
         throw new Error(`Academic year ${academicYear} not found`);
       }
@@ -1181,44 +1206,268 @@ class ScheduleService {
   async importScheduleFromExcel(data, currentUser, options = {}) {
     const errors = [];
     const createdTeachers = [];
+    const createdClasses = [];
     const createdLessons = [];
     const weeklyScheduleMap = new Map();
     const bcrypt = require("bcryptjs");
-    const allClasses = await Class.find();
-    const allSubjects = await Subject.find();
-    let allTeachers = await User.find({
-      role: { $in: ["teacher", "homeroom_teacher"] },
-    });
-    const AcademicYear = require("../models/academic-year.model");
-    const allAcademicYears = await AcademicYear.find();
-    const { startDate, endDate, academicYear, weekNumber, semester } = options;
-    let academicYearObj = null;
-    if (academicYear) {
-      academicYearObj = allAcademicYears.find(
-        (a) => a._id.toString() === academicYear || a.name === academicYear
-      );
-      if (!academicYearObj) {
-        throw new Error(
-          `Năm học '${academicYear}' không tồn tại trong hệ thống!`
-        );
+    
+    try {
+      let allClasses = await Class.find();
+      const allSubjects = await Subject.find();
+      let allTeachers = await User.find({
+        role: { $in: ["teacher", "homeroom_teacher"] },
+      });
+      const AcademicYear = require("../models/academic-year.model");
+      const allAcademicYears = await AcademicYear.find();
+      const { startDate, endDate, academicYear, weekNumber, semester } = options;
+      let academicYearObj = null;
+      if (academicYear) {
+        // Xử lý academicYear có thể là string hoặc ObjectId
+        if (mongoose.Types.ObjectId.isValid(academicYear)) {
+          academicYearObj = allAcademicYears.find(
+            (a) => a._id.toString() === academicYear
+          );
+        } else {
+          academicYearObj = allAcademicYears.find(
+            (a) => a.name === academicYear
+          );
+        }
+        
+        if (!academicYearObj) {
+          throw new Error(
+            `Năm học '${academicYear}' không tồn tại trong hệ thống!`
+          );
+        }
+      }
+      if (!startDate || !endDate || !academicYearObj) {
+        throw new Error("Thiếu startDate, endDate hoặc academicYear!");
+      }
+
+    // Xác định tất cả các lớp cần thiết từ dữ liệu Excel
+    const requiredClasses = new Set();
+    for (const row of data) {
+      const { Lớp: className } = row;
+      if (className && className.trim()) {
+        requiredClasses.add(className.trim());
       }
     }
-    if (!startDate || !endDate || !academicYearObj) {
-      throw new Error("Thiếu startDate, endDate hoặc academicYear!");
-    }
 
-    // Xác định giáo viên chủ nhiệm cho từng lớp và cập nhật trước khi tạo lesson
+    // Xác định giáo viên chủ nhiệm và email cho từng lớp TRƯỚC KHI tạo class
     const homeroomTeachersByClass = {};
+    const homeroomTeacherEmails = {};
+    const allTeacherEmails = {}; // Map tất cả giáo viên và email
+    
     for (const row of data) {
       const {
         Lớp: className,
         "Môn học": subjectName,
         "Giáo viên": teacherName,
+        "Email giáo viên": teacherEmail,
       } = row;
+      
+      // Lưu email cho tất cả giáo viên
+      if (teacherName && teacherEmail && teacherEmail.trim()) {
+        allTeacherEmails[teacherName] = teacherEmail.trim();
+      }
+      
+      // Lưu giáo viên chủ nhiệm
       if (["Chào cờ", "Sinh hoạt lớp"].includes(subjectName) && teacherName) {
         homeroomTeachersByClass[className] = teacherName;
+        if (teacherEmail && teacherEmail.trim()) {
+          homeroomTeacherEmails[teacherName] = teacherEmail.trim();
+        }
       }
     }
+
+    // Tự động tạo các lớp còn thiếu VỚI giáo viên chủ nhiệm
+    console.log("🔄 Kiểm tra và tạo các lớp còn thiếu...");
+    for (const className of requiredClasses) {
+      let classObj = allClasses.find((c) => c.className === className);
+      if (!classObj) {
+        try {
+          // Tự động xác định khối từ tên lớp (ví dụ: 10A1 -> khối 10)
+          const gradeMatch = className.match(/^(\d{1,2})/);
+          const gradeLevel = gradeMatch ? parseInt(gradeMatch[1]) : 10;
+          
+          // Tìm hoặc tạo giáo viên chủ nhiệm cho lớp này
+          let homeroomTeacher = null;
+          if (homeroomTeachersByClass[className]) {
+            const teacherName = homeroomTeachersByClass[className];
+            homeroomTeacher = allTeachers.find((t) => t.name === teacherName);
+            
+            if (!homeroomTeacher) {
+              // Tạo mới giáo viên chủ nhiệm nếu chưa tồn tại
+              try {
+                // Lấy trường học
+                let school = await School.findOne({ active: true });
+                if (!school) {
+                  school = await School.create({
+                    name: 'THPT Phan Văn Trị',
+                    address: '123 Đường Nguyễn Văn Linh, Quận 7, TP.HCM',
+                    phone: '028 3776 1234',
+                    email: 'info@thptphanvantri.edu.vn',
+                    website: 'https://thptphanvantri.edu.vn',
+                    principal: 'Nguyễn Văn A',
+                    active: true
+                  });
+                }
+                
+                // Tạo giáo viên chủ nhiệm sử dụng UserService
+                // Lấy email từ Excel nếu có
+                const teacherEmail = homeroomTeacherEmails[teacherName] || null;
+                homeroomTeacher = await userService.createTeacherFromSchedule(teacherName, 'Chào cờ', school._id, teacherEmail);
+                
+                // Cập nhật role để bao gồm homeroom_teacher
+                if (!homeroomTeacher.role.includes("homeroom_teacher")) {
+                  homeroomTeacher.role = Array.from(
+                    new Set([...homeroomTeacher.role, "homeroom_teacher"])
+                  );
+                  await homeroomTeacher.save();
+                }
+                
+                allTeachers.push(homeroomTeacher);
+                createdTeachers.push(homeroomTeacher);
+                console.log(`✅ Đã tạo giáo viên chủ nhiệm: ${teacherName}`);
+              } catch (error) {
+                console.error(`❌ Lỗi tạo giáo viên chủ nhiệm ${teacherName}:`, error.message);
+                // Fallback: tạo giáo viên chủ nhiệm cơ bản
+                const gender = Math.random() < 0.5 ? "male" : "female";
+                
+                // Tạo email theo format mới
+                const normalizedName = teacherName
+                  .toLowerCase()
+                  .normalize('NFD')
+                  .replace(/[\u0300-\u036f]/g, '')
+                  .replace(/[^a-z0-9\s]/g, '')
+                  .replace(/\s+/g, '.');
+                const email = `${normalizedName}.teacher@yopmail.com`;
+                
+                // Tạo mã giáo viên
+                const teacherCount = await User.countDocuments({ role: { $in: ['teacher', 'homeroom_teacher'] } });
+                const teacherId = `TCH${String(teacherCount + 1).padStart(3, '0')}`;
+                
+                // Tạo ngày sinh random (25-60 tuổi)
+                const generateRandomDate = (minAge, maxAge) => {
+                  const now = new Date();
+                  const minYear = now.getFullYear() - maxAge;
+                  const maxYear = now.getFullYear() - minAge;
+                  const year = Math.floor(Math.random() * (maxYear - minYear + 1)) + minYear;
+                  const month = Math.floor(Math.random() * 12);
+                  const day = Math.floor(Math.random() * 28) + 1;
+                  return new Date(year, month, day);
+                };
+                
+                // Tạo số điện thoại random
+                const generateRandomPhone = () => {
+                  const prefixes = ['032', '033', '034', '035', '036', '037', '038', '039'];
+                  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+                  const number = Math.floor(Math.random() * 10000000).toString().padStart(7, '0');
+                  return `${prefix}${number}`;
+                };
+                
+                // Tạo địa chỉ random
+                const generateRandomAddress = () => {
+                  const districts = ['Quận 1', 'Quận 2', 'Quận 3', 'Quận 7', 'Quận 8', 'Quận 9'];
+                  const district = districts[Math.floor(Math.random() * prefixes.length)];
+                  const street = Math.floor(Math.random() * 100) + 1;
+                  return `${street} Đường Nguyễn Văn Linh, ${district}, TP.HCM`;
+                };
+                
+                const newTeacher = new User({
+                  name: teacherName,
+                  email: email,
+                  passwordHash: await bcrypt.hash("Teacher@123", 10),
+                  teacherId: teacherId,
+                  role: ["teacher", "homeroom_teacher"],
+                  dateOfBirth: generateRandomDate(25, 60),
+                  gender: gender,
+                  phone: generateRandomPhone(),
+                  address: generateRandomAddress(),
+                  school: school._id,
+                  isNewUser: true,
+                  active: true,
+                });
+                await newTeacher.save();
+                allTeachers.push(newTeacher);
+                homeroomTeacher = newTeacher;
+                createdTeachers.push(newTeacher);
+              }
+            }
+          }
+          
+          // Nếu không có giáo viên chủ nhiệm, tạo một giáo viên mặc định
+          if (!homeroomTeacher) {
+            // Tạo giáo viên mặc định cho lớp
+            let school = await School.findOne({ active: true });
+            if (!school) {
+              school = await School.create({
+                name: 'THPT Phan Văn Trị',
+                address: '123 Đường Nguyễn Văn Linh, Quận 7, TP.HCM',
+                phone: '028 3776 1234',
+                email: 'info@thptphanvantri.edu.vn',
+                website: 'https://thptphanvantri.edu.vn',
+                principal: 'Nguyễn Văn A',
+                active: true
+              });
+            }
+            
+            const defaultTeacherName = `GVCN ${className}`;
+            const gender = Math.random() < 0.5 ? "male" : "female";
+            const normalizedName = defaultTeacherName
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/[^a-z0-9\s]/g, '')
+              .replace(/\s+/g, '.');
+            const email = `${normalizedName}.teacher@yopmail.com`;
+            const teacherCount = await User.countDocuments({ role: { $in: ['teacher', 'homeroom_teacher'] } });
+            const teacherId = `TCH${String(teacherCount + 1).padStart(3, '0')}`;
+            
+            const newTeacher = new User({
+              name: defaultTeacherName,
+              email: email,
+              passwordHash: await bcrypt.hash("Teacher@123", 10),
+              teacherId: teacherId,
+              role: ["teacher", "homeroom_teacher"],
+              dateOfBirth: new Date(1980 + Math.floor(Math.random() * 20), Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1),
+              gender: gender,
+              phone: `03${Math.floor(Math.random() * 10000000).toString().padStart(7, '0')}`,
+              address: `${Math.floor(Math.random() * 100) + 1} Đường Nguyễn Văn Linh, Quận 7, TP.HCM`,
+              school: school._id,
+              isNewUser: true,
+              active: true,
+            });
+            await newTeacher.save();
+            allTeachers.push(newTeacher);
+            homeroomTeacher = newTeacher;
+            createdTeachers.push(newTeacher);
+            console.log(`✅ Đã tạo giáo viên chủ nhiệm mặc định: ${defaultTeacherName}`);
+          }
+          
+          // Tạo lớp mới với giáo viên chủ nhiệm
+          const newClass = new Class({
+            className: className,
+            academicYear: academicYearObj._id,
+            gradeLevel: gradeLevel,
+            homeroomTeacher: homeroomTeacher._id,
+            active: true,
+          });
+          
+          await newClass.save();
+          allClasses.push(newClass);
+          createdClasses.push(newClass);
+          console.log(`✅ Đã tạo lớp mới: ${className} (Khối ${gradeLevel}) với GVCN: ${homeroomTeacher.name}`);
+        } catch (error) {
+          console.error(`❌ Lỗi tạo lớp ${className}:`, error.message);
+          errors.push({ 
+            row: 0, 
+            error: `Không thể tạo lớp ${className}: ${error.message}` 
+          });
+        }
+      }
+    }
+
+
 
     // Cập nhật giáo viên chủ nhiệm cho các lớp TRƯỚC KHI tạo lesson
     console.log("🔄 Cập nhật giáo viên chủ nhiệm cho các lớp...");
@@ -1249,7 +1498,9 @@ class ScheduleService {
             }
             
             // Tạo giáo viên chủ nhiệm sử dụng UserService
-            homeroomTeacher = await userService.createTeacherFromSchedule(homeroomTeacherName, 'Chào cờ', school._id);
+            // Lấy email từ Excel nếu có
+            const teacherEmail = homeroomTeacherEmails[homeroomTeacherName] || null;
+            homeroomTeacher = await userService.createTeacherFromSchedule(homeroomTeacherName, 'Chào cờ', school._id, teacherEmail);
             
             // Cập nhật role để bao gồm homeroom_teacher
             if (!homeroomTeacher.role.includes("homeroom_teacher")) {
@@ -1353,13 +1604,21 @@ class ScheduleService {
           });
           console.log(`✅ Cập nhật GVCN cho lớp ${className}: ${homeroomTeacher.name}`);
         }
+      } else {
+        // Nếu lớp chưa có homeroomTeacher, cập nhật ngay
+        if (!classObj.homeroomTeacher) {
+          classObj.homeroomTeacher = homeroomTeacher._id;
+          await classObj.save();
+          console.log(`✅ Đã gán GVCN ${homeroomTeacher.name} cho lớp ${className}`);
+        }
       }
     }
 
     async function findOrCreateAndUpdateTeacher(
       teacherName,
       subjectObj,
-      className
+      className,
+      teacherEmail = null // Thêm tham số email từ Excel
     ) {
       if (!teacherName) return null;
       let teacher = allTeachers.find((t) => t.name === teacherName);
@@ -1382,9 +1641,33 @@ class ScheduleService {
             });
           }
 
+          // Xử lý email: ưu tiên email từ Excel, nếu không có thì tự động tạo
+          let email;
+          if (teacherEmail && teacherEmail.trim()) {
+            // Kiểm tra email từ Excel có tồn tại trong database chưa
+            const existingUserWithEmail = await User.findOne({ email: teacherEmail.trim() });
+            if (existingUserWithEmail) {
+              throw new Error(`Email '${teacherEmail.trim()}' đã tồn tại trong hệ thống. Vui lòng sử dụng email khác hoặc để trống để tự động tạo.`);
+            }
+            email = teacherEmail.trim();
+            console.log(`📧 Sử dụng email từ Excel: ${email}`);
+          } else {
+            // Tự động tạo email nếu không có trong Excel
+            const normalizedName = teacherName
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/[^a-z0-9\s]/g, '')
+              .replace(/\s+/g, '.');
+            email = `${normalizedName}.teacher@yopmail.com`;
+            console.log(`📧 Tự động tạo email: ${email}`);
+          }
+
           // Tạo giáo viên sử dụng UserService
           const subjectName = subjectObj ? subjectObj.subjectName : 'Chào cờ';
-          teacher = await userService.createTeacherFromSchedule(teacherName, subjectName, school._id);
+          // Lấy email từ Excel nếu có
+          const excelEmail = allTeacherEmails[teacherName] || teacherEmail;
+          teacher = await userService.createTeacherFromSchedule(teacherName, subjectName, school._id, excelEmail);
           
           // Cập nhật role nếu là chủ nhiệm
           if (isHomeroom && !teacher.role.includes("homeroom_teacher")) {
@@ -1399,19 +1682,44 @@ class ScheduleService {
           return teacher;
         } catch (error) {
           console.error(`❌ Lỗi tạo giáo viên ${teacherName}:`, error.message);
-          // Fallback: tạo giáo viên cơ bản nếu có lỗi
+          
+          // Nếu lỗi là do email đã tồn tại, throw error để rollback
+          if (error.message.includes('đã tồn tại trong hệ thống')) {
+            throw error;
+          }
+          
+          // Fallback: tạo giáo viên cơ bản nếu có lỗi khác
           const gender = Math.random() < 0.5 ? "male" : "female";
           const roles = isHomeroom ? ["teacher", "homeroom_teacher"] : ["teacher"];
           const isSpecial = subjectObj && ["Chào cờ", "Sinh hoạt lớp"].includes(subjectObj.subjectName);
           
-          // Tạo email theo format mới
-          const normalizedName = teacherName
-            .toLowerCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^a-z0-9\s]/g, '')
-            .replace(/\s+/g, '.');
-          const email = `${normalizedName}.teacher@yopmail.com`;
+          // Sử dụng email đã xử lý ở trên
+          let email;
+          if (teacherEmail && teacherEmail.trim()) {
+            email = teacherEmail.trim();
+          } else {
+            const normalizedName = teacherName
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/[^a-z0-9\s]/g, '')
+              .replace(/\s+/g, '.');
+            email = `${normalizedName}.teacher@yopmail.com`;
+          }
+          
+          // Lấy trường học cho fallback
+          let fallbackSchool = await School.findOne({ active: true });
+          if (!fallbackSchool) {
+            fallbackSchool = await School.create({
+              name: 'THPT Phan Văn Trị',
+              address: '123 Đường Nguyễn Văn Linh, Quận 7, TP.HCM',
+              phone: '028 3776 1234',
+              email: 'info@thptphanvantri.edu.vn',
+              website: 'https://thptphanvantri.edu.vn',
+              principal: 'Nguyễn Văn A',
+              active: true
+            });
+          }
           
           // Tạo mã giáo viên
           const teacherCount = await User.countDocuments({ role: { $in: ['teacher', 'homeroom_teacher'] } });
@@ -1454,7 +1762,7 @@ class ScheduleService {
             gender: gender,
             phone: generateRandomPhone(),
             address: generateRandomAddress(),
-            school: school._id,
+            school: fallbackSchool._id,
             isNewUser: true,
             active: true,
             subject: subjectObj && !isSpecial ? subjectObj._id : undefined,
@@ -1501,16 +1809,43 @@ class ScheduleService {
         Lớp: className,
         "Môn học": subjectName,
         "Giáo viên": teacherName,
+        "Email giáo viên": teacherEmail, // Thêm email từ Excel
         Ngày: day,
         Tiết: period,
         Tuần: week,
         Buổi: session,
         "Bài học": topic, // Thêm dòng này
       } = row;
-      const classObj = allClasses.find((c) => c.className === className);
+      let classObj = allClasses.find((c) => c.className === className);
       if (!classObj) {
-        errors.push({ row: i + 2, error: `Lớp ${className} không tồn tại` });
-        continue;
+        // Tự động tạo lớp mới nếu chưa tồn tại
+        try {
+          // Tự động xác định khối từ tên lớp (ví dụ: 10A1 -> khối 10)
+          const gradeMatch = className.match(/^(\d{1,2})/);
+          const gradeLevel = gradeMatch ? parseInt(gradeMatch[1]) : 10;
+          
+          // Tạo lớp mới
+          const newClass = new Class({
+            className: className,
+            academicYear: academicYearObj._id,
+            gradeLevel: gradeLevel,
+            homeroomTeacher: null, // Sẽ được cập nhật sau khi xác định giáo viên chủ nhiệm
+            active: true,
+          });
+          
+          await newClass.save();
+          allClasses.push(newClass);
+          createdClasses.push(newClass);
+          classObj = newClass;
+          console.log(`✅ Đã tạo lớp mới: ${className} (Khối ${gradeLevel})`);
+        } catch (error) {
+          console.error(`❌ Lỗi tạo lớp ${className}:`, error.message);
+          errors.push({ 
+            row: i + 2, 
+            error: `Không thể tạo lớp ${className}: ${error.message}` 
+          });
+          continue;
+        }
       }
       const subjectObj = allSubjects.find((s) => s.subjectName === subjectName);
       const isSpecial = ["Chào cờ", "Sinh hoạt lớp"].includes(subjectName);
@@ -1523,10 +1858,18 @@ class ScheduleService {
       }
       let teacherObj = null;
       if (teacherName) {
+        // Log để debug email
+        if (teacherEmail && teacherEmail.trim()) {
+          console.log(`📧 Excel email cho ${teacherName}: ${teacherEmail}`);
+        } else {
+          console.log(`📧 Không có email Excel cho ${teacherName}, sẽ tự động tạo`);
+        }
+        
         teacherObj = await findOrCreateAndUpdateTeacher(
           teacherName,
           subjectObj,
-          className
+          className,
+          teacherEmail // Truyền email từ Excel
         );
       }
       if (!teacherObj) {
@@ -1687,6 +2030,22 @@ class ScheduleService {
       }
     }
 
+    // Log tổng kết
+    console.log(`\n📊 TỔNG KẾT IMPORT TKB:`);
+    console.log(`✅ Tổng số giáo viên đã tạo: ${createdTeachers.length}`);
+    console.log(`✅ Tổng số lớp đã tạo: ${createdClasses.length}`);
+    console.log(`✅ Tổng số lesson đã tạo: ${createdLessons.length}`);
+    console.log(`✅ Tổng số lớp đã cập nhật: ${updatedClasses.length}`);
+    if (createdClasses.length > 0) {
+      console.log(`📚 Các lớp mới được tạo: ${createdClasses.map(c => c.className).join(', ')}`);
+    }
+    if (createdTeachers.length > 0) {
+      console.log(`👨‍🏫 Các giáo viên mới được tạo: ${createdTeachers.map(t => t.name).join(', ')}`);
+    }
+    if (errors.length > 0) {
+      console.log(`⚠️ Có ${errors.length} lỗi cần xem xét`);
+    }
+
     return {
       errors,
       createdTeachers: createdTeachers.map((t) => ({
@@ -1694,8 +2053,14 @@ class ScheduleService {
         email: t.email,
         gender: t.gender,
       })),
+      createdClasses: createdClasses.map((c) => ({
+        className: c.className,
+        gradeLevel: c.gradeLevel,
+        academicYear: c.academicYear,
+      })),
       totalLessons: createdLessons.length,
       totalTeachersCreated: createdTeachers.length,
+      totalClassesCreated: createdClasses.length,
       updatedClasses: updatedClasses,
       totalClassesUpdated: updatedClasses.length,
       teacherMappings: Array.from(teacherMapping.entries()).map(([oldId, newId]) => ({
@@ -1704,6 +2069,46 @@ class ScheduleService {
       })),
       totalTeacherMappings: teacherMapping.size,
     };
+    
+  } catch (error) {
+    console.error('❌ LỖI CRITICAL trong importScheduleFromExcel:', error.message);
+    
+    // ROLLBACK: Xóa tất cả dữ liệu đã tạo nếu có lỗi
+    console.log('🔄 Bắt đầu ROLLBACK - Xóa tất cả dữ liệu đã tạo...');
+    
+    try {
+      // Xóa tất cả lessons đã tạo
+      if (createdLessons.length > 0) {
+        for (const lesson of createdLessons) {
+          await Lesson.findByIdAndDelete(lesson._id);
+        }
+        console.log(`🗑️ Đã xóa ${createdLessons.length} lessons`);
+      }
+      
+      // Xóa tất cả classes đã tạo
+      if (createdClasses.length > 0) {
+        for (const classObj of createdClasses) {
+          await Class.findByIdAndDelete(classObj._id);
+        }
+        console.log(`🗑️ Đã xóa ${createdClasses.length} classes`);
+      }
+      
+      // Xóa tất cả teachers đã tạo
+      if (createdTeachers.length > 0) {
+        for (const teacher of createdTeachers) {
+          await User.findByIdAndDelete(teacher._id);
+        }
+        console.log(`🗑️ Đã xóa ${createdTeachers.length} teachers`);
+      }
+      
+      console.log('✅ ROLLBACK hoàn tất');
+    } catch (rollbackError) {
+      console.error('❌ Lỗi trong quá trình ROLLBACK:', rollbackError.message);
+    }
+    
+    // Throw error để controller có thể xử lý
+    throw error;
+  }
   }
 
   /**

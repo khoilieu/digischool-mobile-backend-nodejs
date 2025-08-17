@@ -615,19 +615,27 @@ class StatisticsService {
       
       // Nếu không có academicYear, lấy năm học hiện tại
       let targetAcademicYear = academicYear;
+      let academicYearDoc;
+      
       if (!targetAcademicYear) {
-        const currentAcademicYear = await AcademicYear.findOne({ isActive: true });
-        if (currentAcademicYear) {
-          targetAcademicYear = currentAcademicYear.name;
+        academicYearDoc = await AcademicYear.findOne({ isActive: true });
+        if (academicYearDoc) {
+          targetAcademicYear = academicYearDoc.name;
         } else {
           throw new Error("Không tìm thấy năm học hiện tại");
         }
-      }
-
-      // Tìm academic year document
-      const academicYearDoc = await AcademicYear.findOne({ name: targetAcademicYear });
-      if (!academicYearDoc) {
-        throw new Error(`Không tìm thấy năm học ${targetAcademicYear}`);
+      } else {
+        // Nếu academicYear là ObjectId, tìm trực tiếp
+        if (mongoose.Types.ObjectId.isValid(targetAcademicYear)) {
+          academicYearDoc = await AcademicYear.findById(targetAcademicYear);
+        } else {
+          // Nếu là string, tìm theo name
+          academicYearDoc = await AcademicYear.findOne({ name: targetAcademicYear });
+        }
+        
+        if (!academicYearDoc) {
+          throw new Error(`Không tìm thấy năm học ${targetAcademicYear}`);
+        }
       }
 
       // Tìm weekly schedule
@@ -636,7 +644,7 @@ class StatisticsService {
         // Nếu có className, tìm theo lớp cụ thể
         const classDoc = await Class.findOne({ 
           className: className, 
-          academicYear: targetAcademicYear 
+          academicYear: academicYearDoc._id 
         });
         if (!classDoc) {
           throw new Error(`Không tìm thấy lớp ${className} trong năm học ${targetAcademicYear}`);
@@ -760,10 +768,22 @@ class StatisticsService {
    */
   async getTeachingProgress(gradeLevel, semester, weekNumber, academicYear) {
     try {
+      // Xử lý academicYear có thể là string hoặc ObjectId
+      let academicYearDoc;
+      if (mongoose.Types.ObjectId.isValid(academicYear)) {
+        academicYearDoc = await AcademicYear.findById(academicYear);
+      } else {
+        academicYearDoc = await AcademicYear.findOne({ name: academicYear });
+      }
+      
+      if (!academicYearDoc) {
+        throw new Error(`Academic year ${academicYear} not found`);
+      }
+
       // Lấy danh sách lớp theo khối
       const classes = await Class.find({
         gradeLevel: gradeLevel,
-        academicYear: academicYear,
+        academicYear: academicYearDoc._id,
         active: true
       }).sort({ className: 1 });
 
@@ -771,7 +791,7 @@ class StatisticsService {
       const requirements = await LessonRequirement.find({
         gradeLevel: gradeLevel,
         semester: semester,
-        academicYear: academicYear,
+        academicYear: academicYearDoc._id,
         isActive: true
       }).populate('subject', 'subjectName subjectCode');
 
@@ -790,7 +810,7 @@ class StatisticsService {
       }
 
       // Lấy thời gian bắt đầu và kết thúc của tuần
-      const weekDates = await this.getWeekDates(weekNumber, academicYear);
+      const weekDates = await this.getWeekDates(weekNumber, academicYearDoc._id);
       if (!weekDates) {
         throw new Error(`Không tìm thấy dữ liệu tuần ${weekNumber} trong năm học ${academicYear}`);
       }
@@ -850,7 +870,7 @@ class StatisticsService {
         gradeLevel,
         semester,
         weekNumber,
-        academicYear,
+        academicYear: academicYearDoc.name,
         classes: classes.map(cls => cls.className),
         requirements: Object.fromEntries(requirementMap),
         progressData,
@@ -936,7 +956,7 @@ class StatisticsService {
           subject: subject._id,
           gradeLevel: gradeLevel,
           semester: semester,
-          academicYear: academicYear
+          academicYear: academicYearDoc._id
         });
 
         if (requirement) {
@@ -949,7 +969,7 @@ class StatisticsService {
             subject: subject._id,
             gradeLevel: gradeLevel,
             semester: semester,
-            academicYear: academicYear,
+            academicYear: academicYearDoc._id,
             requiredLessons: requiredLessons
           });
           await requirement.save();
@@ -993,7 +1013,7 @@ class StatisticsService {
           subject: subject._id,
           gradeLevel: gradeLevel,
           semester: semester,
-          academicYear: academicYear
+          academicYear: academicYearDoc._id
         });
 
         if (!existingRequirement) {
@@ -1002,7 +1022,7 @@ class StatisticsService {
             subject: subject._id,
             gradeLevel: gradeLevel,
             semester: semester,
-            academicYear: academicYear,
+            academicYear: academicYearDoc._id,
             requiredLessons: requiredLessons
           });
           await requirement.save();
@@ -1026,9 +1046,21 @@ class StatisticsService {
    */
   async getClassesByGrade(gradeLevel, academicYear) {
     try {
+      // Xử lý academicYear có thể là string hoặc ObjectId
+      let academicYearDoc;
+      if (mongoose.Types.ObjectId.isValid(academicYear)) {
+        academicYearDoc = await AcademicYear.findById(academicYear);
+      } else {
+        academicYearDoc = await AcademicYear.findOne({ name: academicYear });
+      }
+      
+      if (!academicYearDoc) {
+        throw new Error(`Academic year ${academicYear} not found`);
+      }
+
       const classes = await Class.find({
         gradeLevel: gradeLevel,
-        academicYear: academicYear,
+        academicYear: academicYearDoc._id,
         isActive: true
       }).select('className gradeLevel').sort({ className: 1 });
 
@@ -1043,8 +1075,14 @@ class StatisticsService {
    */
   async getWeekDates(weekNumber, academicYear) {
     try {
-      // Tìm academic year
-      const academicYearDoc = await AcademicYear.findOne({ name: academicYear });
+      // Xử lý academicYear có thể là string hoặc ObjectId
+      let academicYearDoc;
+      if (mongoose.Types.ObjectId.isValid(academicYear)) {
+        academicYearDoc = await AcademicYear.findById(academicYear);
+      } else {
+        academicYearDoc = await AcademicYear.findOne({ name: academicYear });
+      }
+      
       if (!academicYearDoc) {
         throw new Error(`Không tìm thấy năm học: ${academicYear}`);
       }

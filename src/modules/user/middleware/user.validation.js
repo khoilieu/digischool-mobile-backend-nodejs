@@ -83,8 +83,20 @@ const validateUser = {
     body('academicYear')
       .optional()
       .trim()
-      .matches(/^\d{4}-\d{4}$/)
-      .withMessage('Academic year must be in format YYYY-YYYY (e.g., 2024-2025)'),
+      .custom((value) => {
+        if (value) {
+          // Chấp nhận cả ObjectId và string format
+          if (require('mongoose').Types.ObjectId.isValid(value)) {
+            return true; // ObjectId hợp lệ
+          }
+          
+          // Kiểm tra string format
+          if (!/^\d{4}-\d{4}$/.test(value)) {
+            throw new Error('Academic year must be in format YYYY-YYYY (e.g., 2024-2025) or valid ObjectId');
+          }
+        }
+        return true;
+      }),
 
     body('dateOfBirth')
       .optional()

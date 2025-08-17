@@ -149,7 +149,7 @@ class AuthService {
       // Thêm thông tin theo role
       if (user.role.includes('student')) {
         userData.studentId = user.studentId || null;
-        userData.academicYear = user.academicYear || null;
+        userData.academicYear = user.academicYearName || null;
         userData.class = user.class_id ? {
           id: user.class_id._id,
           className: user.class_id.className,
@@ -231,7 +231,7 @@ class AuthService {
       roleInfo.type = 'student';
       roleInfo.studentId = user.studentId;
       roleInfo.classId = user.class_id ? user.class_id._id : null;
-      roleInfo.academicYear = user.academicYear;
+      roleInfo.academicYear = user.academicYearName;
       roleInfo.permissions = [
         'view_schedule',
         'view_grades',

@@ -30,9 +30,12 @@ const teachingProgressValidation = {
           'number.max': 'Số tuần phải từ 1-52',
           'any.required': 'Số tuần là bắt buộc'
         }),
-      academicYear: Joi.string().pattern(/^\d{4}-\d{4}$/).required()
+      academicYear: Joi.alternatives().try(
+        Joi.string().pattern(/^\d{4}-\d{4}$/),
+        Joi.string().regex(/^[0-9a-fA-F]{24}$/)
+      ).required()
         .messages({
-          'string.pattern.base': 'Năm học phải có định dạng YYYY-YYYY',
+          'alternatives.types': 'Năm học phải có định dạng YYYY-YYYY hoặc ObjectId hợp lệ',
           'any.required': 'Năm học là bắt buộc'
         })
     });
@@ -69,9 +72,12 @@ const teachingProgressValidation = {
           'number.max': 'Học kỳ phải là 1 hoặc 2',
           'any.required': 'Học kỳ là bắt buộc'
         }),
-      academicYear: Joi.string().pattern(/^\d{4}-\d{4}$/).required()
+      academicYear: Joi.alternatives().try(
+        Joi.string().pattern(/^\d{4}-\d{4}$/),
+        Joi.string().regex(/^[0-9a-fA-F]{24}$/)
+      ).required()
         .messages({
-          'string.pattern.base': 'Năm học phải có định dạng YYYY-YYYY',
+          'alternatives.types': 'Năm học phải có định dạng YYYY-YYYY hoặc ObjectId hợp lệ',
           'any.required': 'Năm học là bắt buộc'
         })
     });
@@ -108,9 +114,12 @@ const teachingProgressValidation = {
           'number.max': 'Học kỳ phải là 1 hoặc 2',
           'any.required': 'Học kỳ là bắt buộc'
         }),
-      academicYear: Joi.string().pattern(/^\d{4}-\d{4}$/).required()
+      academicYear: Joi.alternatives().try(
+        Joi.string().pattern(/^\d{4}-\d{4}$/),
+        Joi.string().regex(/^[0-9a-fA-F]{24}$/)
+      ).required()
         .messages({
-          'string.pattern.base': 'Năm học phải có định dạng YYYY-YYYY',
+          'alternatives.types': 'Năm học phải có định dạng YYYY-YYYY hoặc ObjectId hợp lệ',
           'any.required': 'Năm học là bắt buộc'
         })
     });
@@ -129,40 +138,69 @@ const teachingProgressValidation = {
     const queryError = querySchema.validate(req.query).error;
     const bodyError = bodySchema.validate(req.body).error;
 
-    if (queryError || bodyError) {
-      const errors = [];
-      if (queryError) {
-        errors.push(...queryError.details.map(detail => detail.message));
-      }
-      if (bodyError) {
-        errors.push(...bodyError.details.map(detail => detail.message));
-      }
-
+    if (queryError) {
       return res.status(400).json({
         success: false,
-        message: 'Dữ liệu không hợp lệ',
-        errors: errors
+        message: 'Query parameters không hợp lệ',
+        errors: queryError.details.map(detail => detail.message)
       });
     }
 
-    // Validation cho từng requirement
-    const requirements = req.body.requirements;
-    const requirementErrors = [];
-
-    for (const [subject, lessons] of Object.entries(requirements)) {
-      if (typeof lessons !== 'number' || lessons < 0 || lessons > 10) {
-        requirementErrors.push(`Số tiết cho môn ${subject} phải là số từ 0-10`);
-      }
-    }
-
-    if (requirementErrors.length > 0) {
+    if (bodyError) {
       return res.status(400).json({
         success: false,
-        message: 'Dữ liệu không hợp lệ',
-        errors: requirementErrors
+        message: 'Body data không hợp lệ',
+        errors: bodyError.details.map(detail => detail.message)
       });
     }
 
+    next();
+  },
+
+  /**
+   * Validation cho API lấy dữ liệu điểm danh giáo viên
+   */
+  getTeacherRollcallData: (req, res, next) => {
+    const schema = Joi.object({
+      targetDate: Joi.date().iso().required()
+        .messages({
+          'date.base': 'Ngày không hợp lệ',
+          'date.format': 'Ngày phải có định dạng ISO',
+          'any.required': 'Ngày là bắt buộc'
+        }),
+      status: Joi.string().valid('all', 'present', 'absent', 'late').optional()
+        .messages({
+          'string.base': 'Trạng thái phải là string',
+          'any.only': 'Trạng thái phải là all, present, absent, hoặc late'
+        }),
+      subject: Joi.string().optional()
+        .messages({
+          'string.base': 'Môn học phải là string'
+        }),
+      weekNumber: Joi.number().integer().min(1).max(52).optional()
+        .messages({
+          'number.base': 'Số tuần phải là số',
+          'number.integer': 'Số tuần phải là số nguyên',
+          'number.min': 'Số tuần phải từ 1-52',
+          'number.max': 'Số tuần phải từ 1-52'
+        }),
+      academicYear: Joi.alternatives().try(
+        Joi.string().pattern(/^\d{4}-\d{4}$/),
+        Joi.string().regex(/^[0-9a-fA-F]{24}$/)
+      ).optional()
+        .messages({
+          'alternatives.types': 'Năm học phải có định dạng YYYY-YYYY hoặc ObjectId hợp lệ'
+        })
+    });
+
+    const { error } = schema.validate(req.query);
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Dữ liệu không hợp lệ',
+        errors: error.details.map(detail => detail.message)
+      });
+    }
     next();
   },
 
@@ -179,9 +217,12 @@ const teachingProgressValidation = {
           'number.max': 'Khối học phải từ 10-12',
           'any.required': 'Khối học là bắt buộc'
         }),
-      academicYear: Joi.string().pattern(/^\d{4}-\d{4}$/).required()
+      academicYear: Joi.alternatives().try(
+        Joi.string().pattern(/^\d{4}-\d{4}$/),
+        Joi.string().regex(/^[0-9a-fA-F]{24}$/)
+      ).required()
         .messages({
-          'string.pattern.base': 'Năm học phải có định dạng YYYY-YYYY',
+          'alternatives.types': 'Năm học phải có định dạng YYYY-YYYY hoặc ObjectId hợp lệ',
           'any.required': 'Năm học là bắt buộc'
         })
     });

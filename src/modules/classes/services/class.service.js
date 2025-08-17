@@ -68,13 +68,16 @@ class ClassService {
         await teacher.save();
       }
 
-      // Populate thông tin giáo viên chủ nhiệm
-      await savedClass.populate('homeroomTeacher', 'name email role');
+      // Populate thông tin giáo viên chủ nhiệm và academic year
+      await savedClass.populate([
+        { path: 'homeroomTeacher', select: 'name email role' },
+        { path: 'academicYear', select: 'name' }
+      ]);
 
       return {
         id: savedClass._id,
         className: savedClass.className,
-        academicYear: savedClass.academicYear,
+        academicYear: savedClass.academicYearName,
         homeroomTeacher: {
           id: savedClass.homeroomTeacher._id,
           name: savedClass.homeroomTeacher.name,
@@ -115,6 +118,7 @@ class ClassService {
       const [classes, total] = await Promise.all([
         Class.find(query)
           .populate('homeroomTeacher', 'name email role')
+          .populate('academicYear', 'name')
           .populate('studentCount')
           .sort({ academicYear: -1, className: 1 })
           .skip(skip)
@@ -126,7 +130,7 @@ class ClassService {
         classes: classes.map(cls => ({
           id: cls._id,
           className: cls.className,
-          academicYear: cls.academicYear,
+          academicYear: cls.academicYearName,
           homeroomTeacher: {
             id: cls.homeroomTeacher._id,
             name: cls.homeroomTeacher.name,
@@ -155,6 +159,7 @@ class ClassService {
     try {
       const classInfo = await Class.findById(id)
         .populate('homeroomTeacher', 'name email role dateOfBirth gender')
+        .populate('academicYear', 'name')
         .populate('studentCount');
 
       if (!classInfo) {
@@ -167,7 +172,7 @@ class ClassService {
       return {
         id: classInfo._id,
         className: classInfo.className,
-        academicYear: classInfo.academicYear,
+        academicYear: classInfo.academicYearName,
         homeroomTeacher: {
           id: classInfo.homeroomTeacher._id,
           name: classInfo.homeroomTeacher.name,

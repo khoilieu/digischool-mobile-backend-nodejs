@@ -83,7 +83,11 @@ class ParentService {
       
       // Tính weekNumber dựa trên ngày bắt đầu tuần
       // Sử dụng logic tương tự như trong schedule service
-      const academicYearStart = new Date(academicYear.split('-')[0] + '-09-01'); // Giả sử năm học bắt đầu từ tháng 9
+      let academicYearName = academicYear;
+      if (typeof academicYear === 'object' && academicYear.name) {
+        academicYearName = academicYear.name;
+      }
+      const academicYearStart = new Date(academicYearName.split('-')[0] + '-09-01'); // Giả sử năm học bắt đầu từ tháng 9
       const weekNumber = Math.ceil((startDate - academicYearStart) / (7 * 24 * 60 * 60 * 1000)) + 1;
       
       // Đảm bảo weekNumber không âm và hợp lý
@@ -91,7 +95,7 @@ class ParentService {
 
       // Sử dụng service schedule để lấy thời khóa biểu với cấu trúc mới (không bao gồm personal activities)
       console.log(`📅 Parent requesting schedule for child ${child.name} (${child.studentId})`);
-      console.log(`📚 Class: ${child.class_id.className}, Academic Year: ${academicYear}, Week: ${validatedWeekNumber}`);
+      console.log(`📚 Class: ${child.class_id.className}, Academic Year: ${academicYearName}, Week: ${validatedWeekNumber}`);
       
       const scheduleResult = await scheduleService.getWeeklyScheduleByClassAndWeek(
         child.class_id.className,
