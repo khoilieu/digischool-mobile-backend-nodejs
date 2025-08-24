@@ -10,6 +10,7 @@ class LessonRequestController {
   async createSwapRequest(req, res) {
     try {
       const errors = validationResult(req);
+      console.log(errors);
       if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,
@@ -339,6 +340,56 @@ class LessonRequestController {
       });
     } catch (error) {
       console.error("Error in approveSubstituteRequest:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Phê duyệt yêu cầu dạy thay bởi manager (giai đoạn 2)
+  async approveSubstituteRequestByManager(req, res) {
+    try {
+      const { requestId } = req.params;
+      const managerId = req.user.id;
+
+      const result = await substituteRequestService.approveByManager(
+        requestId,
+        managerId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Substitute request approved by manager successfully",
+        request: result,
+      });
+    } catch (error) {
+      console.error("Error in approveSubstituteRequestByManager:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Phê duyệt yêu cầu đổi tiết bởi manager (giai đoạn 2)
+  async approveSwapRequestByManager(req, res) {
+    try {
+      const { requestId } = req.params;
+      const managerId = req.user.id;
+
+      const result = await swapRequestService.approveSwapRequestByManager(
+        requestId,
+        managerId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Swap request approved by manager successfully",
+        request: result,
+      });
+    } catch (error) {
+      console.error("Error in approveSwapRequestByManager:", error);
       res.status(500).json({
         success: false,
         message: error.message,

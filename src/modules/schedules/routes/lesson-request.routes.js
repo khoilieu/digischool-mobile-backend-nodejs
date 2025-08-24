@@ -67,6 +67,14 @@ router.post(
   lessonRequestController.approveSubstituteRequest
 );
 
+// ✅ POST /api/schedules/lesson-request/substitute/:requestId/approve-manager - Phê duyệt yêu cầu dạy thay bởi manager (giai đoạn 2)
+router.post(
+  "/substitute/:requestId/approve-manager",
+  authMiddleware.authorize("admin", "manager"),
+  lessonRequestValidation.validateRequestId(),
+  lessonRequestController.approveSubstituteRequestByManager
+);
+
 // ✅ POST /api/schedules/lesson-request/substitute/:requestId/reject - Từ chối yêu cầu dạy thay
 router.post(
   "/substitute/:requestId/reject",
@@ -107,6 +115,14 @@ router.post(
   authMiddleware.authorize("teacher"),
   lessonRequestValidation.validateSwapApproval(),
   lessonRequestController.approveSwapRequest
+);
+
+// ✅ POST /api/schedules/lesson-request/swap/:requestId/approve-manager - Duyệt yêu cầu đổi tiết bởi manager (giai đoạn 2)
+router.post(
+  "/swap/:requestId/approve-manager",
+  authMiddleware.authorize("admin", "manager"),
+  lessonRequestValidation.validateRequestId(),
+  lessonRequestController.approveSwapRequestByManager
 );
 
 // ✅ POST /api/schedules/lesson-request/swap/:requestId/reject - Từ chối yêu cầu đổi tiết bởi replacement teacher

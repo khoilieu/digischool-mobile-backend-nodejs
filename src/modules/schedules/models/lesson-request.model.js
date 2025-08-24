@@ -95,6 +95,27 @@ const lessonRequestSchema = new mongoose.Schema(
       default: "pending",
     },
 
+    // ================================ FIELDS CHO 2 GIAI ĐOẠN PHÊ DUYỆT ================================
+    // Chỉ áp dụng cho substitute và swap requests, không áp dụng cho makeup
+
+    // Trạng thái phê duyệt của giáo viên được đề xuất (chỉ cho substitute và swap)
+    teacherApproved: {
+      type: Boolean,
+      default: false,
+      required: function () {
+        return this.requestType === "substitute" || this.requestType === "swap";
+      },
+    },
+
+    // Trạng thái phê duyệt của quản lý (chỉ cho substitute và swap)
+    managerApproved: {
+      type: Boolean,
+      default: false,
+      required: function () {
+        return this.requestType === "substitute" || this.requestType === "swap";
+      },
+    },
+
     // Thông tin đặc biệt cho makeup
     makeupInfo: {
       // Ngày gốc của tiết absent
@@ -370,11 +391,11 @@ lessonRequestSchema.methods.approveByTeacher = async function (teacherId) {
     throw new Error("Request is no longer pending");
   candidate.status = "approved";
   candidate.responseDate = new Date();
-  this.status = "approved";
+  // KHÔNG thay đổi this.status = "approved" - chỉ khi manager approve mới thay đổi
   this.candidateTeachers.forEach((c) => {
     const candidateId = c.teacher._id
       ? c.teacher._id.toString()
-      : c.teacher.toString();
+      : teacherId.toString();
     const teacherIdStr = teacherId._id
       ? teacherId._id.toString()
       : teacherId.toString();

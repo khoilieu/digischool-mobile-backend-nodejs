@@ -48,9 +48,6 @@ class SubstituteRequestService {
       await lessonRequest.save();
 
       // ==== Tạo notification thay cho gửi email ====
-      // Lấy danh sách manager
-      const managers = await User.find({ role: { $in: ["manager", "admin"] } });
-      const managerIds = managers.map((m) => m._id);
       // Gửi notification cho candidate teachers
       await notificationService.createNotification({
         type: "activity",
@@ -66,29 +63,6 @@ class SubstituteRequestService {
         receiverScope: {
           type: "user",
           ids: candidateTeacherIds.map((id) => id.toString()),
-        },
-        relatedObject: {
-          id: lessonRequest._id,
-          requestType: "substitute_request",
-        },
-      });
-      // Gửi notification cho managers
-      await notificationService.createNotification({
-        type: "activity",
-        title: "Thông báo yêu cầu dạy thay mới",
-        content:
-          `Có yêu cầu dạy thay mới từ giáo viên ${
-            lesson.teacher.name
-          } cho tiết ${lesson.subject.subjectName} lớp ${
-            lesson.class.className
-          } vào ngày ${new Date(lesson.scheduledDate).toLocaleDateString(
-            "vi-VN"
-          )} (Tiết ${lesson.timeSlot.period})` +
-          (reason ? `\nLý do: ${reason}` : ""),
-        sender: requestingTeacherId,
-        receiverScope: {
-          type: "user",
-          ids: managerIds.map((id) => id.toString()),
         },
         relatedObject: {
           id: lessonRequest._id,
@@ -157,30 +131,20 @@ class SubstituteRequestService {
   async approveRequest(requestId, teacherId) {
     try {
       const request = await this.getSubstituteRequestById(requestId);
-      // Approve the request
+      
+      // Cập nhật trạng thái phê duyệt của giáo viên
       await request.approveByTeacher(teacherId);
-      // Lưu người xử lý
+      
+      // Cập nhật teacherApproved = true
+      request.teacherApproved = true;
       request.processedBy = teacherId;
       await request.save();
-      // Update the lesson by replacing the original teacher with substitute teacher
-      await Lesson.findByIdAndUpdate(request.lesson._id, {
-        teacher: teacherId, // Thay thế giáo viên gốc
-        substituteTeacher: request.lesson.teacher, // Lưu giáo viên gốc vào substituteTeacher để backup
-      });
 
-      // Gửi notification cho phụ huynh
-      await parentNotificationService.notifySubstituteApproved(
-        request.lesson._id,
-        teacherId,
-        request.lesson.teacher
-      );
-      // Cancel other pending requests from this teacher
-      await this.cancelOtherTeacherRequests(teacherId, requestId);
       // ==== Gửi notification thay cho email ====
       // 1. Gửi notification cho giáo viên yêu cầu
       await notificationService.createNotification({
         type: "activity",
-        title: "Yêu cầu dạy thay đã được chấp nhận",
+        title: "Yêu cầu dạy thay đã được giáo viên chấp nhận",
         content: `Yêu cầu dạy thay cho tiết ${
           request.lesson.subject.subjectName
         } lớp ${request.lesson.class.className} vào ngày ${new Date(
@@ -191,7 +155,7 @@ class SubstituteRequestService {
           request.candidateTeachers.find(
             (c) => c.teacher._id.toString() === teacherId.toString()
           )?.teacher.name || ""
-        } chấp nhận.`,
+        } chấp nhận. Đang chờ quản lý phê duyệt.`,
         sender: teacherId,
         receiverScope: {
           type: "user",
@@ -199,6 +163,33 @@ class SubstituteRequestService {
         },
         relatedObject: { id: request._id, requestType: "substitute_request" },
       });
+
+      // 2. Gửi notification cho manager để phê duyệt lần 2
+      const managers = await User.find({ role: { $in: ["manager", "admin"] } });
+      const managerIds = managers.map((m) => m._id.toString());
+      
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu dạy thay cần phê duyệt",
+        content: `Yêu cầu dạy thay cho tiết ${
+          request.lesson.subject.subjectName
+        } lớp ${request.lesson.class.className} vào ngày ${new Date(
+          request.lesson.scheduledDate
+        ).toLocaleDateString("vi-VN")} (Tiết ${
+          request.lesson.timeSlot.period
+        }) đã được giáo viên ${
+          request.candidateTeachers.find(
+            (c) => c.teacher._id.toString() === teacherId.toString()
+          )?.teacher.name || ""
+        } chấp nhận. Vui lòng phê duyệt để hoàn tất yêu cầu.`,
+        sender: teacherId,
+        receiverScope: {
+          type: "user",
+          ids: managerIds,
+        },
+        relatedObject: { id: request._id, requestType: "substitute_request" },
+      });
+
       // 3. Gửi notification cho các candidate còn lại (trừ người đã nhận)
       const otherCandidates = request.candidateTeachers.filter(
         (c) =>
@@ -224,7 +215,102 @@ class SubstituteRequestService {
           relatedObject: { id: request._id, requestType: "substitute_request" },
         });
       }
-      // 4. Gửi notification cho học sinh lớp đó
+
+      return {
+        success: true,
+        message: "Substitute request approved by teacher, waiting for manager approval",
+        request: request,
+      };
+    } catch (error) {
+      console.error("❌ Error approving substitute request:", error.message);
+      throw new Error(`Failed to approve substitute request: ${error.message}`);
+    }
+  }
+
+  // Approve substitute request by manager (giai đoạn 2)
+  async approveByManager(requestId, managerId) {
+    try {
+      const request = await this.getSubstituteRequestById(requestId);
+      
+      if (!request.teacherApproved) {
+        throw new Error("Teacher has not approved this request yet");
+      }
+      
+      if (request.managerApproved) {
+        throw new Error("Request has already been approved by manager");
+      }
+      
+      if (request.status !== "pending") {
+        throw new Error("Request is no longer pending");
+      }
+
+      // Cập nhật trạng thái phê duyệt của manager
+      request.managerApproved = true;
+      request.status = "approved";
+      request.processedBy = managerId;
+      await request.save();
+
+      // Tìm candidate teacher đã approve
+      const approvedCandidate = request.candidateTeachers.find(c => c.status === "approved");
+      if (!approvedCandidate) {
+        throw new Error("No approved candidate teacher found");
+      }
+
+      // Update the lesson by replacing the original teacher with substitute teacher
+      await Lesson.findByIdAndUpdate(request.lesson._id, {
+        teacher: approvedCandidate.teacher._id, // Thay thế giáo viên gốc
+        substituteTeacher: request.lesson.teacher, // Lưu giáo viên gốc vào substituteTeacher để backup
+      });
+
+      // Gửi notification cho phụ huynh
+      await parentNotificationService.notifySubstituteApproved(
+        request.lesson._id,
+        approvedCandidate.teacher._id,
+        request.lesson.teacher
+      );
+
+      // Cancel other pending requests from this teacher
+      await this.cancelOtherTeacherRequests(approvedCandidate.teacher._id, requestId);
+
+      // Gửi notification cho giáo viên yêu cầu
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu dạy thay đã được phê duyệt hoàn toàn",
+        content: `Yêu cầu dạy thay cho tiết ${
+          request.lesson.subject.subjectName
+        } lớp ${request.lesson.class.className} vào ngày ${new Date(
+          request.lesson.scheduledDate
+        ).toLocaleDateString("vi-VN")} (Tiết ${
+          request.lesson.timeSlot.period
+        }) đã được quản lý phê duyệt. Yêu cầu đã hoàn tất.`,
+        sender: managerId,
+        receiverScope: {
+          type: "user",
+          ids: [request.requestingTeacher._id.toString()],
+        },
+        relatedObject: { id: request._id, requestType: "substitute_request" },
+      });
+
+      // Gửi notification cho candidate teacher đã approve
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu dạy thay đã được phê duyệt hoàn toàn",
+        content: `Yêu cầu dạy thay cho tiết ${
+          request.lesson.subject.subjectName
+        } lớp ${request.lesson.class.className} vào ngày ${new Date(
+          request.lesson.scheduledDate
+        ).toLocaleDateString("vi-VN")} (Tiết ${
+          request.lesson.timeSlot.period
+        }) đã được quản lý phê duyệt. Bạn sẽ dạy thay cho tiết này.`,
+        sender: managerId,
+        receiverScope: {
+          type: "user",
+          ids: [approvedCandidate.teacher._id.toString()],
+        },
+        relatedObject: { id: request._id, requestType: "substitute_request" },
+      });
+
+      // Gửi notification cho học sinh lớp đó
       const ClassModel = require("../../classes/models/class.model");
       const classInfo = await ClassModel.findById(request.lesson.class._id);
       if (classInfo && typeof classInfo.getStudents === "function") {
@@ -240,11 +326,9 @@ class SubstituteRequestService {
             ).toLocaleDateString("vi-VN")} (Tiết ${
               request.lesson.timeSlot.period
             }) sẽ được giáo viên ${
-              request.candidateTeachers.find(
-                (c) => c.teacher._id.toString() === teacherId.toString()
-              )?.teacher.name || ""
+              approvedCandidate.teacher.name || ""
             } dạy thay cho giáo viên ${request.requestingTeacher.name}.`,
-            sender: teacherId,
+            sender: managerId,
             receiverScope: {
               type: "user",
               ids: students.map((s) => s._id.toString()),
@@ -256,11 +340,15 @@ class SubstituteRequestService {
           });
         }
       }
-      // ======================================
-      return await this.getSubstituteRequestById(requestId);
+
+      return {
+        success: true,
+        message: "Substitute request approved by manager successfully",
+        request: request,
+      };
     } catch (error) {
-      console.error("Error approving substitute request:", error);
-      throw error;
+      console.error("❌ Error approving substitute request by manager:", error.message);
+      throw new Error(`Failed to approve substitute request by manager: ${error.message}`);
     }
   }
 

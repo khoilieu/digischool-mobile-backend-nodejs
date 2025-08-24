@@ -411,6 +411,24 @@ class ScheduleService {
             as: "leaveRequests" 
           } 
         },
+        // TỐI ƯU: Thêm lookup cho TeacherLeaveRequest
+        { 
+          $lookup: { 
+            from: "teacherleaverequests", 
+            localField: "lessonDetails._id", 
+            foreignField: "lessonId", 
+            as: "teacherLeaveRequests" 
+          } 
+        },
+        // TỐI ƯU: Thêm lookup cho LessonRequest (makeup/swap/substitute)
+        { 
+          $lookup: { 
+            from: "lessonrequests", 
+            localField: "lessonDetails._id", 
+            foreignField: "lesson", 
+            as: "lessonRequests" 
+          } 
+        },
         // TỐI ƯU: Thêm lookup cho PersonalActivity
         { 
           $lookup: { 
@@ -490,6 +508,24 @@ class ScheduleService {
       const testInfoMap = new Map();
       scheduleData.testInfos.forEach(testInfo => {
         testInfoMap.set(testInfo.lesson.toString(), true);
+      });
+
+      // TỐI ƯU: Tạo maps cho các loại request khác nhau
+      const teacherLeaveRequestMap = new Map();
+      const lessonRequestMap = new Map();
+      
+      // Xử lý TeacherLeaveRequest với trạng thái pending
+      scheduleData.teacherLeaveRequests.forEach(request => {
+        if (request.status === "pending") {
+          teacherLeaveRequestMap.set(request.lessonId.toString(), true);
+        }
+      });
+      
+      // Xử lý LessonRequest (makeup/swap/substitute) với trạng thái pending
+      scheduleData.lessonRequests.forEach(request => {
+        if (request.status === "pending") {
+          lessonRequestMap.set(request.lesson.toString(), true);
+        }
       });
 
       // SỬA ĐỔI: Chỉ lấy leave requests với trạng thái pending hoặc approved
@@ -597,7 +633,16 @@ class ScheduleService {
         }
 
         // Thêm trạng thái từ aggregation result
-        lessonObj.hasTestInfo = testInfoMap.has(lesson._id.toString());
+        // Thay thế hasTestInfo bằng hasNotification với logic mới
+        const hasTestInfo = testInfoMap.has(lesson._id.toString());
+        const hasTeacherLeaveRequest = teacherLeaveRequestMap.has(lesson._id.toString());
+        const hasLessonRequest = lessonRequestMap.has(lesson._id.toString());
+        
+        // hasNotification = true nếu có một trong các điều kiện sau:
+        // 1. có test information
+        // 2. giáo viên có các yêu cầu makeup/swap/substitute trạng thái pending
+        // 3. giáo viên có yêu cầu xin nghỉ trạng thái pending
+        lessonObj.hasNotification = hasTestInfo || hasTeacherLeaveRequest || hasLessonRequest;
         
         // SỬA ĐỔI: Thêm logic mới cho leave request
         const hasLeaveRequest = leaveRequestMap.has(lesson._id.toString());
@@ -608,8 +653,6 @@ class ScheduleService {
           lessonObj.leaveRequestStatus = leaveRequestStatusMap.get(lesson._id.toString());
         }
         
-        // Không cần thêm personalActivity vào lesson nữa
-        // Chỉ trả về mảng studentPersonalActivities riêng biệt
 
         return lessonObj;
       });
@@ -689,7 +732,10 @@ class ScheduleService {
       const lessons = await Lesson.aggregate([
         {
           $match: {
-            teacher: teacherObjectId,
+            $or: [
+              { teacher: teacherObjectId },
+              { substituteTeacher: teacherObjectId }
+            ],
             academicYear: academicYearDoc._id,
             scheduledDate: {
               $gte: startDate,
@@ -722,6 +768,22 @@ class ScheduleService {
           }
         },
         {
+          $lookup: {
+            from: "users",
+            localField: "teacher",
+            foreignField: "_id",
+            as: "teacherDetails"
+          }
+        },
+        {
+          $lookup: {
+            from: "users",
+            localField: "substituteTeacher",
+            foreignField: "_id",
+            as: "substituteTeacherDetails"
+          }
+        },
+        {
           $sort: {
             scheduledDate: 1,
             "timeSlotDetails.period": 1
@@ -748,6 +810,8 @@ class ScheduleService {
       const classMap = new Map();
       const subjectMap = new Map();
       const timeSlotMap = new Map();
+      const teacherMap = new Map();
+      const substituteTeacherMap = new Map();
 
       lessons.forEach(lesson => {
         // Process class details
@@ -779,6 +843,26 @@ class ScheduleService {
             startTime: timeSlotDetail.startTime,
             endTime: timeSlotDetail.endTime,
             type: timeSlotDetail.type
+          });
+        }
+
+        // Process teacher details
+        if (lesson.teacherDetails && lesson.teacherDetails.length > 0) {
+          const teacherDetail = lesson.teacherDetails[0];
+          teacherMap.set(lesson.teacher.toString(), {
+            _id: teacherDetail._id,
+            name: teacherDetail.name,
+            email: teacherDetail.email
+          });
+        }
+
+        // Process substituteTeacher details
+        if (lesson.substituteTeacherDetails && lesson.substituteTeacherDetails.length > 0) {
+          const substituteTeacherDetail = lesson.substituteTeacherDetails[0];
+          substituteTeacherMap.set(lesson.substituteTeacher.toString(), {
+            _id: substituteTeacherDetail._id,
+            name: substituteTeacherDetail.name,
+            email: substituteTeacherDetail.email
           });
         }
       });
@@ -901,6 +985,12 @@ class ScheduleService {
         }
         if (lesson.timeSlot) {
           lessonObj.timeSlot = timeSlotMap.get(lesson.timeSlot.toString());
+        }
+        if (lesson.teacher) {
+          lessonObj.teacher = teacherMap.get(lesson.teacher.toString());
+        }
+        if (lesson.substituteTeacher) {
+          lessonObj.substituteTeacher = substituteTeacherMap.get(lesson.substituteTeacher.toString());
         }
 
         // Thêm các trạng thái boolean

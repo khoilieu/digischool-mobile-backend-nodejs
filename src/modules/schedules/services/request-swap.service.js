@@ -100,28 +100,6 @@ class SwapRequestService {
         .populate("replacementTeacher", "name email fullName");
 
       // ==== Gửi notification thay cho email ====
-      // Gửi notification cho manager
-      const managers = await User.find({ role: { $in: ["manager", "admin"] } });
-      const managerIds = managers.map((m) => m._id.toString());
-      await notificationService.createNotification({
-        type: "activity",
-        title: "Yêu cầu đổi tiết mới",
-        content: `Có yêu cầu đổi tiết mới từ giáo viên ${
-          populatedRequest.requestingTeacher.fullName ||
-          populatedRequest.requestingTeacher.name
-        } cho lớp ${originalLesson.class.className}, môn ${
-          originalLesson.subject.subjectName
-        }.`,
-        sender: data.teacherId,
-        receiverScope: {
-          type: "user",
-          ids: managerIds,
-        },
-        relatedObject: {
-          id: populatedRequest._id,
-          requestType: "swap_request",
-        },
-      });
       // Gửi notification cho giáo viên replacement
       await notificationService.createNotification({
         type: "activity",
@@ -294,6 +272,107 @@ class SwapRequestService {
         );
       }
 
+      // Cập nhật trạng thái phê duyệt của giáo viên
+      lessonRequest.teacherApproved = true;
+      lessonRequest.processedBy = replacementTeacherId;
+      await lessonRequest.save();
+
+      // ==== Gửi notification thay cho email ====
+      // 1. Gửi notification cho giáo viên yêu cầu
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu đổi tiết đã được giáo viên chấp nhận",
+        content: `Yêu cầu đổi tiết của bạn đã được giáo viên ${
+          lessonRequest.replacementTeacher.fullName ||
+          lessonRequest.replacementTeacher.name
+        } chấp nhận. Đang chờ quản lý phê duyệt.`,
+        sender: replacementTeacherId,
+        receiverScope: {
+          type: "user",
+          ids: [lessonRequest.requestingTeacher._id.toString()],
+        },
+        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
+      });
+
+      // 2. Gửi notification cho manager để phê duyệt lần 2
+      const managers = await User.find({ role: { $in: ["manager", "admin"] } });
+      const managerIds = managers.map((m) => m._id.toString());
+      
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu đổi tiết cần phê duyệt",
+        content: `Yêu cầu đổi tiết từ giáo viên ${
+          lessonRequest.requestingTeacher.fullName ||
+          lessonRequest.requestingTeacher.name
+        } đã được giáo viên ${
+          lessonRequest.replacementTeacher.fullName ||
+          lessonRequest.replacementTeacher.name
+        } chấp nhận. Vui lòng phê duyệt để hoàn tất yêu cầu.`,
+        sender: replacementTeacherId,
+        receiverScope: {
+          type: "user",
+          ids: managerIds,
+        },
+        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
+      });
+
+      console.log(`✅ Swap request approved by teacher, waiting for manager approval: ${lessonRequest.requestId}`);
+
+      return {
+        success: true,
+        message: "Swap request approved by teacher, waiting for manager approval",
+        request: lessonRequest,
+      };
+    } catch (error) {
+      console.error("❌ Error approving swap request:", error.message);
+      throw new Error(`Failed to approve swap request: ${error.message}`);
+    }
+  }
+
+  // Duyệt yêu cầu đổi tiết bởi manager (giai đoạn 2)
+  async approveSwapRequestByManager(requestId, managerId) {
+    try {
+      console.log(`✅ Approving swap request by manager: ${requestId}`);
+
+      // Tìm request
+      const lessonRequest = await LessonRequest.findById(requestId)
+        .populate({
+          path: "originalLesson",
+          populate: {
+            path: "timeSlot",
+            select: "period name startTime endTime",
+          },
+        })
+        .populate({
+          path: "replacementLesson",
+          populate: {
+            path: "timeSlot",
+            select: "period name startTime endTime",
+          },
+        })
+        .populate("requestingTeacher", "name email fullName")
+        .populate("replacementTeacher", "name email fullName");
+
+      if (!lessonRequest) {
+        throw new Error("Swap request not found");
+      }
+
+      if (lessonRequest.requestType !== "swap") {
+        throw new Error("Not a swap request");
+      }
+
+      if (!lessonRequest.teacherApproved) {
+        throw new Error("Teacher has not approved this request yet");
+      }
+
+      if (lessonRequest.managerApproved) {
+        throw new Error("Request has already been approved by manager");
+      }
+
+      if (lessonRequest.status !== "pending") {
+        throw new Error("Request is no longer pending");
+      }
+
       // Kiểm tra lessons vẫn còn valid
       const originalLesson = await Lesson.findById(
         lessonRequest.originalLesson._id
@@ -321,8 +400,9 @@ class SwapRequestService {
       );
 
       // Cập nhật trạng thái request
+      lessonRequest.managerApproved = true;
       lessonRequest.status = "approved";
-      lessonRequest.processedBy = replacementTeacherId;
+      lessonRequest.processedBy = managerId;
       await lessonRequest.save();
 
       // Xóa trường candidateTeachers khỏi document
@@ -334,18 +414,29 @@ class SwapRequestService {
       // 1. Gửi notification cho giáo viên yêu cầu
       await notificationService.createNotification({
         type: "activity",
-        title: "Yêu cầu đổi tiết đã được chấp nhận",
-        content: `Yêu cầu đổi tiết của bạn đã được giáo viên ${
-          lessonRequest.replacementTeacher.fullName ||
-          lessonRequest.replacementTeacher.name
-        } chấp nhận.`,
-        sender: replacementTeacherId,
+        title: "Yêu cầu đổi tiết đã được phê duyệt hoàn toàn",
+        content: `Yêu cầu đổi tiết của bạn đã được quản lý phê duyệt. Yêu cầu đã hoàn tất.`,
+        sender: managerId,
         receiverScope: {
           type: "user",
           ids: [lessonRequest.requestingTeacher._id.toString()],
         },
         relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
       });
+
+      // 2. Gửi notification cho replacement teacher
+      await notificationService.createNotification({
+        type: "activity",
+        title: "Yêu cầu đổi tiết đã được phê duyệt hoàn toàn",
+        content: `Yêu cầu đổi tiết đã được quản lý phê duyệt. Yêu cầu đã hoàn tất.`,
+        sender: managerId,
+        receiverScope: {
+          type: "user",
+          ids: [lessonRequest.replacementTeacher._id.toString()],
+        },
+        relatedObject: { id: lessonRequest._id, requestType: "swap_request" },
+      });
+
       // 3. Gửi notification cho học sinh lớp đó
       const students = await User.find({
         role: "student",
@@ -356,7 +447,7 @@ class SwapRequestService {
           type: "activity",
           title: "Thông báo đổi tiết",
           content: `Lịch học lớp ${originalLesson.class.className} đã được đổi tiết theo yêu cầu. Vui lòng kiểm tra lại lịch học mới.`,
-          sender: replacementTeacherId,
+          sender: managerId,
           receiverScope: {
             type: "user",
             ids: students.map((s) => s._id.toString()),
@@ -372,16 +463,17 @@ class SwapRequestService {
         lessonRequest.requestingTeacher._id,
         lessonRequest.replacementTeacher._id
       );
-      // =========================================
+
+      console.log(`✅ Swap request approved by manager successfully: ${lessonRequest.requestId}`);
 
       return {
         success: true,
-        message: "Swap request approved successfully",
+        message: "Swap request approved by manager successfully",
         request: lessonRequest,
       };
     } catch (error) {
-      console.error("❌ Error approving swap request:", error.message);
-      throw new Error(`Failed to approve swap request: ${error.message}`);
+      console.error("❌ Error approving swap request by manager:", error.message);
+      throw new Error(`Failed to approve swap request by manager: ${error.message}`);
     }
   }
 
