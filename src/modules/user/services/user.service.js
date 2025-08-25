@@ -2151,6 +2151,29 @@ class UserService {
     const number = Math.floor(Math.random() * 200) + 1;
     return `${number} ${street}, ${district}, TP.HCM`;
   }
+
+  // Lấy danh sách giáo viên cho phụ huynh chọn khi góp ý
+  async getTeachersList() {
+    try {
+      const teachers = await User.find({ 
+        role: { $in: ['teacher', 'homeroom_teacher'] },
+        active: true 
+      })
+      .select('_id name teacherId subject')
+      .populate('subject', 'subjectName')
+      .sort({ name: 1 });
+
+      return teachers.map(teacher => ({
+        _id: teacher._id,
+        name: teacher.name,
+        teacherId: teacher.teacherId,
+        subject: teacher.subject ? teacher.subject.subjectName : 'Chưa phân môn'
+      }));
+    } catch (error) {
+      console.error('❌ Lỗi lấy danh sách giáo viên:', error.message);
+      throw error;
+    }
+  }
 }
 
 module.exports = new UserService(); 

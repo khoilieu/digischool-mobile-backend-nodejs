@@ -94,4 +94,22 @@ router.get('/classes-by-grade',
   statisticsController.getClassesByGrade
 );
 
+// Xuất thống kê đánh giá tiết học theo tuần ra Excel
+router.get('/export-weekly-evaluation',
+  authMiddleware.authorize("admin", "manager"), 
+  statisticsController.exportWeeklyEvaluation
+);
+
+// Lấy danh sách tuần có sẵn cho dropdown
+router.get('/available-weeks',
+  authMiddleware.authorize("admin", "manager"), 
+  statisticsController.getAvailableWeeks
+);
+
+// Lấy danh sách năm học cho dropdown
+router.get('/academic-years',
+  authMiddleware.authorize("admin", "manager"), 
+  statisticsController.getAcademicYears
+);
+
 module.exports = router;

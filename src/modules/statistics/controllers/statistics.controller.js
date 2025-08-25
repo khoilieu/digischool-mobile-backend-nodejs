@@ -365,20 +365,90 @@ class StatisticsController {
       if (!gradeLevel || !academicYear) {
         return res.status(400).json({
           success: false,
-          message: "Thiếu thông tin: gradeLevel, academicYear"
+          message: "Grade level and academic year are required"
         });
       }
 
       const statisticsService = new StatisticsService();
-      const classes = await statisticsService.getClassesByGrade(
-        parseInt(gradeLevel),
-        academicYear
-      );
+      const classes = await statisticsService.getClassesByGrade(gradeLevel, academicYear);
       
       res.status(200).json({
         success: true,
         message: "Lấy danh sách lớp theo khối thành công",
         data: classes
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Xuất thống kê đánh giá tiết học theo tuần ra Excel
+   */
+  exportWeeklyEvaluation = async (req, res, next) => {
+    try {
+      const { academicYearId, weekNumber } = req.query;
+      
+      if (!academicYearId || !weekNumber) {
+        return res.status(400).json({
+          success: false,
+          message: "Academic year ID and week number are required"
+        });
+      }
+
+      const statisticsService = new StatisticsService();
+      const excelBuffer = await statisticsService.generateWeeklyEvaluationExcel(academicYearId, weekNumber);
+      
+      // Set headers for Excel download
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="weekly-evaluation-week-${weekNumber}.xlsx"`);
+      res.setHeader('Content-Length', excelBuffer.length);
+      
+      res.status(200).send(excelBuffer);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Lấy danh sách tuần có sẵn cho dropdown
+   */
+  getAvailableWeeks = async (req, res, next) => {
+    try {
+      const { academicYearId } = req.query;
+      
+      if (!academicYearId) {
+        return res.status(400).json({
+          success: false,
+          message: "Academic year ID is required"
+        });
+      }
+
+      const statisticsService = new StatisticsService();
+      const weeks = await statisticsService.getAvailableWeeks(academicYearId);
+      
+      res.status(200).json({
+        success: true,
+        message: "Lấy danh sách tuần thành công",
+        data: weeks
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * Lấy danh sách năm học cho dropdown
+   */
+  getAcademicYears = async (req, res, next) => {
+    try {
+      const statisticsService = new StatisticsService();
+      const academicYears = await statisticsService.getAcademicYears();
+      
+      res.status(200).json({
+        success: true,
+        message: "Lấy danh sách năm học thành công",
+        data: academicYears
       });
     } catch (error) {
       next(error);

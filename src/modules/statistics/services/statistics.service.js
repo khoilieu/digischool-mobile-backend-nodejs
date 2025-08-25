@@ -1118,6 +1118,222 @@ class StatisticsService {
   }
 
   /**
+   * Tạo Excel thống kê đánh giá tiết học theo tuần
+   */
+  async generateWeeklyEvaluationExcel(academicYearId, weekNumber) {
+    try {
+      const ExcelJS = require('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Thống kê đánh giá tuần');
+
+      // Lấy thông tin tuần
+      const weekDates = await this.getWeekDates(weekNumber, academicYearId);
+      
+      // Lấy tất cả tiết học trong tuần
+      const lessons = await Lesson.find({
+        scheduledDate: {
+          $gte: weekDates.startDate,
+          $lte: weekDates.endDate
+        },
+        status: "completed"
+      }).populate('class', 'className gradeLevel');
+
+      // Lấy tất cả đánh giá tiết học trong tuần
+      const evaluations = await TeacherLessonEvaluation.find({
+        lesson: { $in: lessons.map(l => l._id) }
+      }).populate([
+        { path: 'lesson', select: 'scheduledDate' },
+        { path: 'class', select: 'className gradeLevel' },
+        { path: 'oralTests.student', select: 'name' },
+        { path: 'violations.student', select: 'name' },
+        { path: 'absentStudents.student', select: 'name' }
+      ]);
+
+      // Nhóm dữ liệu theo lớp
+      const classStats = {};
+      
+      evaluations.forEach(evaluation => {
+        const className = evaluation.class.className;
+        if (!classStats[className]) {
+          classStats[className] = {
+            className: className,
+            gradeLevel: evaluation.class.gradeLevel,
+            totalLessons: 0,
+            totalAbsent: 0,
+            totalViolations: 0,
+            oralTestScores: {
+              under5: 0,    // Dưới trung bình (<5đ)
+              average: 0,   // Trung bình (5-6đ)
+              good: 0,      // Khá (6-8đ)
+              excellent: 0  // Giỏi (8-10đ)
+            },
+            lessonRatings: {
+              'A+': 0,
+              'A': 0,
+              'B+': 0,
+              'B': 0,
+              'C': 0
+            }
+          };
+        }
+
+        // Đếm tiết học
+        classStats[className].totalLessons++;
+
+        // Đếm học sinh vắng
+        classStats[className].totalAbsent += evaluation.summary?.totalAbsent || 0;
+
+        // Đếm vi phạm
+        classStats[className].totalViolations += evaluation.summary?.totalViolations || 0;
+
+        // Phân loại điểm kiểm tra miệng
+        evaluation.oralTests?.forEach(oralTest => {
+          const score = oralTest.score;
+          if (score < 5) classStats[className].oralTestScores.under5++;
+          else if (score >= 5 && score < 6) classStats[className].oralTestScores.average++;
+          else if (score >= 6 && score < 8) classStats[className].oralTestScores.good++;
+          else if (score >= 8) classStats[className].oralTestScores.excellent++;
+        });
+
+        // Đếm đánh giá tiết học
+        if (evaluation.rating) {
+          classStats[className].lessonRatings[evaluation.rating]++;
+        }
+      });
+
+      // Tạo header cho Excel
+      worksheet.columns = [
+        { header: 'Lớp', key: 'className', width: 15 },
+        { header: 'Khối', key: 'gradeLevel', width: 10 },
+        { header: 'Số tiết hoàn thành', key: 'totalLessons', width: 20 },
+        { header: 'Tổng học sinh vắng', key: 'totalAbsent', width: 20 },
+        { header: 'Tổng vi phạm', key: 'totalViolations', width: 15 },
+        { header: 'Kiểm tra miệng <5đ', key: 'under5', width: 18 },
+        { header: 'Kiểm tra miệng 5-6đ', key: 'average', width: 18 },
+        { header: 'Kiểm tra miệng 6-8đ', key: 'good', width: 18 },
+        { header: 'Kiểm tra miệng 8-10đ', key: 'excellent', width: 18 },
+        { header: 'Đánh giá A+', key: 'A+', width: 15 },
+        { header: 'Đánh giá A', key: 'A', width: 15 },
+        { header: 'Đánh giá B+', key: 'B+', width: 15 },
+        { header: 'Đánh giá B', key: 'B', width: 15 },
+        { header: 'Đánh giá C', key: 'C', width: 15 }
+      ];
+
+      // Style header
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE0E0E0' }
+      };
+
+      // Thêm dữ liệu
+      Object.values(classStats).forEach(classData => {
+        worksheet.addRow({
+          className: classData.className,
+          gradeLevel: classData.gradeLevel,
+          totalLessons: classData.totalLessons,
+          totalAbsent: classData.totalAbsent,
+          totalViolations: classData.totalViolations,
+          under5: classData.oralTestScores.under5,
+          average: classData.oralTestScores.average,
+          good: classData.oralTestScores.good,
+          excellent: classData.oralTestScores.excellent,
+          'A+': classData.lessonRatings['A+'],
+          'A': classData.lessonRatings['A'],
+          'B+': classData.lessonRatings['B+'],
+          'B': classData.lessonRatings['B'],
+          'C': classData.lessonRatings['C']
+        });
+      });
+
+      // Thêm thông tin tuần
+      worksheet.spliceRows(1, 0, 1);
+      worksheet.mergeCells('A1:N1');
+      worksheet.getCell('A1').value = `THỐNG KÊ ĐÁNH GIÁ TIẾT HỌC - TUẦN ${weekNumber} (${weekDates.startDate.toLocaleDateString('vi-VN')} - ${weekDates.endDate.toLocaleDateString('vi-VN')})`;
+      worksheet.getCell('A1').font = { bold: true, size: 14 };
+      worksheet.getCell('A1').alignment = { horizontal: 'center' };
+
+      // Tạo buffer Excel
+      const buffer = await workbook.xlsx.writeBuffer();
+      return buffer;
+
+    } catch (error) {
+      throw new Error(`Lỗi khi tạo Excel: ${error.message}`);
+    }
+  }
+
+  /**
+   * Lấy danh sách tuần có sẵn cho dropdown
+   */
+  async getAvailableWeeks(academicYearId) {
+    try {
+      // Lấy tất cả weekly schedules của năm học
+      const weeklySchedules = await WeeklySchedule.find({
+        academicYear: academicYearId
+      }).sort({ weekNumber: 1 });
+
+      // Lấy thông tin năm học
+      const academicYear = await AcademicYear.findById(academicYearId);
+      if (!academicYear) {
+        throw new Error('Không tìm thấy năm học');
+      }
+
+      // Tạo danh sách tuần unique (chỉ lấy tuần thực sự có trong database)
+      const weeksMap = new Map();
+      
+      // Thêm tuần từ weekly schedules (chỉ lấy tuần unique)
+      weeklySchedules.forEach(ws => {
+        if (!weeksMap.has(ws.weekNumber)) {
+          weeksMap.set(ws.weekNumber, {
+            weekNumber: ws.weekNumber,
+            startDate: ws.startDate,
+            endDate: ws.endDate,
+            semester: ws.semester || this.getSemesterByWeek(ws.weekNumber, academicYear.totalWeeks),
+            hasData: true
+          });
+        }
+      });
+
+      // Chỉ trả về các tuần thực sự có trong database
+      const weeks = Array.from(weeksMap.values()).sort((a, b) => a.weekNumber - b.weekNumber);
+
+      return weeks;
+    } catch (error) {
+      throw new Error(`Lỗi khi lấy danh sách tuần: ${error.message}`);
+    }
+  }
+
+  /**
+   * Xác định học kỳ dựa trên số tuần
+   */
+  getSemesterByWeek(weekNumber, totalWeeks) {
+    const midPoint = Math.ceil(totalWeeks / 2);
+    return weekNumber <= midPoint ? 'Học kỳ 1' : 'Học kỳ 2';
+  }
+
+  /**
+   * Lấy danh sách năm học
+   */
+  async getAcademicYears() {
+    try {
+      const academicYears = await AcademicYear.find({})
+        .select('name startDate endDate isActive')
+        .sort({ startDate: -1 });
+
+      return academicYears.map(ay => ({
+        _id: ay._id,
+        name: ay.name,
+        startDate: ay.startDate,
+        endDate: ay.endDate,
+        isActive: ay.isActive
+      }));
+    } catch (error) {
+      throw new Error(`Lỗi khi lấy danh sách năm học: ${error.message}`);
+    }
+  }
+
+  /**
    * Lấy thống kê sĩ số toàn trường theo ngày (cập nhật theo yêu cầu mới)
    */
   async getDailySchoolStatistics(targetDate) {

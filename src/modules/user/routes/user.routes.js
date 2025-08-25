@@ -118,7 +118,8 @@ router.post('/import-parents',
   userController.importParents
 );
 
-
+// Lấy danh sách giáo viên cho phụ huynh chọn khi góp ý
+router.get('/teachers/list', userController.getTeachersList);
 
 // ===== API QUẢN LÝ TÀI KHOẢN =====
 

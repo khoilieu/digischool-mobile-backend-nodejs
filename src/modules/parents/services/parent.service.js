@@ -135,7 +135,7 @@ class ParentService {
   // Gửi feedback
   async sendFeedback(parentId, feedbackData) {
     try {
-      const { rating, description } = feedbackData;
+      const { rating, type, targetTeacher, description } = feedbackData;
 
       // Kiểm tra phụ huynh
       const parent = await User.findById(parentId);
@@ -147,10 +147,20 @@ class ParentService {
         throw new Error('Người dùng không phải là phụ huynh');
       }
 
+      // Kiểm tra targetTeacher nếu type là giao_vien
+      if (type === 'giao_vien' && targetTeacher) {
+        const teacher = await User.findById(targetTeacher);
+        if (!teacher || !teacher.role.includes('teacher')) {
+          throw new Error('Giáo viên không tồn tại hoặc không hợp lệ');
+        }
+      }
+
       // Tạo feedback mới
       const feedback = new Feedback({
         user: parentId,
         rating,
+        type,
+        targetTeacher: type === 'giao_vien' ? targetTeacher : undefined,
         description
       });
 
@@ -208,7 +218,7 @@ class ParentService {
   // Lấy tất cả feedback (cho admin/manager)
   async getAllFeedbacks(filters = {}) {
     try {
-      const { status, rating, page = 1, limit = 10 } = filters;
+      const { status, rating, type, page = 1, limit = 10 } = filters;
       
       const query = {};
       
@@ -222,6 +232,11 @@ class ParentService {
         query.rating = rating;
       }
 
+      // Filter theo type
+      if (type && type !== 'all') {
+        query.type = type;
+      }
+
       const skip = (page - 1) * limit;
 
       const feedbacks = await Feedback.find(query)
@@ -229,6 +244,7 @@ class ParentService {
         .skip(skip)
         .limit(limit)
         .populate('user', 'name email')
+        .populate('targetTeacher', 'name teacherId')
         .populate('respondedBy', 'name email');
 
       const total = await Feedback.countDocuments(query);
@@ -271,6 +287,20 @@ class ParentService {
 
       const averageRating = ratingStats.length > 0 ? ratingStats[0].averageRating : 0;
 
+      // Thống kê theo type
+      const typeStats = await Feedback.aggregate([
+        {
+          $group: {
+            _id: '$type',
+            count: { $sum: 1 },
+            averageRating: { $avg: '$rating' }
+          }
+        },
+        {
+          $sort: { count: -1 }
+        }
+      ]);
+
       return {
         success: true,
         data: {
@@ -278,7 +308,8 @@ class ParentService {
           pending,
           reviewed,
           resolved,
-          averageRating: Math.round(averageRating * 10) / 10 // Làm tròn 1 chữ số thập phân
+          averageRating: Math.round(averageRating * 10) / 10, // Làm tròn 1 chữ số thập phân
+          typeStats
         }
       };
     } catch (error) {

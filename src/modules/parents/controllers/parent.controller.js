@@ -63,10 +63,12 @@ class ParentController {
   sendFeedback = async (req, res) => {
     try {
       const parentId = req.user._id;
-      const { rating, description } = req.body;
+      const { rating, type, targetTeacher, description } = req.body;
 
       const result = await parentService.sendFeedback(parentId, {
         rating,
+        type,
+        targetTeacher,
         description
       });
 
@@ -113,11 +115,12 @@ class ParentController {
   // Lấy tất cả feedback (cho admin/manager)
   getAllFeedbacks = async (req, res) => {
     try {
-      const { status, rating, page = 1, limit = 10 } = req.query;
+      const { status, rating, type, page = 1, limit = 10 } = req.query;
 
       const result = await parentService.getAllFeedbacks({
         status,
         rating: rating ? parseInt(rating) : undefined,
+        type,
         page: parseInt(page),
         limit: parseInt(limit)
       });

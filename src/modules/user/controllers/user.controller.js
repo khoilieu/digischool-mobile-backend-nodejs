@@ -405,6 +405,21 @@ class UserController {
     }
   }
 
+  // Lấy danh sách giáo viên cho phụ huynh chọn khi góp ý
+  async getTeachersList(req, res, next) {
+    try {
+      const result = await userService.getTeachersList();
+      
+      res.status(200).json({
+        success: true,
+        message: 'Lấy danh sách giáo viên thành công',
+        data: result
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
 }
 
 module.exports = new UserController(); 

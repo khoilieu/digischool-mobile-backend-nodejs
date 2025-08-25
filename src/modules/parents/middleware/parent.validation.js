@@ -14,6 +14,24 @@ const feedbackSchema = Joi.object({
       'number.max': 'Đánh giá tối đa là 5 sao',
       'any.required': 'Đánh giá là bắt buộc'
     }),
+  type: Joi.string()
+    .valid('ban_giam_hieu', 'tai_chinh', 'giao_vien', 'nhan_vien', 'canh_quan_ve_sinh', 'hoc_sinh')
+    .required()
+    .messages({
+      'string.empty': 'Loại góp ý không được để trống',
+      'any.only': 'Loại góp ý phải là ban_giam_hieu, tai_chinh, giao_vien, nhan_vien, canh_quan_ve_sinh hoặc hoc_sinh',
+      'any.required': 'Loại góp ý là bắt buộc'
+    }),
+  targetTeacher: Joi.when('type', {
+    is: 'giao_vien',
+    then: Joi.string().required().messages({
+      'string.empty': 'Giáo viên mục tiêu không được để trống',
+      'any.required': 'Giáo viên mục tiêu là bắt buộc khi loại góp ý là giáo viên'
+    }),
+    otherwise: Joi.forbidden().messages({
+      'any.unknown': 'Giáo viên mục tiêu chỉ được sử dụng khi loại góp ý là giáo viên'
+    })
+  }),
   description: Joi.string()
     .trim()
     .min(1)
@@ -87,6 +105,13 @@ const feedbackFiltersSchema = Joi.object({
       'string.empty': 'Trạng thái không được để trống',
       'any.only': 'Trạng thái phải là all, pending, reviewed hoặc resolved'
     }),
+  type: Joi.string()
+    .valid('all', 'ban_giam_hieu', 'tai_chinh', 'giao_vien', 'nhan_vien', 'canh_quan_ve_sinh', 'hoc_sinh')
+    .default('all')
+    .messages({
+      'string.empty': 'Loại góp ý không được để trống',
+      'any.only': 'Loại góp ý phải là all, ban_giam_hieu, tai_chinh, giao_vien, nhan_vien, canh_quan_ve_sinh hoặc hoc_sinh'
+    }),
   rating: Joi.number()
     .integer()
     .min(0)
@@ -104,8 +129,7 @@ const feedbackFiltersSchema = Joi.object({
     .default(1)
     .messages({
       'number.base': 'Trang phải là số',
-      'number.integer': 'Trang phải là số nguyên',
-      'number.min': 'Trang tối thiểu là 1'
+      'number.integer': 'Trang tối thiểu là 1'
     }),
   limit: Joi.number()
     .integer()
