@@ -1,7 +1,7 @@
 const { body, param, query, validationResult } = require("express-validator");
 
-// Validation for creating student leave requests
-const createLeaveRequests = [
+// Validation for creating lesson leave requests (requestType = "lesson")
+const createLessonLeaveRequests = [
   body("lessonIds")
     .isArray({ min: 1, max: 10 })
     .withMessage("Lesson IDs must be an array with 1-10 items"),
@@ -9,6 +9,36 @@ const createLeaveRequests = [
   body("lessonIds.*")
     .isMongoId()
     .withMessage("Each lesson ID must be a valid MongoDB ObjectId"),
+
+  body("phoneNumber")
+    .notEmpty()
+    .withMessage("Phone number is required")
+    .matches(/^[0-9+\-\s\(\)]{10,15}$/)
+    .withMessage("Phone number must be valid (10-15 digits)"),
+
+  body("reason")
+    .notEmpty()
+    .withMessage("Reason is required")
+    .isLength({ min: 1, max: 200 })
+    .withMessage("Reason must be between 1-200 characters")
+    .trim(),
+];
+
+// Validation for creating day leave request (requestType = "day")
+const createDayLeaveRequest = [
+  body("date")
+    .notEmpty()
+    .withMessage("Date is required")
+    .isISO8601()
+    .withMessage("Date must be a valid ISO date")
+    .custom((date) => {
+      const requestDate = new Date(date);
+      const now = new Date();
+      if (requestDate < now.setHours(0, 0, 0, 0)) {
+        throw new Error("Cannot request leave for past dates");
+      }
+      return true;
+    }),
 
   body("phoneNumber")
     .notEmpty()
@@ -210,7 +240,8 @@ const handleValidationErrors = (req, res, next) => {
 };
 
 const studentLeaveRequestValidation = {
-  createLeaveRequests: [...createLeaveRequests, handleValidationErrors],
+  createLessonLeaveRequests: [...createLessonLeaveRequests, handleValidationErrors],
+  createDayLeaveRequest: [...createDayLeaveRequest, handleValidationErrors],
   validateRequestId: [...validateRequestId, handleValidationErrors],
   validateApproveRequest: [...validateApproveRequest, handleValidationErrors],
   validateRejectRequest: [...validateRejectRequest, handleValidationErrors],

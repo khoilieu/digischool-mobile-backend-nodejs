@@ -1,8 +1,8 @@
 const studentLeaveRequestService = require("../services/student-leave-request.service");
 
 class StudentLeaveRequestController {
-  // Tạo đơn xin vắng cho nhiều tiết
-  async createLeaveRequests(req, res, next) {
+  // Tạo đơn xin vắng cho nhiều tiết (requestType = "lesson")
+  async createLessonLeaveRequests(req, res, next) {
     try {
       const studentId = req.user._id; // From auth middleware
       const { lessonIds, phoneNumber, reason } = req.body;
@@ -30,7 +30,7 @@ class StudentLeaveRequestController {
       }
 
       console.log(
-        `📝 Student ${studentId} requesting leave for ${lessonIds.length} lessons`
+        `📝 Student ${studentId} requesting lesson leave for ${lessonIds.length} lessons`
       );
 
       const result =
@@ -44,12 +44,56 @@ class StudentLeaveRequestController {
       res.status(statusCode).json({
         success: result.success,
         message: result.success
-          ? `Successfully created ${result.created.length} leave requests and notifications sent to teachers`
-          : "Failed to create leave requests",
+          ? `Successfully created ${result.created.length} lesson leave requests and notifications sent to subject teachers`
+          : "Failed to create lesson leave requests",
         data: result,
       });
     } catch (error) {
-      console.error("❌ Error in createLeaveRequests:", error.message);
+      console.error("❌ Error in createLessonLeaveRequests:", error.message);
+      next(error);
+    }
+  }
+
+  // Tạo đơn xin nghỉ cả ngày (requestType = "day")
+  async createDayLeaveRequest(req, res, next) {
+    try {
+      const studentId = req.user._id; // From auth middleware
+      const { date, phoneNumber, reason } = req.body;
+
+      // Validate input
+      if (!date || !phoneNumber || !reason) {
+        return res.status(400).json({
+          success: false,
+          message: "Date, phone number and reason are required",
+        });
+      }
+
+      // Validate date is not in the past
+      const requestDate = new Date(date);
+      const now = new Date();
+      if (requestDate < now.setHours(0, 0, 0, 0)) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot request leave for past dates",
+        });
+      }
+
+      console.log(
+        `📝 Student ${studentId} requesting day leave for ${new Date(date).toLocaleDateString()}`
+      );
+
+      const result = await studentLeaveRequestService.createDayLeaveRequest(
+        { date, phoneNumber, reason },
+        studentId
+      );
+
+      res.status(201).json({
+        success: true,
+        message: "Day leave request created successfully and notification sent to homeroom teacher",
+        data: result,
+      });
+    } catch (error) {
+      console.error("❌ Error in createDayLeaveRequest:", error.message);
       next(error);
     }
   }

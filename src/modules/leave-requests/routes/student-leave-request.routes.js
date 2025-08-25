@@ -8,12 +8,20 @@ const studentLeaveRequestValidation = require("../middleware/student-leave-reque
 router.use(authMiddleware.protect);
 
 // Student routes - Học sinh xin vắng
-//API
+// API tạo đơn xin vắng từng tiết (requestType = "lesson")
 router.post(
-  "/create",
+  "/create-lesson",
   authMiddleware.authorize("student"),
-  studentLeaveRequestValidation.createLeaveRequests,
-  studentLeaveRequestController.createLeaveRequests
+  studentLeaveRequestValidation.createLessonLeaveRequests,
+  studentLeaveRequestController.createLessonLeaveRequests
+);
+
+// API tạo đơn xin nghỉ cả ngày (requestType = "day")
+router.post(
+  "/create-day",
+  authMiddleware.authorize("student"),
+  studentLeaveRequestValidation.createDayLeaveRequest,
+  studentLeaveRequestController.createDayLeaveRequest
 );
 
 router.get(

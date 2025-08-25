@@ -403,13 +403,44 @@ class ScheduleService {
           } 
         },
         // TỐI ƯU: Thêm lookup cho StudentLeaveRequest
+        // Lookup theo lessonId (cho requestType: "lesson")
         { 
           $lookup: { 
             from: "studentleaverequests", 
             localField: "lessonDetails._id", 
             foreignField: "lessonId", 
-            as: "leaveRequests" 
+            as: "lessonLeaveRequests" 
           } 
+        },
+        // Lookup theo classId và date (cho requestType: "day")
+        {
+          $lookup: {
+            from: "studentleaverequests",
+            let: { classId: "$class", startDate: "$startDate", endDate: "$endDate" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ["$requestType", "day"] },
+                      { $eq: ["$classId", "$$classId"] },
+                      { $gte: ["$date", "$$startDate"] },
+                      { $lte: ["$date", "$$endDate"] }
+                    ]
+                  }
+                }
+              }
+            ],
+            as: "dayLeaveRequests"
+          }
+        },
+        // Gộp cả 2 loại leave requests
+        {
+          $addFields: {
+            leaveRequests: {
+              $concatArrays: ["$lessonLeaveRequests", "$dayLeaveRequests"]
+            }
+          }
         },
         // TỐI ƯU: Thêm lookup cho TeacherLeaveRequest
         { 
@@ -538,20 +569,84 @@ class ScheduleService {
           request => request.studentId.toString() === user._id.toString() && 
                      ["pending", "approved"].includes(request.status)
         );
+        
+        console.log(`🔍 Found ${userLeaveRequests.length} leave requests for student ${user._id}`);
+        console.log(`🔍 Breakdown: lessonLeaveRequests=${scheduleData.lessonLeaveRequests?.length || 0}, dayLeaveRequests=${scheduleData.dayLeaveRequests?.length || 0}`);
+        
         userLeaveRequests.forEach(request => {
-          leaveRequestMap.set(request.lessonId.toString(), true);
-          leaveRequestStatusMap.set(request.lessonId.toString(), request.status); // Lưu trạng thái
+          console.log(`📋 Processing leave request: ${request._id}, type: ${request.requestType}, status: ${request.status}`);
+          
+          if (request.requestType === "lesson") {
+            // Nghỉ từng tiết: đánh dấu tiết cụ thể
+            leaveRequestMap.set(request.lessonId.toString(), true);
+            leaveRequestStatusMap.set(request.lessonId.toString(), request.status);
+            console.log(`📝 Lesson leave request: ${request.lessonId} -> ${request.status}`);
+          } else if (request.requestType === "day") {
+            // Nghỉ cả ngày: đánh dấu tất cả tiết trong ngày đó (cả pending và approved)
+            const requestDate = new Date(request.date);
+            const requestDateStr = requestDate.toISOString().split('T')[0];
+            
+            console.log(`📅 Day leave request (${request.status}) for date: ${requestDateStr}`);
+            
+            // Tìm tất cả tiết học trong ngày đó và đánh dấu
+            let matchedLessons = 0;
+            scheduleData.lessonDetails.forEach(lesson => {
+              const lessonDate = new Date(lesson.scheduledDate);
+              const lessonDateStr = lessonDate.toISOString().split('T')[0];
+              
+              if (lessonDateStr === requestDateStr) {
+                leaveRequestMap.set(lesson._id.toString(), true);
+                leaveRequestStatusMap.set(lesson._id.toString(), request.status);
+                matchedLessons++;
+              }
+            });
+            
+          }
         });
       } else {
         // Nếu là teacher/admin, lấy tất cả requests với trạng thái pending/approved
         const validLeaveRequests = scheduleData.leaveRequests.filter(
           request => ["pending", "approved"].includes(request.status)
         );
+        
+        console.log(`🔍 Found ${validLeaveRequests.length} leave requests for teacher/admin`);
+        console.log(`🔍 Breakdown: lessonLeaveRequests=${scheduleData.lessonLeaveRequests?.length || 0}, dayLeaveRequests=${scheduleData.dayLeaveRequests?.length || 0}`);
+        
         validLeaveRequests.forEach(request => {
-          leaveRequestMap.set(request.lessonId.toString(), true);
-          leaveRequestStatusMap.set(request.lessonId.toString(), request.status); // Lưu trạng thái
+          console.log(`📋 Processing leave request: ${request._id}, type: ${request.requestType}, status: ${request.status}`);
+          
+          if (request.requestType === "lesson") {
+            // Nghỉ từng tiết: đánh dấu tiết cụ thể
+            leaveRequestMap.set(request.lessonId.toString(), true);
+            leaveRequestStatusMap.set(request.lessonId.toString(), request.status);
+            console.log(`📝 Lesson leave request: ${request.lessonId} -> ${request.status}`);
+          } else if (request.requestType === "day") {
+            // Nghỉ cả ngày: đánh dấu tất cả tiết trong ngày đó (cả pending và approved)
+            const requestDate = new Date(request.date);
+            const requestDateStr = requestDate.toISOString().split('T')[0];
+            
+            console.log(`📅 Day leave request (${request.status}) for date: ${requestDateStr}`);
+            
+            // Tìm tất cả tiết học trong ngày đó và đánh dấu
+            let matchedLessons = 0;
+            scheduleData.lessonDetails.forEach(lesson => {
+              const lessonDate = new Date(lesson.scheduledDate);
+              const lessonDateStr = lessonDate.toISOString().split('T')[0];
+              
+              if (lessonDateStr === requestDateStr) {
+                leaveRequestMap.set(lesson._id.toString(), true);
+                leaveRequestStatusMap.set(lesson._id.toString(), request.status);
+                matchedLessons++;
+              }
+            });
+            
+            console.log(`📊 Marked ${matchedLessons} lessons for day leave on ${requestDateStr}`);
+          }
         });
       }
+      
+      console.log(`📊 Final leaveRequestMap size: ${leaveRequestMap.size}`);
+      console.log(`📊 Final leaveRequestStatusMap size: ${leaveRequestStatusMap.size}`);
 
       // TỐI ƯU: Lấy personal activities từ aggregation result
       const studentPersonalActivities = [];
@@ -645,14 +740,18 @@ class ScheduleService {
         lessonObj.hasNotification = hasTestInfo || hasTeacherLeaveRequest || hasLessonRequest;
         
         // SỬA ĐỔI: Thêm logic mới cho leave request
-        const hasLeaveRequest = leaveRequestMap.has(lesson._id.toString());
-        lessonObj.hasStudentLeaveRequest = hasLeaveRequest;
-        
-        // Nếu có leave request, thêm trạng thái
-        if (hasLeaveRequest) {
-          lessonObj.leaveRequestStatus = leaveRequestStatusMap.get(lesson._id.toString());
+        // Chỉ xử lý leave request cho các tiết có type khác "empty"
+        if (lesson.type !== "empty") {
+          const hasLeaveRequest = leaveRequestMap.has(lesson._id.toString());
+          lessonObj.hasStudentLeaveRequest = hasLeaveRequest;
+          
+          // Nếu có leave request, thêm trạng thái
+          if (hasLeaveRequest) {
+            lessonObj.leaveRequestStatus = leaveRequestStatusMap.get(lesson._id.toString());
+          }
         }
         
+
 
         return lessonObj;
       });
@@ -1189,6 +1288,22 @@ class ScheduleService {
         .populate("subjectId", "subjectName subjectCode")
         .lean();
 
+      // Tìm thêm Student Leave Requests theo classId và date (cho requestType: "day")
+      const dayLeaveRequests = await StudentLeaveRequest.find({
+        requestType: "day",
+        classId: lesson.class._id,
+        date: {
+          $gte: new Date(lesson.scheduledDate.getFullYear(), lesson.scheduledDate.getMonth(), lesson.scheduledDate.getDate()),
+          $lt: new Date(lesson.scheduledDate.getFullYear(), lesson.scheduledDate.getMonth(), lesson.scheduledDate.getDate() + 1)
+        }
+      })
+        .populate("studentId", "name email fullName")
+        .populate("classId", "className")
+        .lean();
+
+      // Gộp cả 2 loại leave requests
+      const allStudentLeaveRequests = [...studentLeaveRequests, ...dayLeaveRequests];
+
       // Teacher Leave Requests: lessonId field
       const teacherLeaveRequests = await TeacherLeaveRequest.find({
         lessonId: lesson._id,
@@ -1202,8 +1317,25 @@ class ScheduleService {
       lessonObj.substituteRequests = substituteRequests;
       lessonObj.swapRequests = swapRequests;
       lessonObj.makeupRequests = makeupRequests;
-      lessonObj.studentLeaveRequests = studentLeaveRequests;
+      lessonObj.studentLeaveRequests = allStudentLeaveRequests;
       lessonObj.teacherLeaveRequests = teacherLeaveRequests;
+
+      // Thêm thông tin về trạng thái nghỉ phép của học sinh
+      if (allStudentLeaveRequests.length > 0) {
+        lessonObj.hasStudentLeaveRequest = true;
+        
+        // Tìm request có trạng thái approved hoặc pending
+        const activeLeaveRequest = allStudentLeaveRequests.find(request => 
+          ["pending", "approved"].includes(request.status)
+        );
+        
+        if (activeLeaveRequest) {
+          lessonObj.leaveRequestStatus = activeLeaveRequest.status;
+          lessonObj.leaveRequestType = activeLeaveRequest.requestType;
+        }
+      } else {
+        lessonObj.hasStudentLeaveRequest = false;
+      }
 
       return lessonObj;
     } catch (error) {

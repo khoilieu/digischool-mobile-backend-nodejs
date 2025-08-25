@@ -8,7 +8,7 @@ const notificationService = require("../../notification/services/notification.se
 const parentNotificationService = require("../../notification/services/parent-notification.service");
 
 class StudentLeaveRequestService {
-  // Tạo đơn xin vắng cho nhiều tiết cùng lúc
+  // Tạo đơn xin vắng cho nhiều tiết cùng lúc (requestType = "lesson")
   async createMultipleLeaveRequests(data, studentId) {
     try {
       const { lessonIds, phoneNumber, reason } = data;
@@ -22,7 +22,7 @@ class StudentLeaveRequestService {
       }
 
       console.log(
-        `📝 Creating leave requests for ${lessonIds.length} lessons by student ${studentId}`
+        `📝 Creating lesson leave requests for ${lessonIds.length} lessons by student ${studentId}`
       );
 
       // Validate student exists and has a class
@@ -38,12 +38,6 @@ class StudentLeaveRequestService {
         throw new Error("Student is not assigned to any class");
       }
 
-      // Lấy giáo viên chủ nhiệm của lớp
-      let homeroomTeacherId = null;
-      if (student.class_id.homeroomTeacher) {
-        homeroomTeacherId = student.class_id.homeroomTeacher.toString();
-      }
-
       console.log(
         `👨‍🎓 Student ${student.name} from class ${student.class_id.className} requesting leave for ${lessonIds.length} lessons`
       );
@@ -54,13 +48,11 @@ class StudentLeaveRequestService {
       // Process each lesson
       for (const lessonId of lessonIds) {
         try {
-
           // Get lesson details
           const lesson = await Lesson.findById(lessonId)
             .populate("class", "className")
             .populate("subject", "subjectName subjectCode")
             .populate("teacher", "name email");
-
 
           if (!lesson) {
             errors.push(`Lesson ${lessonId} not found`);
@@ -82,26 +74,18 @@ class StudentLeaveRequestService {
             `✅ Validation passed: Student ${student.name} requesting leave for ${lesson.subject.subjectName} in their class ${lesson.class.className}`
           );
 
-          // Check if lesson is in the future
-          const lessonDate = new Date(lesson.scheduledDate);
-          const now = new Date();
-          // if (lessonDate <= now) {
-          //   errors.push(`Cannot request leave for past lesson: ${lesson.subject.subjectName} on ${lessonDate.toLocaleDateString()}`);
-          //   continue;
-          // }
-
           // Check if leave request already exists for this lesson (only pending and approved are considered existing)
           const existingRequest = await StudentLeaveRequest.findOne({
             studentId,
             lessonId: lesson._id,
-            status: { $in: ["pending", "approved"] }, // Only pending and approved requests block new requests
+            status: { $in: ["pending", "approved"] },
           });
 
           if (existingRequest) {
             errors.push(
               `Leave request already exists for ${
                 lesson.subject.subjectName
-              } on ${lessonDate.toLocaleDateString()}`
+              } on ${new Date(lesson.scheduledDate).toLocaleDateString()}`
             );
             continue;
           }
@@ -109,11 +93,10 @@ class StudentLeaveRequestService {
           // Get period from timeSlot
           const period = lesson.timeSlot?.period || 1;
 
-          
-
           // Create leave request
           const leaveRequest = new StudentLeaveRequest({
             studentId,
+            requestType: "lesson",
             lessonId: lesson._id,
             classId: lesson.class._id,
             subjectId: lesson.subject._id,
@@ -137,27 +120,25 @@ class StudentLeaveRequestService {
           results.push(leaveRequest);
 
           console.log(
-            `✅ Created leave request for ${lesson.subject.subjectName} - Period ${period}`
+            `✅ Created lesson leave request for ${lesson.subject.subjectName} - Period ${period}`
           );
 
-          // Gửi notification cho giáo viên chủ nhiệm (nếu có)
-          if (homeroomTeacherId) {
-            await notificationService.createNotification({
-              type: "activity",
-              title: `Đơn xin vắng mới từ học sinh - ${student.name}`,
-              content: `Học sinh ${student.name} xin vắng tiết ${
-                lesson.subject.subjectName
-              } lớp ${lesson.class.className} ngày ${new Date(
-                lesson.scheduledDate
-              ).toLocaleDateString("vi-VN")}. Lý do: ${reason}`,
-              sender: studentId,
-              receiverScope: { type: "user", ids: [homeroomTeacherId] },
-              relatedObject: {
-                id: leaveRequest._id,
-                requestType: "student_leave_request",
-              },
-            });
-          }
+          // Gửi notification cho giáo viên bộ môn (người phê duyệt)
+          await notificationService.createNotification({
+            type: "activity",
+            title: `Đơn xin vắng mới từ học sinh - ${student.name}`,
+            content: `Học sinh ${student.name} xin vắng tiết ${
+              lesson.subject.subjectName
+            } lớp ${lesson.class.className} ngày ${new Date(
+              lesson.scheduledDate
+            ).toLocaleDateString("vi-VN")}. Lý do: ${reason}`,
+            sender: studentId,
+            receiverScope: { type: "user", ids: [lesson.teacher._id] },
+            relatedObject: {
+              id: leaveRequest._id,
+              requestType: "student_leave_request",
+            },
+          });
 
           // Gửi notification cho phụ huynh
           await parentNotificationService.notifyStudentLeaveRequest(studentId, leaveRequest._id, reason);
@@ -173,7 +154,7 @@ class StudentLeaveRequestService {
       }
 
       console.log(
-        `📊 Leave request creation summary: ${results.length} created, ${errors.length} errors`
+        `📊 Lesson leave request creation summary: ${results.length} created, ${errors.length} errors`
       );
 
       return {
@@ -189,6 +170,104 @@ class StudentLeaveRequestService {
     } catch (error) {
       console.error("❌ Error in createMultipleLeaveRequests:", error.message);
       throw new Error(`Failed to create leave requests: ${error.message}`);
+    }
+  }
+
+  // Tạo đơn xin vắng cả ngày (requestType = "day")
+  async createDayLeaveRequest(data, studentId) {
+    try {
+      const { date, phoneNumber, reason } = data;
+
+      if (!date || !phoneNumber || !reason) {
+        throw new Error("Date, phone number and reason are required");
+      }
+
+      console.log(
+        `📝 Creating day leave request for student ${studentId} on ${new Date(date).toLocaleDateString()}`
+      );
+
+      // Validate student exists and has a class
+      const student = await User.findById(studentId).populate(
+        "class_id",
+        "className homeroomTeacher"
+      );
+      if (!student || !student.role.includes("student")) {
+        throw new Error("Student not found");
+      }
+
+      if (!student.class_id) {
+        throw new Error("Student is not assigned to any class");
+      }
+
+      if (!student.class_id.homeroomTeacher) {
+        throw new Error("Class does not have a homeroom teacher assigned");
+      }
+
+      console.log(
+        `👨‍🎓 Student ${student.name} from class ${student.class_id.className} requesting day leave`
+      );
+
+      // Check if day leave request already exists for this date
+      const existingRequest = await StudentLeaveRequest.findOne({
+        studentId,
+        requestType: "day",
+        date: new Date(date),
+        status: { $in: ["pending", "approved"] },
+      });
+
+      if (existingRequest) {
+        throw new Error(
+          `Day leave request already exists for ${new Date(date).toLocaleDateString("vi-VN")}`
+        );
+      }
+
+      // Create day leave request
+      const leaveRequest = new StudentLeaveRequest({
+        studentId,
+        requestType: "day",
+        classId: student.class_id._id,
+        date: new Date(date),
+        phoneNumber: phoneNumber.trim(),
+        reason: reason.trim(),
+      });
+
+      await leaveRequest.save();
+
+      // Populate for response
+      await leaveRequest.populate([
+        { path: "classId", select: "className homeroomTeacher" },
+      ]);
+
+      console.log(
+        `✅ Created day leave request for ${new Date(date).toLocaleDateString("vi-VN")}`
+      );
+
+      // Gửi notification cho giáo viên chủ nhiệm (người phê duyệt)
+      await notificationService.createNotification({
+        type: "activity",
+        title: `Đơn xin nghỉ cả ngày mới từ học sinh - ${student.name}`,
+        content: `Học sinh ${student.name} xin nghỉ cả ngày ${new Date(
+          date
+        ).toLocaleDateString("vi-VN")} lớp ${student.class_id.className}. Lý do: ${reason}`,
+        sender: studentId,
+        receiverScope: { type: "user", ids: [student.class_id.homeroomTeacher] },
+        relatedObject: {
+          id: leaveRequest._id,
+          requestType: "student_leave_request",
+        },
+      });
+
+      // Gửi notification cho phụ huynh
+      await parentNotificationService.notifyStudentLeaveRequest(studentId, leaveRequest._id, reason);
+
+      return {
+        success: true,
+        request: leaveRequest,
+        message: "Day leave request created successfully",
+      };
+    } catch (error) {
+      console.error("❌ Error in createDayLeaveRequest:", error.message);
+      throw new Error(`Failed to create day leave request: ${error.message}`);
     }
   }
 
@@ -255,9 +334,27 @@ class StudentLeaveRequestService {
   // Lấy danh sách đơn xin vắng cần duyệt của giáo viên
   async getTeacherPendingRequests(teacherId, filters = {}) {
     try {
-      const { startDate, endDate, page = 1, limit = 50 } = filters;
+      const { startDate, endDate, page = 1, limit = 50, requestType } = filters;
 
-      let query = { teacherId, status: "pending" };
+      let query = { status: "pending" };
+
+      // Nếu có requestType, lọc theo loại yêu cầu
+      if (requestType) {
+        query.requestType = requestType;
+      }
+
+      // Giáo viên chỉ thấy đơn cần duyệt của mình
+      const teacher = await User.findById(teacherId).populate("class_id", "className homeroomTeacher");
+      
+      if (teacher.role.includes("homeroom_teacher")) {
+        // Giáo viên chủ nhiệm: thấy đơn nghỉ cả ngày của lớp mình
+        query.requestType = "day";
+        query.classId = teacher.class_id._id;
+      } else {
+        // Giáo viên bộ môn: thấy đơn nghỉ tiết học của mình
+        query.requestType = "lesson";
+        query.teacherId = teacherId;
+      }
 
       if (startDate || endDate) {
         query.date = {};
@@ -271,8 +368,9 @@ class StudentLeaveRequestService {
         .populate("studentId", "name email")
         .populate("lessonId", "lessonId type topic scheduledDate")
         .populate("subjectId", "subjectName subjectCode")
+        .populate("teacherId", "name email")
         .populate("classId", "className")
-        .sort({ date: 1, period: 1 }) // Sort by date and period
+        .sort({ date: 1, period: 1 })
         .skip(skip)
         .limit(limit);
 
@@ -361,36 +459,60 @@ class StudentLeaveRequestService {
         throw error;
       }
 
-      // Lấy homeroomTeacher của lớp
-      const homeroomTeacherId = request.classId.homeroomTeacher?.toString();
-
-      // Chỉ cho phép giáo viên chủ nhiệm duyệt
-      if (teacherId.toString() !== homeroomTeacherId) {
-        const error = new Error(
-          "Bạn không có quyền duyệt đơn này. Chỉ giáo viên chủ nhiệm lớp mới được duyệt."
-        );
-        error.statusCode = 403;
-        throw error;
-      }
-
       if (request.status !== "pending") {
         const error = new Error(`Request has already been ${request.status}`);
         error.statusCode = 400;
         throw error;
       }
 
+      // Kiểm tra quyền phê duyệt dựa trên loại yêu cầu
+      if (request.requestType === "lesson") {
+        // Nghỉ từng tiết: chỉ giáo viên bộ môn mới được duyệt
+        if (teacherId.toString() !== request.teacherId._id.toString()) {
+          const error = new Error(
+            "Bạn không có quyền duyệt đơn này. Chỉ giáo viên bộ môn mới được duyệt đơn xin nghỉ tiết học."
+          );
+          error.statusCode = 403;
+          throw error;
+        }
+      } else if (request.requestType === "day") {
+        // Nghỉ cả ngày: chỉ giáo viên chủ nhiệm mới được duyệt
+        const homeroomTeacherId = request.classId.homeroomTeacher?.toString();
+        if (teacherId.toString() !== homeroomTeacherId) {
+          const error = new Error(
+            "Bạn không có quyền duyệt đơn này. Chỉ giáo viên chủ nhiệm lớp mới được duyệt đơn xin nghỉ cả ngày."
+          );
+          error.statusCode = 403;
+          throw error;
+        }
+      }
+
       request.status = "approved";
       request.processedAt = new Date();
-      request.teacherId = teacherId;
+      request.approvedBy = teacherId;
       await request.save();
-      await notificationService.createNotification({
-        type: "activity",
-        title: `Đơn xin vắng đã được duyệt - ${request.subjectId.subjectName}`,
-        content: `Đơn xin vắng của bạn cho tiết ${
+
+      // Tạo nội dung thông báo dựa trên loại yêu cầu
+      let notificationTitle, notificationContent;
+      
+      if (request.requestType === "lesson") {
+        notificationTitle = `Đơn xin vắng tiết học đã được duyệt - ${request.subjectId.subjectName}`;
+        notificationContent = `Đơn xin vắng của bạn cho tiết ${
           request.subjectId.subjectName
         } lớp ${request.classId.className} ngày ${new Date(
           request.lessonId.scheduledDate
-        ).toLocaleDateString("vi-VN")} đã được duyệt.`,
+        ).toLocaleDateString("vi-VN")} đã được duyệt.`;
+      } else {
+        notificationTitle = `Đơn xin nghỉ cả ngày đã được duyệt`;
+        notificationContent = `Đơn xin nghỉ cả ngày của bạn cho lớp ${request.classId.className} ngày ${new Date(
+          request.date
+        ).toLocaleDateString("vi-VN")} đã được duyệt.`;
+      }
+
+      await notificationService.createNotification({
+        type: "activity",
+        title: notificationTitle,
+        content: notificationContent,
         sender: teacherId,
         receiverScope: { type: "user", ids: [request.studentId._id] },
         relatedObject: {
@@ -400,7 +522,7 @@ class StudentLeaveRequestService {
       });
 
       console.log(
-        `✅ Leave request approved by homeroom teacher ${teacherId} for student ${request.studentId.name}`
+        `✅ Leave request approved by teacher ${teacherId} for student ${request.studentId.name} (${request.requestType})`
       );
 
       return {
@@ -435,36 +557,60 @@ class StudentLeaveRequestService {
         throw error;
       }
 
-      // Lấy homeroomTeacher của lớp
-      const homeroomTeacherId = request.classId.homeroomTeacher?.toString();
-
-      // Chỉ cho phép giáo viên chủ nhiệm từ chối
-      if (teacherId.toString() !== homeroomTeacherId) {
-        const error = new Error(
-          "Bạn không có quyền từ chối đơn này. Chỉ giáo viên chủ nhiệm lớp mới được từ chối."
-        );
-        error.statusCode = 403;
-        throw error;
-      }
-
       if (request.status !== "pending") {
         const error = new Error(`Request has already been ${request.status}`);
         error.statusCode = 400;
         throw error;
       }
 
+      // Kiểm tra quyền từ chối dựa trên loại yêu cầu
+      if (request.requestType === "lesson") {
+        // Nghỉ từng tiết: chỉ giáo viên bộ môn mới được từ chối
+        if (teacherId.toString() !== request.teacherId._id.toString()) {
+          const error = new Error(
+            "Bạn không có quyền từ chối đơn này. Chỉ giáo viên bộ môn mới được từ chối đơn xin nghỉ tiết học."
+          );
+          error.statusCode = 403;
+          throw error;
+        }
+      } else if (request.requestType === "day") {
+        // Nghỉ cả ngày: chỉ giáo viên chủ nhiệm mới được từ chối
+        const homeroomTeacherId = request.classId.homeroomTeacher?.toString();
+        if (teacherId.toString() !== homeroomTeacherId) {
+          const error = new Error(
+            "Bạn không có quyền từ chối đơn này. Chỉ giáo viên chủ nhiệm lớp mới được từ chối đơn xin nghỉ cả ngày."
+          );
+          error.statusCode = 403;
+          throw error;
+        }
+      }
+
       request.status = "rejected";
       request.processedAt = new Date();
-      request.teacherId = teacherId;
+      request.approvedBy = teacherId;
       await request.save();
-      await notificationService.createNotification({
-        type: "activity",
-        title: `Đơn xin vắng đã bị từ chối - ${request.subjectId.subjectName}`,
-        content: `Đơn xin vắng của bạn cho tiết ${
+
+      // Tạo nội dung thông báo dựa trên loại yêu cầu
+      let notificationTitle, notificationContent;
+      
+      if (request.requestType === "lesson") {
+        notificationTitle = `Đơn xin vắng tiết học đã bị từ chối - ${request.subjectId.subjectName}`;
+        notificationContent = `Đơn xin vắng của bạn cho tiết ${
           request.subjectId.subjectName
         } lớp ${request.classId.className} ngày ${new Date(
           request.lessonId.scheduledDate
-        ).toLocaleDateString("vi-VN")} đã bị từ chối.`,
+        ).toLocaleDateString("vi-VN")} đã bị từ chối.`;
+      } else {
+        notificationTitle = `Đơn xin nghỉ cả ngày đã bị từ chối`;
+        notificationContent = `Đơn xin nghỉ cả ngày của bạn cho lớp ${request.classId.className} ngày ${new Date(
+          request.date
+        ).toLocaleDateString("vi-VN")} đã bị từ chối.`;
+      }
+
+      await notificationService.createNotification({
+        type: "activity",
+        title: notificationTitle,
+        content: notificationContent,
         sender: teacherId,
         receiverScope: { type: "user", ids: [request.studentId._id] },
         relatedObject: {
@@ -474,7 +620,7 @@ class StudentLeaveRequestService {
       });
 
       console.log(
-        `❌ Leave request rejected by homeroom teacher ${teacherId} for student ${request.studentId.name}`
+        `❌ Leave request rejected by teacher ${teacherId} for student ${request.studentId.name} (${request.requestType})`
       );
 
       return {
