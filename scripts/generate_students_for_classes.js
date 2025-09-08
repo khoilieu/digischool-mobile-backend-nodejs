@@ -5,7 +5,8 @@ const AcademicYear = require('../src/modules/schedules/models/academic-year.mode
 // Kết nối database
 const connectDB = async () => {
   try {
-    await mongoose.connect('mongodb://localhost:27017/ecoschool-app-dev');
+    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/ecoschool-app-dev';
+    await mongoose.connect(MONGODB_URI);
     console.log('✅ Đã kết nối database thành công');
   } catch (error) {
     console.error('❌ Lỗi kết nối database:', error.message);
